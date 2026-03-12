@@ -40,6 +40,19 @@ This is a **test/build/run task**. Your goal is to build, run, test, or verify s
 - If a build or test fails, report the error clearly — don't try to fix it unless asked
 - If running a local server, report the URL (e.g., http://localhost:3000)
 
+## Run Command (IMPORTANT)
+
+When the build succeeds and the task involves running a server or app, you MUST output a ready-to-paste run command using **absolute paths** so the user can launch it from any terminal. Format it exactly like this:
+
+```
+## Run Command
+cd <absolute-path-to-project-or-worktree> && <exact command to start the server>
+```
+
+Example: `cd C:/Users/yemishin/office-bohemia && yarn dev --filter bebop`
+
+The agent process terminates after completion, so any dev server you start will die with it. The user needs this command to run it themselves.
+
 ## After Completion
 
 Write your findings to: `{{team_root}}/decisions/inbox/{{agent_id}}-{{item_id}}-{{date}}.md`
@@ -48,8 +61,8 @@ Include:
 - Build status (pass/fail)
 - Test results if applicable
 - Any errors or warnings
-- Localhost URL if running a server
-- Screenshots or output snippets if relevant
+- The run command (absolute paths, copy-pasteable from any terminal)
+- Localhost URL if applicable
 
 **Note:** Do NOT write to `agents/*/status.json` — the engine manages your status automatically.
 
