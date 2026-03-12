@@ -85,5 +85,17 @@
     "dispatched_at": "2026-03-12T17:04:07.905Z",
     "dispatched_to": "dallas",
     "completedAt": "2026-03-12T17:25:08.044Z"
+  },
+  {
+    "id": "W006",
+    "title": "Build dalla's pr PR-4959092 locally and launch the webapp on localhost",
+    "type": "test",
+    "priority": "medium",
+    "description": "",
+    "status": "dispatched",
+    "created": "2026-03-12T17:58:07.529Z",
+    "createdBy": "dashboard",
+    "dispatched_at": "2026-03-12T19:29:55.446Z",
+    "dispatched_to": "dallas"
   }
 ]

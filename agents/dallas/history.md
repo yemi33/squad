@@ -1,5 +1,19 @@
 # Agent History
 
+### 2026-03-12T18:56:55.298Z — error
+- **Task:** Build dalla's pr PR-4959092 locally and launch the webapp on localhost
+- **Type:** test
+- **Project:** central
+- **Branch:** none
+- **Dispatch ID:** dallas-test-1773339894928
+
+### 2026-03-12T17:58:08.409Z — error
+- **Task:** Build dalla's pr PR-4959092 locally and launch the webapp on localhost
+- **Type:** test
+- **Project:** central
+- **Branch:** none
+- **Dispatch ID:** dallas-test-1773338288264
+
 ### 2026-03-12T17:29:56.582Z — error
 - **Task:** Build Dallas cowork PR locally and verify it works
 - **Type:** test
