@@ -982,13 +982,14 @@ function updateSnapshot(config) {
 // ─── Timeout Checker ────────────────────────────────────────────────────────
 
 function checkTimeouts(config) {
-  const timeout = config.engine?.agentTimeout || 600000;
-  const staleThreshold = config.engine?.staleThreshold || 1800000; // 30min default
+  const timeout = config.engine?.agentTimeout || 18000000; // 5h default
+  const heartbeatTimeout = config.engine?.heartbeatTimeout || 300000; // 5min — no output = dead
 
+  // 1. Check tracked processes for hard timeout
   for (const [id, info] of activeProcesses.entries()) {
     const elapsed = Date.now() - new Date(info.startedAt).getTime();
     if (elapsed > timeout) {
-      log('warn', `Agent ${info.agentId} (${id}) timed out after ${Math.round(elapsed / 1000)}s — killing`);
+      log('warn', `Agent ${info.agentId} (${id}) hit hard timeout after ${Math.round(elapsed / 1000)}s — killing`);
       try { info.proc.kill('SIGTERM'); } catch {}
       setTimeout(() => {
         try { info.proc.kill('SIGKILL'); } catch {}
@@ -996,33 +997,48 @@ function checkTimeouts(config) {
     }
   }
 
-  // Stale agent detection — catch dispatch items stuck in active without a tracked process
+  // 2. Heartbeat check — for ALL active dispatch items (catches orphans after engine restart)
+  //    Uses live-output.log mtime as heartbeat. If no output for heartbeatTimeout, agent is dead.
   const dispatch = getDispatch();
-  const staleItems = (dispatch.active || []).filter(item => {
-    if (!item.started_at) return false;
-    const elapsed = Date.now() - new Date(item.started_at).getTime();
-    return elapsed > staleThreshold;
-  });
+  const deadItems = [];
 
-  for (const item of staleItems) {
-    const elapsedSec = Math.round((Date.now() - new Date(item.started_at).getTime()) / 1000);
-    log('warn', `Stale agent detected: ${item.agent} (${item.id}) — active for ${elapsedSec}s, exceeds staleThreshold (${staleThreshold / 1000}s)`);
+  for (const item of (dispatch.active || [])) {
+    if (!item.agent) continue;
 
-    // Kill process if still tracked
-    const procInfo = activeProcesses.get(item.id);
-    if (procInfo) {
-      log('warn', `Killing stale process for ${item.id}`);
-      try { procInfo.proc.kill('SIGTERM'); } catch {}
-      setTimeout(() => {
-        try { procInfo.proc.kill('SIGKILL'); } catch {}
-      }, 5000);
-      activeProcesses.delete(item.id);
+    const hasProcess = activeProcesses.has(item.id);
+    const liveLogPath = path.join(AGENTS_DIR, item.agent, 'live-output.log');
+    let lastActivity = item.started_at ? new Date(item.started_at).getTime() : 0;
+
+    // Check live-output.log mtime as heartbeat
+    try {
+      const stat = fs.statSync(liveLogPath);
+      lastActivity = Math.max(lastActivity, stat.mtimeMs);
+    } catch {}
+
+    const silentMs = Date.now() - lastActivity;
+    const silentSec = Math.round(silentMs / 1000);
+
+    if (!hasProcess && silentMs > heartbeatTimeout) {
+      // No tracked process AND no recent output → orphaned
+      log('warn', `Orphan detected: ${item.agent} (${item.id}) — no process tracked, no output for ${silentSec}s`);
+      deadItems.push({ item, reason: `Orphaned — no process, silent for ${silentSec}s` });
+    } else if (hasProcess && silentMs > heartbeatTimeout) {
+      // Has process but no output → hung
+      log('warn', `Hung agent: ${item.agent} (${item.id}) — process exists but no output for ${silentSec}s`);
+      const procInfo = activeProcesses.get(item.id);
+      if (procInfo) {
+        try { procInfo.proc.kill('SIGTERM'); } catch {}
+        setTimeout(() => { try { procInfo.proc.kill('SIGKILL'); } catch {} }, 5000);
+        activeProcesses.delete(item.id);
+      }
+      deadItems.push({ item, reason: `Hung — no output for ${silentSec}s` });
     }
+    // If has process and recent output → healthy, let it run
+  }
 
-    // Mark dispatch as error
-    completeDispatch(item.id, 'error', `Stale after ${elapsedSec}s`);
-
-    // Set agent status to idle
+  // Clean up dead items
+  for (const { item, reason } of deadItems) {
+    completeDispatch(item.id, 'error', reason);
     setAgentStatus(item.agent, {
       status: 'idle',
       task: null,
