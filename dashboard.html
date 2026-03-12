@@ -276,12 +276,17 @@
 <body>
 
 <header>
-  <h1>Squad Mission Control <span>OfficeAgent</span></h1>
+  <h1>Squad Mission Control <span id="header-projects">—</span></h1>
   <div style="display:flex;align-items:center;gap:8px;">
     <span class="engine-badge stopped" id="engine-badge">STOPPED</span>
     <div class="timestamp" id="ts">—</div>
   </div>
 </header>
+
+<div id="projects-bar" style="background:var(--surface);border-bottom:1px solid var(--border);padding:8px 24px;display:flex;align-items:center;gap:12px;font-size:12px;">
+  <span style="color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;font-size:10px;">Projects</span>
+  <div id="projects-list" style="display:flex;gap:8px;flex-wrap:wrap;">—</div>
+</div>
 
 <div class="layout">
   <section class="cmd-center">
@@ -296,6 +301,7 @@
     <div class="cmd-form active" id="cmd-work-item">
       <div class="cmd-row">
         <div class="cmd-field" style="flex:3"><label>Title</label><input id="wi-title" placeholder="e.g. Add retry logic to API calls"></div>
+        <div class="cmd-field" style="flex:1"><label>Project</label><select id="wi-project"><option value="">Auto (agent decides)</option></select></div>
         <div class="cmd-field" style="flex:1"><label>Type</label>
           <select id="wi-type"><option value="implement">Implement</option><option value="fix">Fix</option><option value="test">Test</option><option value="explore">Explore</option><option value="review">Review</option></select>
         </div>
@@ -904,11 +910,37 @@ async function refresh() {
     renderEngineStatus(data.engine);
     renderDispatch(data.dispatch);
     renderEngineLog(data.engineLog || []);
+    renderProjects(data.projects || []);
   } catch(e) { console.error('refresh error', e); }
 }
 
 refresh();
 setInterval(refresh, 4000);
+
+// -- Projects --
+function renderProjects(projects) {
+  const header = document.getElementById('header-projects');
+  const list = document.getElementById('projects-list');
+  if (!projects.length) {
+    header.textContent = 'No projects';
+    list.innerHTML = '<span style="color:var(--muted);font-style:italic">No projects linked. Run: node squad.js add &lt;dir&gt;</span>';
+    return;
+  }
+  header.textContent = projects.map(p => p.name).join(' + ');
+  list.innerHTML = projects.map(p =>
+    '<span title="' + escHtml(p.description || p.path || '') + '" style="background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:3px 10px;color:var(--blue);font-weight:500;cursor:help">' +
+      escHtml(p.name) +
+      (p.description ? '<span style="color:var(--muted);font-weight:400;margin-left:6px;font-size:10px">' + escHtml(p.description.slice(0, 60)) + (p.description.length > 60 ? '...' : '') + '</span>' : '') +
+    '</span>'
+  ).join('');
+
+  // Populate project dropdowns in Command Center
+  const sel = document.getElementById('wi-project');
+  if (sel && sel.options.length !== projects.length + 1) {
+    sel.innerHTML = '<option value="">Auto (agent decides)</option>' +
+      projects.map(p => '<option value="' + escHtml(p.name) + '">' + escHtml(p.name) + '</option>').join('');
+  }
+}
 
 // -- Command Center --
 function switchCmdTab(tab) {
@@ -933,6 +965,7 @@ async function submitWorkItem() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title,
+        project: document.getElementById('wi-project').value,
         type: document.getElementById('wi-type').value,
         priority: document.getElementById('wi-priority').value,
         description: document.getElementById('wi-desc').value.trim(),

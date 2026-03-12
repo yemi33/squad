@@ -39,7 +39,7 @@ Skips PRs where `status !== "active"`.
 | `status: "missing"` or `"planned"` | Queue implementation | `implement` |
 | `estimated_complexity: "large"` | Routes to `implement:large` (prefers Rebecca) | `implement:large` |
 
-### Source 3: Manual Work Items (`discoverFromWorkItems`)
+### Source 3: Per-Project Work Items (`discoverFromWorkItems`)
 
 **Reads:** `<project>/.squad/work-items.json`
 
@@ -47,7 +47,48 @@ Skips PRs where `status !== "active"`.
 |------------|--------|---------------|
 | `status: "queued"` or `"pending"` | Queue based on item's `type` field | Item's `type` (default: `implement`) |
 
-After dispatching, the engine writes `status: "dispatched"` back to the item.
+After dispatching, the engine writes `status: "dispatched"` back to the item. The agent is scoped to the specific project directory.
+
+### Source 4: Central Work Items (`discoverCentralWorkItems`)
+
+**Reads:** `~/.squad/work-items.json` (central, project-agnostic)
+
+These are tasks where the agent decides which project to work in. The engine builds a prompt that includes a list of all linked projects with their paths and ADO config. The agent then navigates to the appropriate project directory based on the task.
+
+| Item State | Action | Dispatch Type |
+|------------|--------|---------------|
+| `status: "queued"` or `"pending"` | Queue based on item's `type` field | Item's `type` (default: `implement`) |
+
+**How it differs from per-project work items:**
+- No `cwd` is set — agent starts in the squad directory and navigates itself
+- The prompt includes all project paths and **descriptions** so the agent can choose
+- No branch/worktree is pre-created — agent handles this
+- Useful for cross-project tasks, exploratory work, or when you don't know which repo is relevant
+
+**Project descriptions drive routing.** Each project in `config.json` has a `description` field. The engine injects these into the central work item prompt:
+
+```
+### OfficeAgent
+- **Path:** C:/Users/you/OfficeAgent
+- **ADO:** office/ISS/OfficeAgent
+- **What it is:** AI agent platform for Office document creation (DOCX, PPTX, XLSX)...
+```
+
+Better descriptions → better agent routing. Describe what each repo contains, what kind of work happens there, and what technologies it uses.
+
+**Cross-repo tasks.** Central work items can span multiple repositories. The agent's prompt instructs it to:
+1. Determine all repos affected by the task
+2. Work on each sequentially (worktree → commit → push → PR per repo)
+3. Note cross-repo dependencies in PR descriptions (e.g., "Requires OfficeAgent PR #456")
+4. Use the correct ADO config (org, project, repoId) for each repo
+5. Document which repos were touched in the learnings file
+
+This means a single work item like "Add telemetry to the document creation pipeline" can result in PRs across multiple repos if the agent determines the change touches shared modules in one repo and the frontend in another.
+
+**Adding central work items:**
+- Dashboard Command Center → set Project dropdown to "Auto (agent decides)"
+- CLI: `node engine.js work "task title"` (defaults to central queue)
+- Direct edit: `~/.squad/work-items.json`
 
 ## Discovery Gates
 
@@ -193,9 +234,10 @@ work-items.json ──┐
 prd-gaps.json ────┤  discoverWork()   dispatch.json
 pull-requests.json┘  (each tick)      ┌──────────┐
                           │           │ pending   │
-                          ▼           │ active    │
-                     addToDispatch()──│ completed │
-                                      └─────┬────┘
+~/.squad/                 │           │ active    │
+  work-items.json ────────┤           │ completed │
+  (central, auto-route)   ▼           └─────┬────┘
+                     addToDispatch()─────────┘
                                             │
                                        spawnAgent()
                                             │

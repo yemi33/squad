@@ -2,6 +2,7 @@
   "projects": [
     {
       "name": "OfficeAgent",
+      "description": "AI agent platform for Office document creation (DOCX, PPTX, XLSX, PDF). Contains agent implementations, shared modules, Claude SDK harness, Docker runtime, eval framework, and CLI tools. TypeScript/Node.js monorepo with Yarn workspaces.",
       "localPath": "C:/Users/yemishin/OfficeAgent",
       "repositoryId": "61458d25-9f75-41c3-be29-e63727145257",
       "adoOrg": "office",
@@ -35,6 +36,7 @@
     },
     {
       "name": "office-bohemia",
+      "description": "",
       "localPath": "C:/Users/yemishin/office-bohemia",
       "repositoryId": "74031860-e0cd-45a1-913f-10bbf3f82555",
       "adoOrg": "office",
@@ -57,6 +59,7 @@
     },
     {
       "name": "bebop-desktop",
+      "description": "",
       "localPath": "C:/Users/yemishin/bebop-desktop",
       "adoOrg": "open-studio",
       "adoProject": "Prototypes",

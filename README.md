@@ -91,6 +91,7 @@ Each project keeps its own work-items, PRs, and PRD locally. The central engine 
 ```json
 {
   "name": "MyProject",
+  "description": "What this repo is for — the agent reads this to decide where to work",
   "localPath": "C:/Users/you/MyProject",
   "repositoryId": "ado-guid",
   "adoOrg": "myorg",
@@ -107,13 +108,74 @@ Each project keeps its own work-items, PRs, and PRD locally. The central engine 
 
 Agents, engine settings, claude config, routing, decisions, and playbooks are shared across all projects.
 
+### Project Descriptions
+
+The `description` field is **critical for central work items**. When an agent receives a task with no specific project assigned, it reads descriptions to decide which repo to work in. Good descriptions help agents route themselves accurately.
+
+Write descriptions that answer: what does this repo contain, what kind of work happens here, and what technologies does it use.
+
+```json
+"description": "AI agent platform for Office document creation (DOCX, PPTX, XLSX). Contains agent implementations, shared modules, Claude SDK harness, Docker runtime, eval framework. TypeScript/Node.js monorepo."
+```
+
+```json
+"description": "Office Copilot frontend — React UI, Fluid Framework integration, collaborative editing, extensibility points. Look here for UI bugs, UX features, and frontend components."
+```
+
+```json
+"description": "Desktop prototype app — Electron shell, native OS integrations, local-first data sync. Look here for desktop-specific features, installer, and system tray logic."
+```
+
+You can update descriptions anytime by re-running `node squad.js add <dir>` (it detects the existing project and prompts to update), or by editing `config.json` directly.
+
+The dashboard projects bar shows descriptions as tooltips and inline previews.
+
+## Work Items: Per-Project vs Central
+
+There are two ways to create work items:
+
+**Per-project** — scoped to a specific repo. The agent works in that project's directory.
+- Dashboard: select a project in the Command Center dropdown
+- File: `<project>/.squad/work-items.json`
+
+**Central (auto-route)** — the agent gets a list of all projects and decides where to work. Use this when you don't know which repo is relevant, or for cross-project tasks.
+- Dashboard: leave the Project dropdown on "Auto (agent decides)"
+- CLI: `node engine.js work "task title"`
+- File: `~/.squad/work-items.json`
+
+For central work items, the agent's prompt includes all projects with their descriptions:
+
+```
+## Available Projects
+
+### OfficeAgent
+- **Path:** C:/Users/you/OfficeAgent
+- **ADO:** office/ISS/OfficeAgent
+- **What it is:** AI agent platform for Office document creation...
+
+### office-bohemia
+- **Path:** C:/Users/you/office-bohemia
+- **ADO:** office/OC/office-bohemia
+- **What it is:** Office Copilot frontend — React UI, Fluid Framework...
+```
+
+The agent reads this context, determines which project(s) the task applies to, navigates to the correct directory, and works there. The better your descriptions, the better the auto-routing.
+
+### Cross-Repo Tasks
+
+Central work items can span multiple repos. If the agent determines a task touches more than one project, it works on each sequentially — creating separate worktrees and PRs per repo. Cross-repo dependencies are noted in PR descriptions (e.g., "Requires OfficeAgent PR #456").
+
+Example: a work item like "Add error telemetry to document creation" might result in:
+- A PR in `OfficeAgent` adding telemetry calls to the agent modules
+- A PR in `office-bohemia` adding the dashboard UI to display the telemetry
+
 ## How the Engine Works
 
 The engine ticks every 60 seconds. On each tick:
 
 1. **Check timeouts** — kill stale agents (>30min inactive)
 2. **Consolidate inbox** — merge learnings into `decisions.md` (at 5+ files)
-3. **Discover work** — scan all projects for PRD gaps, pending PRs, work items
+3. **Discover work** — scan all projects for PRD gaps, pending PRs, work items, plus the central work queue
 4. **Update snapshot** — write `identity/now.md`
 5. **Dispatch** — spawn agents up to `maxConcurrent` (default 3)
 
@@ -190,9 +252,12 @@ All playbooks use `{{template_variables}}` filled from `config.json` project ent
       history.md         <- Cross-session learnings
   identity/
     now.md               <- Engine-generated state snapshot
+  work-items.json      <- Central work queue (agent decides which project)
   decisions/
     inbox/               <- Agent findings drop-box
     archive/             <- Processed inbox files
+  docs/
+    auto-discovery.md    <- Detailed auto-discovery pipeline docs
 
 Each linked project keeps locally:
   <project>/.squad/

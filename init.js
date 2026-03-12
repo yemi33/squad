@@ -61,6 +61,7 @@ async function addProject(targetDir) {
   console.log(`  Project:    ${target}\n`);
 
   const name = await ask('Project name', path.basename(target));
+  const description = await ask('Description (what this repo contains/does)', '');
   const adoOrg = await ask('ADO organization', '');
   const adoProject = await ask('ADO project', '');
   const repoName = await ask('Repo name', name);
@@ -71,6 +72,7 @@ async function addProject(targetDir) {
 
   const project = {
     name,
+    description,
     localPath: target.replace(/\\/g, '/'),
     repositoryId: repoId,
     adoOrg,
@@ -152,6 +154,7 @@ function listProjects() {
   for (const p of projects) {
     const exists = fs.existsSync(p.localPath);
     console.log(`  ${p.name}`);
+    if (p.description) console.log(`    Desc: ${p.description}`);
     console.log(`    Path: ${p.localPath} ${exists ? '' : '(NOT FOUND)'}`);
     console.log(`    ADO:  ${p.adoOrg}/${p.adoProject}/${p.repoName}`);
     console.log(`    ID:   ${p.repositoryId || 'none'}`);

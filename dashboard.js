@@ -268,7 +268,7 @@ function getStatus() {
     engine: getEngineState(),
     dispatch: getDispatchQueue(),
     engineLog: getEngineLog(),
-    projects: PROJECTS.map(p => ({ name: p.name, path: p.localPath })),
+    projects: PROJECTS.map(p => ({ name: p.name, path: p.localPath, description: p.description || '' })),
     timestamp: new Date().toISOString(),
   };
 }
@@ -307,10 +307,17 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/api/work-items') {
     try {
       const body = await readBody(req);
-      const targetProject = PROJECTS.find(p => p.name === body.project) || PROJECTS[0];
-      const root = path.resolve(targetProject.localPath || path.resolve(SQUAD_DIR, '..'));
-      const wiSrc = targetProject.workSources?.workItems || CONFIG.workSources?.workItems || {};
-      const wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+      let wiPath;
+      if (body.project) {
+        // Write to project-specific queue
+        const targetProject = PROJECTS.find(p => p.name === body.project) || PROJECTS[0];
+        const root = path.resolve(targetProject.localPath || path.resolve(SQUAD_DIR, '..'));
+        const wiSrc = targetProject.workSources?.workItems || CONFIG.workSources?.workItems || {};
+        wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+      } else {
+        // Write to central queue — agent decides which project
+        wiPath = path.join(SQUAD_DIR, 'work-items.json');
+      }
       let items = [];
       const existing = safeRead(wiPath);
       if (existing) { try { items = JSON.parse(existing); } catch {} }

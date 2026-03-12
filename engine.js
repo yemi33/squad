@@ -966,8 +966,88 @@ function discoverFromWorkItems(config, project) {
 }
 
 /**
+ * Scan central ~/.squad/work-items.json for project-agnostic tasks.
+ * The agent receives all project context and decides where to work.
+ */
+function discoverCentralWorkItems(config) {
+  const centralPath = path.join(SQUAD_DIR, 'work-items.json');
+  const items = safeJson(centralPath) || [];
+  const projects = getProjects(config);
+  const newWork = [];
+
+  for (const item of items) {
+    if (item.status !== 'queued' && item.status !== 'pending') continue;
+
+    const key = `central-work-${item.id}`;
+    if (isAlreadyDispatched(key) || isOnCooldown(key, 0)) continue;
+
+    const workType = item.type || 'implement';
+    const agentId = item.agent || resolveAgent(workType, config);
+    if (!agentId) continue;
+
+    // Build project context for the agent to decide
+    const projectList = projects.map(p => {
+      let line = `### ${p.name}\n`;
+      line += `- **Path:** ${p.localPath}\n`;
+      line += `- **ADO:** ${p.adoOrg}/${p.adoProject}/${p.repoName}\n`;
+      if (p.description) line += `- **What it is:** ${p.description}\n`;
+      return line;
+    }).join('\n');
+
+    const agentName = config.agents[agentId]?.name || agentId;
+    const agentRole = config.agents[agentId]?.role || 'Agent';
+
+    let prompt = `# Task: ${item.title}\n\n`;
+    prompt += `**Agent:** ${agentName} (${agentRole})\n`;
+    prompt += `**Priority:** ${item.priority || 'medium'}\n`;
+    prompt += `**Type:** ${workType}\n\n`;
+    if (item.description) prompt += `## Description\n\n${item.description}\n\n`;
+    prompt += `## Available Projects\n\n${projectList}\n\n`;
+    prompt += `## Instructions\n\n`;
+    prompt += `You have access to multiple project repositories. Based on the task above:\n\n`;
+    prompt += `1. **Determine scope** — which project(s) does this task apply to? It may span multiple repos.\n`;
+    prompt += `2. **Navigate** to the correct project directory to do the work.\n`;
+    prompt += `3. **If the task spans multiple repos**, work on each one sequentially:\n`;
+    prompt += `   - Complete changes in the first repo (worktree → commit → push → PR)\n`;
+    prompt += `   - Then move to the next repo and repeat\n`;
+    prompt += `   - Note cross-repo dependencies in your PR descriptions (e.g., "Requires <other-repo> PR #123")\n`;
+    prompt += `   - Each repo has its own ADO config (org, project, repoId) — use the correct one per repo\n`;
+    prompt += `4. Use **git worktrees** for any code changes — NEVER checkout on main\n`;
+    prompt += `5. Use **Azure DevOps MCP tools** (mcp__azure-ado__*) for PRs — NEVER use gh CLI\n`;
+    prompt += `6. Write your findings to: \`${SQUAD_DIR}/decisions/inbox/${agentId}-${dateStamp()}.md\`\n`;
+    prompt += `   - If multi-repo: note which repos were touched and why\n`;
+    prompt += `7. Update your status at: \`${SQUAD_DIR}/agents/${agentId}/status.json\`\n`;
+
+    // Append custom prompt if provided
+    if (item.prompt) prompt += `\n## Additional Context\n\n${item.prompt}\n`;
+
+    // Append decisions
+    const decisions = getDecisions();
+    if (decisions) prompt += `\n\n---\n\n## Team Decisions (MUST READ)\n\n${decisions}`;
+
+    newWork.push({
+      type: workType,
+      agent: agentId,
+      agentName,
+      agentRole,
+      task: item.title || item.description?.slice(0, 80) || item.id,
+      prompt,
+      meta: { dispatchKey: key, source: 'central-work-item', item }
+    });
+
+    item.status = 'dispatched';
+    item.dispatched_at = ts();
+    item.dispatched_to = agentId;
+    setCooldown(key);
+  }
+
+  if (newWork.length > 0) safeWrite(centralPath, items);
+  return newWork;
+}
+
+/**
  * Run all work discovery sources and queue new items
- * Priority: fix (0) > review (1) > implement (2) > work-items (3)
+ * Priority: fix (0) > review (1) > implement (2) > work-items (3) > central (4)
  */
 function discoverWork(config) {
   const projects = getProjects(config);
@@ -981,8 +1061,11 @@ function discoverWork(config) {
     allWorkItems.push(...discoverFromWorkItems(config, project));
   }
 
+  // Central work items (project-agnostic — agent decides where to work)
+  const centralWork = discoverCentralWorkItems(config);
+
   const fixes = allFixes, reviews = allReviews, implements_ = allImplements, workItems = allWorkItems;
-  const allWork = [...fixes, ...reviews, ...implements_, ...workItems];
+  const allWork = [...fixes, ...reviews, ...implements_, ...workItems, ...centralWork];
 
   for (const item of allWork) {
     addToDispatch(item);
