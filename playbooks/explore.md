@@ -10,7 +10,7 @@ Team root: {{team_root}}
 
 ## Mission
 
-Explore the codebase area specified in the task description. Your goal is to understand the architecture, patterns, and current state of the code, then document your findings for the team.
+Explore the codebase area specified in the task description. Your primary goal is to understand the architecture, patterns, and current state of the code. If the task asks you to produce a deliverable (design doc, architecture doc, analysis report), create it and commit it to the repo via PR.
 
 ## Steps
 
@@ -31,7 +31,7 @@ Explore the codebase area specified in the task description. Your goal is to und
 - What conventions are followed?
 
 ### 4. Document Findings
-Write your findings to `.squad/decisions/inbox/{{agent_name}}-explore-{{task_id}}-{{date}}.md` with these sections:
+Write your findings to `{{team_root}}/decisions/inbox/{{agent_id}}-explore-{{task_id}}-{{date}}.md` with these sections:
 - **Area Explored**: what you looked at
 - **Architecture**: how it works
 - **Patterns**: conventions and patterns found
@@ -39,14 +39,24 @@ Write your findings to `.squad/decisions/inbox/{{agent_name}}-explore-{{task_id}
 - **Gaps**: anything missing, broken, or unclear
 - **Recommendations**: suggestions for the team
 
-### 5. Status
+### 5. Create Deliverable (if the task asks for one)
+If the task asks you to write a design doc, architecture doc, or any durable artifact:
+1. Create a git worktree: `git worktree add ../worktrees/explore-{{task_id}} -b feat/{{task_id}}-<short-desc> {{main_branch}}`
+2. Write the document (e.g., `docs/design-<topic>.md`)
+3. Commit, push, and create a PR via `mcp__azure-ado__repo_create_pull_request`
+4. Clean up worktree when done
+
+If the task is purely exploratory (no deliverable requested), skip this step.
+
+### 6. Status
 **Note:** Do NOT write to `agents/*/status.json` — the engine manages your status automatically.
 
 ## Rules
-- Do NOT modify any code. This is read-only exploration.
+- Do NOT modify existing code unless the task explicitly asks for it.
 - Do NOT use `gh` CLI or GitHub API. This repo uses Azure DevOps.
-- Do NOT checkout branches in the main working tree.
+- Do NOT checkout branches in the main working tree — use worktrees.
 - Read `decisions.md` for all team rules before starting.
+- If you discover a repeatable workflow, save it as a runbook at `{{team_root}}/runbooks/<name>.md`
 
 ## Team Decisions
 {{decisions_content}}
