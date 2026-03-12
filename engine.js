@@ -494,17 +494,23 @@ function spawnAgent(dispatchItem, config) {
   }
 
   const binary = claudeConfig.binary || 'claude';
-  const bashBin = process.env.SHELL || '/usr/bin/bash';
-  const safeArgs = args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-  const promptFileUnix = promptPath.replace(/\\/g, '/');
-  const sysPromptFileUnix = sysPromptPath.replace(/\\/g, '/');
-  const bashCmd = `unset CLAUDECODE; ${binary} -p "$(cat '${promptFileUnix}')" --system-prompt "$(cat '${sysPromptFileUnix}')" ${safeArgs}`;
 
-  const proc = spawn(bashBin, ['-c', bashCmd], {
+  // Read prompt content — pipe via stdin to avoid shell metacharacter issues
+  const promptContent = fs.readFileSync(promptPath, 'utf8');
+  const systemPromptContent = fs.readFileSync(sysPromptPath, 'utf8');
+
+  // Build args: -p (print mode), system prompt as arg, everything else
+  const cliArgs = ['-p', '--system-prompt', systemPromptContent, ...args];
+
+  const proc = spawn(binary, cliArgs, {
     cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: childEnv
   });
+
+  // Send prompt via stdin
+  proc.stdin.write(promptContent);
+  proc.stdin.end();
 
   const MAX_OUTPUT = 1024 * 1024; // 1MB
   let stdout = '';
