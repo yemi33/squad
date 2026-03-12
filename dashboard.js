@@ -335,18 +335,38 @@ function getWorkItems() {
   }
 
   // Cross-reference with dispatch completed to find PRs created
-  const dispatch = getDispatchQueue();
-  const completed = dispatch.completed || [];
+  // Cross-reference with all PRs to find links (match by prdItems containing work item ID)
+  const allPrs = getPullRequests();
   for (const item of allItems) {
-    const match = completed.find(d => d.meta?.item?.id === item.id && d.meta?.source?.includes('work-item'));
-    if (match) {
-      // Check agent status for PR info
-      if (match.agent) {
+    // Check if item already has _pr from the JSON
+    if (item._pr && !item._prUrl) {
+      const prId = String(item._pr).replace('PR-', '');
+      const pr = allPrs.find(p => String(p.id).includes(prId));
+      if (pr) { item._prUrl = pr.url; }
+    }
+    // Check PRs that reference this work item ID
+    if (!item._pr) {
+      const linkedPr = allPrs.find(p => (p.prdItems || []).includes(item.id));
+      if (linkedPr) {
+        item._pr = linkedPr.id;
+        item._prUrl = linkedPr.url;
+      }
+    }
+    // Fallback: check agent status
+    if (!item._pr) {
+      const dispatch = getDispatchQueue();
+      const match = (dispatch.completed || []).find(d => d.meta?.item?.id === item.id && d.meta?.source?.includes('work-item'));
+      if (match?.agent) {
         const statusFile = safeRead(path.join(SQUAD_DIR, 'agents', match.agent, 'status.json'));
         if (statusFile) {
           try {
             const s = JSON.parse(statusFile);
-            if (s.pr) item._pr = s.pr;
+            if (s.pr) {
+              item._pr = s.pr;
+              const prId = String(s.pr).replace('PR-', '');
+              const pr = allPrs.find(p => String(p.id).includes(prId));
+              if (pr) item._prUrl = pr.url;
+            }
           } catch {}
         }
       }

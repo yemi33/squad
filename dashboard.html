@@ -1048,7 +1048,7 @@ function wiRow(item) {
   const typeBadge = (t) => '<span class="dispatch-type ' + (t || 'implement') + '">' + escHtml(t || 'implement') + '</span>';
   const priBadge = (p) => '<span class="prd-item-priority ' + (p || '') + '">' + escHtml(p || 'medium') + '</span>';
   const prLink = item._pr
-    ? '<a class="pr-title" href="#" style="font-size:10px">' + escHtml(item._pr) + '</a>'
+    ? '<a class="pr-title" href="' + escHtml(item._prUrl || '#') + '" target="_blank" style="font-size:10px">' + escHtml(item._pr) + '</a>'
     : '<span style="color:var(--muted)">—</span>';
   return '<tr>' +
     '<td><span class="pr-id">' + escHtml(item.id || '') + '</span></td>' +
