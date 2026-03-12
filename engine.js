@@ -502,15 +502,12 @@ function spawnAgent(dispatchItem, config) {
     }
   }
 
-  // Spawn via wrapper script — uses bash to ensure clean env (strips CLAUDECODE)
-  // This is necessary when the engine runs inside a Claude Code terminal
-  const spawnScript = path.join(ENGINE_DIR, 'spawn-agent.js').replace(/\\/g, '/');
-  const nodeExe = process.execPath.replace(/\\/g, '/');
-  const safeArgStr = args.map(function(a) { return "'" + a.replace(/'/g, "'\\''") + "'"; }).join(' ');
-  const bashCmd = '"' + nodeExe + '" "' + spawnScript + '" "' + promptPath.replace(/\\/g, '/') + '" "' + sysPromptPath.replace(/\\/g, '/') + '" ' + safeArgStr;
+  // Spawn via wrapper script — node directly (no bash intermediary)
+  // spawn-agent.js handles CLAUDECODE env cleanup and claude binary resolution
+  const spawnScript = path.join(ENGINE_DIR, 'spawn-agent.js');
+  const spawnArgs = [spawnScript, promptPath, sysPromptPath, ...args];
 
-  const bashBin = process.env.SHELL || '/usr/bin/bash';
-  const proc = spawn(bashBin, ['-c', bashCmd], {
+  const proc = spawn(process.execPath, spawnArgs, {
     cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: childEnv
