@@ -1306,12 +1306,21 @@ function checkTimeouts(config) {
   }
 
   // Reset "done" agents to "idle" after 1 minute (visual cleanup)
+  // Also catch stranded "working" agents with no active dispatch (e.g. after engine restart)
   for (const [agentId] of Object.entries(config.agents || {})) {
     const status = getAgentStatus(agentId);
     if ((status.status === 'done' || status.status === 'error') && status.completed_at) {
       const elapsed = Date.now() - new Date(status.completed_at).getTime();
       if (elapsed > 60000) {
         setAgentStatus(agentId, { status: 'idle', task: null, started_at: null, completed_at: status.completed_at });
+      }
+    }
+    // Reconcile: if status says "working" but no active dispatch exists, reset to idle
+    if (status.status === 'working') {
+      const hasActiveDispatch = (dispatch.active || []).some(d => d.agent === agentId);
+      if (!hasActiveDispatch) {
+        log('warn', `Reconcile: ${agentId} status is "working" but no active dispatch found — resetting to idle`);
+        setAgentStatus(agentId, { status: 'idle', task: null, started_at: null, completed_at: ts() });
       }
     }
   }
@@ -1753,6 +1762,161 @@ function buildProjectContext(projects, assignedProject, isFanOut, agentName, age
 }
 
 /**
+ * Detect merged PRs containing design docs and create implement work items.
+ * This is a two-stage discovery: it creates work items (side effect) that
+ * discoverFromWorkItems() picks up on the next tick.
+ */
+function discoverFromMergedDesignDocs(config, project) {
+  const src = project?.workSources?.mergedDesignDocs;
+  if (!src?.enabled) return;
+
+  const root = projectRoot(project);
+  const filePatterns = src.filePatterns || ['docs/design-*.md', 'docs/designs/*.md'];
+  const trackerPath = path.resolve(root, src.statePath || '.squad/design-doc-tracker.json');
+  const tracker = safeJson(trackerPath) || { processedPrs: {} };
+
+  // Get merged PRs from the project's PR tracker
+  const prs = getPrs(project);
+  const mergedPrs = prs.filter(pr =>
+    (pr.status === 'merged' || pr.status === 'completed') &&
+    !tracker.processedPrs[pr.id]
+  );
+
+  if (mergedPrs.length === 0) return;
+
+  // For each merged PR, check if it introduced design docs
+  const sinceDate = src.lookbackDays ? `${src.lookbackDays} days ago` : '7 days ago';
+  let recentDesignDocs = [];
+  for (const pattern of filePatterns) {
+    try {
+      const result = execSync(
+        `git log --diff-filter=AM --name-only --pretty=format:"COMMIT:%H|%s" --since="${sinceDate}" -- "${pattern}"`,
+        { cwd: root, encoding: 'utf8', timeout: 10000 }
+      ).trim();
+      if (!result) continue;
+
+      // Parse git log output: alternating COMMIT: lines and file paths
+      let currentCommit = null;
+      for (const line of result.split('\n')) {
+        if (line.startsWith('COMMIT:')) {
+          const [hash, ...msgParts] = line.replace('COMMIT:', '').split('|');
+          currentCommit = { hash: hash.trim(), message: msgParts.join('|').trim() };
+        } else if (line.trim() && currentCommit) {
+          recentDesignDocs.push({ file: line.trim(), ...currentCommit });
+        }
+      }
+    } catch {}
+  }
+
+  if (recentDesignDocs.length === 0) return;
+
+  // Match design docs to merged PRs (by branch name or commit message overlap)
+  const wiPath = projectWorkItemsPath(project);
+  const existingItems = safeJson(wiPath) || [];
+  let created = 0;
+
+  for (const pr of mergedPrs) {
+    // Check if any design doc commit is plausibly from this PR
+    const prBranch = (pr.branch || '').toLowerCase();
+    const prTitle = (pr.title || '').toLowerCase();
+    const matchedDocs = recentDesignDocs.filter(doc => {
+      const msg = doc.message.toLowerCase();
+      // Match by: branch name in commit, PR title overlap, or file path in PR title
+      return (prBranch && msg.includes(prBranch.split('/').pop())) ||
+             (prTitle && (msg.includes('design') || doc.file.toLowerCase().includes('design')));
+    });
+
+    if (matchedDocs.length === 0) {
+      // No design doc match — still mark as processed to avoid re-checking
+      tracker.processedPrs[pr.id] = { processedAt: ts(), matched: false };
+      continue;
+    }
+
+    // Read the design doc to extract info for the work item
+    for (const doc of matchedDocs) {
+      const alreadyCreated = existingItems.some(i =>
+        i.sourceDesignDoc === doc.file || i.sourcePr === pr.id
+      );
+      if (alreadyCreated) continue;
+
+      const info = extractDesignDocInfo(doc.file, root);
+      if (!info) continue;
+
+      // Generate next work item ID with DD prefix
+      const ddItems = existingItems.filter(i => i.id?.startsWith('DD'));
+      const maxNum = ddItems.reduce((max, i) => {
+        const n = parseInt(i.id.replace('DD', ''), 10);
+        return isNaN(n) ? max : Math.max(max, n);
+      }, 0);
+      const newId = `DD${String(maxNum + 1).padStart(3, '0')}`;
+
+      const workItem = {
+        id: newId,
+        type: 'implement',
+        title: `Implement: ${info.title}`,
+        description: `Implementation work derived from merged design doc.\n\n**Design doc:** \`${doc.file}\`\n**Source PR:** ${pr.id} — ${pr.title || ''}\n**PR URL:** ${pr.url || 'N/A'}\n\n## Design Summary\n\n${info.summary}\n\nRead the full design doc at \`${doc.file}\` before starting implementation.`,
+        priority: info.priority,
+        status: 'queued',
+        created: ts(),
+        createdBy: 'engine:design-doc-discovery',
+        sourceDesignDoc: doc.file,
+        sourcePr: pr.id
+      };
+
+      existingItems.push(workItem);
+      created++;
+      log('info', `Design doc discovery: created ${newId} "${workItem.title}" from PR ${pr.id} in ${project.name}`);
+    }
+
+    tracker.processedPrs[pr.id] = { processedAt: ts(), matched: true, docs: matchedDocs.map(d => d.file) };
+  }
+
+  if (created > 0) {
+    safeWrite(wiPath, existingItems);
+  }
+  safeWrite(trackerPath, tracker);
+}
+
+/**
+ * Extract title, summary, and priority from a design doc markdown file.
+ */
+function extractDesignDocInfo(filePath, projectRoot_) {
+  const fullPath = path.resolve(projectRoot_, filePath);
+  const content = safeRead(fullPath);
+  if (!content) return null;
+
+  // Title: frontmatter title or first H1
+  let title = '';
+  const fmMatch = content.match(/^---\n[\s\S]*?title:\s*(.+)\n[\s\S]*?---/);
+  const h1Match = content.match(/^#\s+(.+)$/m);
+  title = fmMatch?.[1]?.trim() || h1Match?.[1]?.trim() || path.basename(filePath, '.md');
+
+  // Summary: ## Summary section, or first paragraph after title
+  let summary = '';
+  const summaryMatch = content.match(/##\s*Summary\n\n([\s\S]*?)(?:\n##|\n---|$)/);
+  if (summaryMatch) {
+    summary = summaryMatch[1].trim();
+  } else {
+    const lines = content.split('\n');
+    let pastTitle = false;
+    for (const line of lines) {
+      if (line.startsWith('# ')) { pastTitle = true; continue; }
+      if (pastTitle && line.trim() && !line.startsWith('#') && !line.startsWith('---')) {
+        summary = line.trim();
+        break;
+      }
+    }
+  }
+
+  // Priority from frontmatter
+  const priorityMatch = content.match(/priority:\s*(high|medium|low|critical)/i);
+  const priority = priorityMatch?.[1]?.toLowerCase() || 'medium';
+
+  // Cap content for the work item description
+  return { title, summary: summary.slice(0, 1500), priority };
+}
+
+/**
  * Scan central ~/.squad/work-items.json for project-agnostic tasks.
  * Uses the shared work-item.md playbook with multi-project context injected.
  */
@@ -1908,6 +2072,7 @@ function discoverWork(config) {
     allFixes.push(...prWork.filter(w => w.type === 'fix'));
     allReviews.push(...prWork.filter(w => w.type === 'review'));
     allImplements.push(...discoverFromPrd(config, project));
+    discoverFromMergedDesignDocs(config, project); // side-effect: creates work items for next tick
     allWorkItems.push(...discoverFromWorkItems(config, project));
   }
 
@@ -2225,11 +2390,13 @@ const commands = {
       const sources = project.workSources || config.workSources || {};
       for (const [name, src] of Object.entries(sources)) {
         const status = src.enabled ? 'ENABLED' : 'DISABLED';
-        const filePath = path.resolve(root, src.path);
-        const exists = fs.existsSync(filePath);
-
         console.log(`  ${name}: ${status}`);
-        console.log(`    Path: ${src.path} ${exists ? '(found)' : '(NOT FOUND)'}`);
+
+        const filePath = src.path ? path.resolve(root, src.path) : null;
+        const exists = filePath && fs.existsSync(filePath);
+        if (filePath) {
+          console.log(`    Path: ${src.path} ${exists ? '(found)' : '(NOT FOUND)'}`);
+        }
         console.log(`    Cooldown: ${src.cooldownMinutes || 0}m`);
 
         if (exists && name === 'prd') {
@@ -2249,6 +2416,13 @@ const commands = {
           const items = safeJson(filePath) || [];
           const queued = items.filter(i => i.status === 'queued');
           console.log(`    Items: ${queued.length} queued`);
+        }
+        if (name === 'mergedDesignDocs') {
+          const trackerFile = path.resolve(root, src.statePath || '.squad/design-doc-tracker.json');
+          const tracker = safeJson(trackerFile) || { processedPrs: {} };
+          const processed = Object.keys(tracker.processedPrs).length;
+          const matched = Object.values(tracker.processedPrs).filter(p => p.matched).length;
+          console.log(`    Processed: ${processed} merged PRs (${matched} had design docs)`);
         }
         console.log('');
       }

@@ -1,5 +1,40 @@
 # Agent History
 
+### 2026-03-12T17:29:56.582Z — error
+- **Task:** Build Dallas cowork PR locally and verify it works
+- **Type:** test
+- **Project:** central
+- **Branch:** none
+- **Dispatch ID:** dallas-test-1773335047914
+
+### 2026-03-12T17:25:08.069Z — success
+- **Task:** Build Dallas cowork PR locally and verify it works
+- **Type:** test
+- **Project:** central
+- **Branch:** none
+- **Dispatch ID:** dallas-test-1773335047914
+
+### 2026-03-12T07:51:05.335Z — error
+- **Task:** Build Dallas cowork PR locally and verify it works
+- **Type:** test
+- **Project:** central
+- **Branch:** none
+- **Dispatch ID:** dallas-test-1773301212502
+
+### 2026-03-12T07:49:55.643Z — error
+- **Task:** add 'cowork' route to bebop
+- **Type:** implement
+- **Project:** central
+- **Branch:** none
+- **Dispatch ID:** dallas-implement-1773290832159
+
+### 2026-03-12T07:49:38.194Z — error
+- **Task:** build dalla's cowork pr locally
+- **Type:** implement
+- **Project:** central
+- **Branch:** none
+- **Dispatch ID:** dallas-implement-1773297956413
+
 ### 2026-03-12T07:18:22.368Z — error
 - **Task:** Build Dallas cowork PR locally and verify it works
 - **Type:** test

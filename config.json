@@ -31,6 +31,12 @@
           "enabled": true,
           "path": ".squad/work-items.json",
           "cooldownMinutes": 0
+        },
+        "mergedDesignDocs": {
+          "enabled": true,
+          "filePatterns": ["docs/design-*.md", "docs/designs/*.md"],
+          "statePath": ".squad/design-doc-tracker.json",
+          "lookbackDays": 7
         }
       }
     },
@@ -54,6 +60,12 @@
           "enabled": true,
           "path": ".squad/work-items.json",
           "cooldownMinutes": 0
+        },
+        "mergedDesignDocs": {
+          "enabled": true,
+          "filePatterns": ["docs/design-*.md", "docs/designs/*.md"],
+          "statePath": ".squad/design-doc-tracker.json",
+          "lookbackDays": 7
         }
       }
     },
@@ -76,6 +88,12 @@
           "enabled": true,
           "path": ".squad/work-items.json",
           "cooldownMinutes": 0
+        },
+        "mergedDesignDocs": {
+          "enabled": true,
+          "filePatterns": ["docs/design-*.md", "docs/designs/*.md"],
+          "statePath": ".squad/design-doc-tracker.json",
+          "lookbackDays": 7
         }
       }
     }
