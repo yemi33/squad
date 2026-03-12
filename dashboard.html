@@ -304,6 +304,7 @@
       <div class="cmd-row">
         <div class="cmd-field" style="flex:3"><label>Title</label><input id="wi-title" placeholder="e.g. Add retry logic to API calls" oninput="autoDetectWorkItemType()"></div>
         <div class="cmd-field" style="flex:1"><label>Project</label><select id="wi-project"><option value="">Auto (agent decides)</option></select></div>
+        <button class="cmd-submit" onclick="submitWorkItem()">Add</button>
       </div>
       <div class="cmd-row">
         <div class="cmd-field" style="flex:1"><label>Type</label>
@@ -315,7 +316,6 @@
         <div class="cmd-field" style="flex:1"><label>Scope</label>
           <select id="wi-scope"><option value="">Single agent</option><option value="fan-out">Fan-out (all agents)</option></select>
         </div>
-        <button class="cmd-submit" onclick="submitWorkItem()">Add</button>
       </div>
       <div class="cmd-row">
         <div class="cmd-field" style="flex:3"><label>Description (optional)</label><textarea id="wi-desc" rows="2" placeholder="Additional details..." oninput="autoDetectWorkItemType()"></textarea></div>
