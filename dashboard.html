@@ -355,24 +355,25 @@
     </div>
   </section>
 
-  <section class="prd-panel" id="prd-section">
-    <h2>PRD Gap Analysis <span id="prd-badge"></span></h2>
-    <div id="prd-content"><p class="prd-pending">Lambert is generating docs/prd-gaps.json...</p></div>
-  </section>
-
-  <section class="pr-panel" id="pr-section">
-    <h2>Pull Requests <span class="count" id="pr-count">0</span></h2>
-    <div id="pr-content"><p class="pr-empty">No pull requests yet. PRs created by agents will appear here with review, build, and merge status.</p></div>
-  </section>
-
   <section>
     <h2>Squad Members <span style="font-size:10px;color:var(--border);font-weight:400;text-transform:none;letter-spacing:0">click for details</span></h2>
     <div class="agents" id="agents-grid">Loading...</div>
   </section>
 
-  <section>
-    <h2>PRD Progress <span class="count" id="prd-progress-count">0%</span> <span id="archive-btns"></span></h2>
-    <div id="prd-progress-content">Loading...</div>
+  <section id="work-items-section">
+    <h2>Work Items <span class="count" id="wi-count">0</span></h2>
+    <div id="work-items-content"><p class="empty">No work items. Add tasks via Command Center above.</p></div>
+  </section>
+
+  <section class="prd-panel" id="prd-section">
+    <h2>PRD <span class="count" id="prd-progress-count">0%</span> <span id="prd-badge"></span> <span id="archive-btns"></span></h2>
+    <div id="prd-content"><p class="prd-pending">No PRD found.</p></div>
+    <div id="prd-progress-content" style="margin-top:12px"></div>
+  </section>
+
+  <section class="pr-panel" id="pr-section">
+    <h2>Pull Requests <span class="count" id="pr-count">0</span></h2>
+    <div id="pr-content"><p class="pr-empty">No pull requests yet.</p></div>
   </section>
 
   <section>
@@ -386,11 +387,6 @@
   </section>
 
   <section>
-    <h2>Agent Metrics</h2>
-    <div id="metrics-content"><p class="empty">No metrics yet. Metrics appear after agents complete tasks.</p></div>
-  </section>
-
-  <section>
     <h2>Dispatch Queue</h2>
     <div class="dispatch-stats" id="dispatch-stats"></div>
     <div id="dispatch-active"></div>
@@ -400,6 +396,11 @@
   <section>
     <h2>Engine Log</h2>
     <div class="log-list" id="engine-log">No log entries yet.</div>
+  </section>
+
+  <section>
+    <h2>Agent Metrics</h2>
+    <div id="metrics-content"><p class="empty">No metrics yet. Metrics appear after agents complete tasks.</p></div>
   </section>
 
   <section class="pr-panel" id="completed-section">
@@ -558,7 +559,7 @@ function renderAgents(agents) {
 function renderPrdProgress(prog) {
   const el = document.getElementById('prd-progress-content');
   const countEl = document.getElementById('prd-progress-count');
-  if (!prog) { el.innerHTML = '<p class="empty">PRD not found.</p>'; return; }
+  if (!prog) { el.innerHTML = ''; countEl.textContent = '—'; return; }
 
   countEl.textContent = prog.donePercent + '%';
 
@@ -593,7 +594,7 @@ function renderPrdProgress(prog) {
     ).join('') +
   '</div>';
 
-  el.innerHTML = '<div class="prd-progress-pct">' + prog.donePercent + '% done</div>' + bar + legend + items;
+  el.innerHTML = bar + legend + items;
 }
 
 function renderInbox(inbox) {
@@ -622,22 +623,23 @@ function renderPrd(prd) {
   const section = document.getElementById('prd-content');
   const badge = document.getElementById('prd-badge');
   if (!prd) {
-    section.innerHTML = '<p class="prd-pending">Lambert is generating docs/prd-gaps.json...</p>';
+    section.innerHTML = '<p class="prd-pending" style="margin-bottom:0">No PRD found.</p>';
+    badge.innerHTML = '';
     return;
   }
   if (prd.error) {
-    section.innerHTML = '<p style="color:var(--orange)">PRD file found but has parse errors.</p>';
+    section.innerHTML = '<p style="color:var(--orange);margin-bottom:0">PRD file found but has parse errors.</p>';
     return;
   }
-  badge.innerHTML = '<span style="color:var(--green);font-size:11px">Generated ' + prd.age + '</span>';
+  badge.innerHTML = '<span style="color:var(--green);font-size:11px">' + prd.age + '</span>';
   section.innerHTML =
-    '<div class="prd-inner">' +
-      '<div class="prd-stats">' +
+    '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">' +
+      '<div class="prd-stats" style="margin:0">' +
         '<div class="prd-stat"><div class="prd-stat-num green">' + prd.existing + '</div><div class="prd-stat-label">Existing</div></div>' +
-        '<div class="prd-stat"><div class="prd-stat-num red">' + prd.missing + '</div><div class="prd-stat-label">Missing</div></div>' +
+        '<div class="prd-stat"><div class="prd-stat-num red">' + prd.missing + '</div><div class="prd-stat-label">Gaps</div></div>' +
         '<div class="prd-stat"><div class="prd-stat-num orange">' + prd.questions + '</div><div class="prd-stat-label">Questions</div></div>' +
       '</div>' +
-      '<div class="prd-summary">' + escHtml(prd.summary) + '</div>' +
+      (prd.summary ? '<div class="prd-summary" style="flex:1;min-width:200px">' + escHtml(prd.summary) + '</div>' : '') +
     '</div>';
 }
 
@@ -917,6 +919,7 @@ async function refresh() {
     renderEngineLog(data.engineLog || []);
     renderProjects(data.projects || []);
     renderMetrics(data.metrics || {});
+    renderWorkItems(data.workItems || []);
   } catch(e) { console.error('refresh error', e); }
 }
 
@@ -946,6 +949,39 @@ function renderProjects(projects) {
     sel.innerHTML = '<option value="">Auto (agent decides)</option>' +
       projects.map(p => '<option value="' + escHtml(p.name) + '">' + escHtml(p.name) + '</option>').join('');
   }
+}
+
+// -- Work Items --
+function renderWorkItems(items) {
+  const el = document.getElementById('work-items-content');
+  const countEl = document.getElementById('wi-count');
+  countEl.textContent = items.length;
+  if (!items.length) {
+    el.innerHTML = '<p class="empty">No work items. Add tasks via Command Center above.</p>';
+    return;
+  }
+  const statusBadge = (s) => {
+    const cls = s === 'dispatched' ? 'building' : s === 'pending' || s === 'queued' ? 'active' : s === 'done' ? 'approved' : 'draft';
+    return '<span class="pr-badge ' + cls + '">' + escHtml(s) + '</span>';
+  };
+  const typeBadge = (t) => '<span class="dispatch-type ' + (t || 'implement') + '">' + escHtml(t || 'implement') + '</span>';
+  const priBadge = (p) => '<span class="prd-item-priority ' + (p || '') + '">' + escHtml(p || 'medium') + '</span>';
+
+  let html = '<table class="pr-table"><thead><tr><th>ID</th><th>Title</th><th>Source</th><th>Type</th><th>Priority</th><th>Status</th><th>Agent</th><th>Created</th></tr></thead><tbody>';
+  for (const item of items) {
+    html += '<tr>' +
+      '<td><span class="pr-id">' + escHtml(item.id || '') + '</span></td>' +
+      '<td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(item.description || item.title || '') + '">' + escHtml(item.title || '') + '</td>' +
+      '<td><span style="font-size:10px;color:var(--muted)">' + escHtml(item._source || '') + '</span></td>' +
+      '<td>' + typeBadge(item.type) + '</td>' +
+      '<td>' + priBadge(item.priority) + '</td>' +
+      '<td>' + statusBadge(item.status || 'pending') + '</td>' +
+      '<td><span class="pr-agent">' + escHtml(item.dispatched_to || '—') + '</span></td>' +
+      '<td><span class="pr-date">' + shortTime(item.created) + '</span></td>' +
+    '</tr>';
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
 }
 
 // -- Metrics --

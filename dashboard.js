@@ -262,6 +262,51 @@ function getMetrics() {
   try { return JSON.parse(data); } catch { return {}; }
 }
 
+function getWorkItems() {
+  const allItems = [];
+
+  // Central work items
+  const centralPath = path.join(SQUAD_DIR, 'work-items.json');
+  const centralData = safeRead(centralPath);
+  if (centralData) {
+    try {
+      const items = JSON.parse(centralData);
+      for (const item of items) {
+        item._source = 'central';
+        allItems.push(item);
+      }
+    } catch {}
+  }
+
+  // Per-project work items
+  for (const project of PROJECTS) {
+    const root = path.resolve(project.localPath || path.resolve(SQUAD_DIR, '..'));
+    const wiSrc = project.workSources?.workItems || CONFIG.workSources?.workItems || {};
+    const wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+    const data = safeRead(wiPath);
+    if (data) {
+      try {
+        const items = JSON.parse(data);
+        for (const item of items) {
+          item._source = project.name || 'project';
+          allItems.push(item);
+        }
+      } catch {}
+    }
+  }
+
+  // Sort: pending/queued first, then by created date desc
+  const statusOrder = { pending: 0, queued: 0, dispatched: 1, done: 2 };
+  allItems.sort((a, b) => {
+    const sa = statusOrder[a.status] ?? 1;
+    const sb = statusOrder[b.status] ?? 1;
+    if (sa !== sb) return sa - sb;
+    return (b.created || '').localeCompare(a.created || '');
+  });
+
+  return allItems;
+}
+
 function getStatus() {
   const prdInfo = getPrdInfo();
   return {
@@ -276,6 +321,7 @@ function getStatus() {
     dispatch: getDispatchQueue(),
     engineLog: getEngineLog(),
     metrics: getMetrics(),
+    workItems: getWorkItems(),
     projects: PROJECTS.map(p => ({ name: p.name, path: p.localPath, description: p.description || '' })),
     timestamp: new Date().toISOString(),
   };
