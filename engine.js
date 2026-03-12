@@ -716,30 +716,51 @@ function syncPrsFromOutput(output, agentId, meta, config) {
   const urlPattern = /(?:visualstudio\.com|dev\.azure\.com)[^\s"]*?pullrequest\/(\d+)|github\.com\/[^\s"]*?\/pull\/(\d+)/g;
   let match;
 
-  // First extract the "result" text from stream-json (the agent's final summary)
-  // This is more reliable than scanning raw stream-json events
-  let resultText = '';
+  // Strategy: only capture PRs the agent CREATED, not referenced.
+  // 1. Scan stream-json for mcp__azure-ado__repo_create_pull_request tool results
+  // 2. Scan for gh pr create output
+  // 3. As fallback, look for "Created PR" / "PR created" patterns in the result text
   try {
     const lines = output.split('\n');
     for (const line of lines) {
-      if (line.includes('"type":"result"')) {
+      try {
+        if (!line.includes('"type":"assistant"') && !line.includes('"type":"result"')) continue;
         const parsed = JSON.parse(line);
-        resultText = parsed.result || '';
-        break;
-      }
+
+        // Check tool use results for PR creation MCP calls
+        const content = parsed.message?.content || [];
+        for (const block of content) {
+          if (block.type === 'tool_result' && block.content) {
+            const text = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+            if (text.includes('pullRequestId') || text.includes('create_pull_request')) {
+              while ((match = urlPattern.exec(text)) !== null) prMatches.add(match[1] || match[2]);
+            }
+          }
+        }
+
+        // Check result text for "created PR" patterns (not just any PR mention)
+        if (parsed.type === 'result' && parsed.result) {
+          const resultText = parsed.result;
+          // Match PR URLs only near creation-indicating words
+          const createdPattern = /(?:created|opened|submitted|new PR|PR created)[^\n]*?(?:(?:visualstudio\.com|dev\.azure\.com)[^\s"]*?pullrequest\/(\d+)|github\.com\/[^\s"]*?\/pull\/(\d+))/gi;
+          while ((match = createdPattern.exec(resultText)) !== null) prMatches.add(match[1] || match[2]);
+
+          // Also match "PR #NNNN" or "PR-NNNN" only when preceded by created/opened
+          const createdIdPattern = /(?:created|opened|submitted|new)\s+PR[# -]*(\d{5,})/gi;
+          while ((match = createdIdPattern.exec(resultText)) !== null) prMatches.add(match[1]);
+        }
+      } catch {}
     }
   } catch {}
 
-  // Scan the result text (clean agent output) for PR URLs
-  const scanText = resultText || '';
-  while ((match = urlPattern.exec(scanText)) !== null) prMatches.add(match[1] || match[2]);
-
-  // Also scan inbox files for this agent today (these are clean markdown, not stream-json)
+  // Also scan inbox files — look for "PR:" or "PR created" lines (agent's own summary)
   const today = dateStamp();
   const inboxFiles = getInboxFiles().filter(f => f.includes(agentId) && f.includes(today));
   for (const f of inboxFiles) {
     const content = safeRead(path.join(INBOX_DIR, f));
-    while ((match = urlPattern.exec(content)) !== null) prMatches.add(match[1] || match[2]);
+    // Only match PR URLs near "PR:" header lines (agent's structured output)
+    const prHeaderPattern = /\*\*PR[:\*]*\*?\s*[#-]*\s*(?:(?:visualstudio\.com|dev\.azure\.com)[^\s"]*?pullrequest\/(\d+)|github\.com\/[^\s"]*?\/pull\/(\d+))/gi;
+    while ((match = prHeaderPattern.exec(content)) !== null) prMatches.add(match[1] || match[2]);
   }
 
   if (prMatches.size === 0) return;
