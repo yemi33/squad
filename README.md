@@ -11,6 +11,7 @@ A multi-project AI dev team that runs from `~/.squad/`. Five autonomous agents s
 - **Tracks quality** — approval rates, error rates, and task metrics per agent
 - **Shares workflows** — agents create reusable runbooks that all other agents can follow
 - **Supports cross-repo tasks** — a single work item can span multiple repositories
+- **Fan-out dispatch** — broad tasks can be split across all idle agents in parallel, each assigned a project
 
 ## Quick Start
 
@@ -95,10 +96,10 @@ PORT=8080 node dashboard.js  # Custom port
 The web dashboard at `http://localhost:7331` provides:
 
 - **Projects bar** — all linked projects with descriptions (hover for full text)
-- **Command Center** — add work items (per-project or auto-route), decisions, and PRD items
+- **Command Center** — add work items (per-project, auto-route, or fan-out), decisions, and PRD items
 - **Squad Members** — agent cards with status, click for charter/history/output detail
-- **Work Items** — all items from central + per-project queues with status, source, assigned agent
-- **PRD** — gap analysis stats + progress bar with item-level breakdown
+- **Work Items** — all items from central + per-project queues with status, source, assigned agent, linked PRs, and fan-out badges
+- **PRD** — gap analysis stats + progress bar with item-level breakdown and linked PRs per item
 - **Pull Requests** — paginated PR tracker with review/build/merge status
 - **Runbooks** — agent-created reusable workflows, click to view full content
 - **Decisions Inbox + Active Decisions** — learnings and team rules
@@ -132,6 +133,23 @@ The `description` field is critical — it tells agents what each repo contains 
 **Central (auto-route)** — agent gets all project descriptions and decides where to work. Use "Auto (agent decides)" in the dropdown, or `node engine.js work "title"`.
 
 Central work items can span multiple repos — the agent works on each sequentially, creating separate PRs per repo with cross-repo dependency notes.
+
+### Fan-Out (Parallel Multi-Agent)
+
+Set Scope to "Fan-out (all agents)" in the Command Center, or add `"scope": "fan-out"` to the work item JSON.
+
+The engine dispatches the task to **all idle agents simultaneously**, assigning each a project (round-robin). Each agent focuses on their assigned project and writes findings to the inbox. The engine consolidates everything into `decisions.md`.
+
+```
+"Explore all codebases and write architecture doc"  scope: fan-out
+       │
+       ├─→ Ripley   → OfficeAgent
+       ├─→ Lambert  → office-bohemia
+       ├─→ Rebecca  → bebop-desktop
+       └─→ Ralph    → OfficeAgent (round-robin wraps)
+```
+
+Fan-out items show a yellow badge in the dashboard work items table.
 
 ## Auto-Discovery Pipeline
 
