@@ -1,5 +1,11 @@
 # Squad — Future Improvements
 
+## Durable Artifacts
+- [ ] **Per-dispatch artifact archive** — `artifacts/<agent>/<dispatch-id>/` preserving full output.log, live-output.log, inbox findings, and any generated files. Never overwritten, indexed by dispatch ID.
+- [ ] **Artifact query for agents** — inject recent artifact summaries into agent prompts so they can reference past investigations without re-doing the work
+- [ ] **Artifact browser in dashboard** — browse past dispatch artifacts, view full reasoning chains, search across agent outputs
+- [ ] **Output.log append, not overwrite** — keep all dispatch outputs, not just the last one. Rotate by dispatch ID.
+
 ## Agent Communication
 - [ ] **Agent message board** — agents can post tagged messages to specific agents or all agents. Messages have sender, recipient (or "all"), subject, and expiry. Injected into recipient's next prompt.
 - [ ] **Handoff protocol** — agent can mark a task as "blocked on X" or "ready for Y", engine picks up dependencies and sequences dispatch accordingly
