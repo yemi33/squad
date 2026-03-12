@@ -338,16 +338,15 @@ function getWorkItems() {
 
   // Cross-reference with all PRs to find links — only for implement/fix types (not explore/review)
   const allPrs = getPullRequests();
-  const prRelevantTypes = ['implement', 'fix', 'test', ''];
+  const prSpeculativeTypes = ['implement', 'fix', 'test', ''];
   for (const item of allItems) {
-    if (!prRelevantTypes.includes(item.type || '')) continue;
     // Check if item already has _pr from the JSON
     if (item._pr && !item._prUrl) {
       const prId = String(item._pr).replace('PR-', '');
       const pr = allPrs.find(p => String(p.id).includes(prId));
       if (pr) { item._prUrl = pr.url; }
     }
-    // Check PRs that reference this work item ID
+    // Always check PRs that explicitly reference this work item ID via prdItems
     if (!item._pr) {
       const linkedPr = allPrs.find(p => (p.prdItems || []).includes(item.id));
       if (linkedPr) {
@@ -355,8 +354,8 @@ function getWorkItems() {
         item._prUrl = linkedPr.url;
       }
     }
-    // Fallback: check agent status
-    if (!item._pr) {
+    // Speculative fallback (agent status) — only for implement/fix/test types
+    if (!item._pr && prSpeculativeTypes.includes(item.type || '')) {
       const dispatch = getDispatchQueue();
       const match = (dispatch.completed || []).find(d => d.meta?.item?.id === item.id && d.meta?.source?.includes('work-item'));
       if (match?.agent) {
