@@ -587,6 +587,7 @@ function spawnAgent(dispatchItem, config) {
   proc.on('error', (err) => {
     log('error', `Failed to spawn agent ${agentId}: ${err.message}`);
     activeProcesses.delete(id);
+    completeDispatch(id, 'error', `Spawn error: ${err.message}`);
     setAgentStatus(agentId, {
       status: 'error',
       task: dispatchItem.task,
@@ -594,6 +595,13 @@ function spawnAgent(dispatchItem, config) {
       completed_at: ts()
     });
   });
+
+  // Safety: if process exits immediately (within 3s), log it
+  setTimeout(() => {
+    if (proc.exitCode !== null && !proc.killed) {
+      log('warn', `Agent ${agentId} (${id}) exited within 3s with code ${proc.exitCode}`);
+    }
+  }, 3000);
 
   // Track process — even if PID isn't available yet (async on Windows)
   activeProcesses.set(id, { proc, agentId, startedAt });
