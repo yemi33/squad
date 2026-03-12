@@ -78,12 +78,18 @@ fs.writeFileSync(pidFile, String(proc.pid || ''));
 proc.stdin.write(prompt);
 proc.stdin.end();
 
-// Pipe stdout/stderr to parent
+// Capture stderr separately for debugging
+let stderrBuf = '';
+proc.stderr.on('data', (chunk) => {
+  stderrBuf += chunk.toString();
+  process.stderr.write(chunk);
+});
+
+// Pipe stdout to parent
 proc.stdout.pipe(process.stdout);
-proc.stderr.pipe(process.stderr);
 
 proc.on('close', (code) => {
-  fs.appendFileSync(debugPath, `EXIT: code=${code}\n`);
+  fs.appendFileSync(debugPath, `EXIT: code=${code}\nSTDERR: ${stderrBuf.slice(0, 500)}\n`);
   process.exit(code || 0);
 });
 proc.on('error', (err) => {
