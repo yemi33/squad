@@ -79,12 +79,10 @@
     "type": "test",
     "priority": "medium",
     "description": "Checkout Dallas's PR branch (dallas/add-cowork-route) in office-bohemia, build the project, and run it locally. Verify the /cowork route loads correctly. Report the localhost URL and any build/runtime errors.",
-    "status": "failed",
+    "status": "dispatched",
     "created": "2026-03-12T06:53:37.589Z",
     "createdBy": "dashboard",
-    "dispatched_at": "2026-03-12T06:53:50.283Z",
-    "dispatched_to": "dallas",
-    "failReason": "Orphaned — no process, silent for 300s",
-    "failedAt": "2026-03-12T06:58:50.759Z"
+    "dispatched_at": "2026-03-12T07:02:23.593Z",
+    "dispatched_to": "dallas"
   }
 ]
