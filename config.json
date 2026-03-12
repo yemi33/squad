@@ -82,10 +82,10 @@
   ],
   "engine": {
     "tickInterval": 60000,
-    "staleThreshold": 1800000,
+    "staleThreshold": 21600000,
     "maxConcurrent": 3,
     "inboxConsolidateThreshold": 5,
-    "agentTimeout": 600000,
+    "agentTimeout": 18000000,
     "maxTurns": 100
   },
   "claude": {
