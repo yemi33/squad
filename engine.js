@@ -1440,6 +1440,7 @@ function checkTimeouts(config) {
   // Clean up dead items
   for (const { item, reason } of deadItems) {
     completeDispatch(item.id, 'error', reason);
+    if (item.meta?.item?.id) updateWorkItemStatus(item.meta, 'failed', reason);
     setAgentStatus(item.agent, {
       status: 'idle',
       task: null,
@@ -1466,6 +1467,33 @@ function checkTimeouts(config) {
         setAgentStatus(agentId, { status: 'idle', task: null, started_at: null, completed_at: ts() });
       }
     }
+  }
+
+  // Reconcile: find work items stuck in "dispatched" with no matching active dispatch
+  const activeKeys = new Set((dispatch.active || []).map(d => d.meta?.dispatchKey).filter(Boolean));
+  const allWiPaths = [path.join(SQUAD_DIR, 'work-items.json')];
+  for (const project of getProjects(config)) {
+    allWiPaths.push(projectWorkItemsPath(project));
+  }
+  for (const wiPath of allWiPaths) {
+    const items = safeJson(wiPath);
+    if (!items || !Array.isArray(items)) continue;
+    let changed = false;
+    for (const item of items) {
+      if (item.status !== 'dispatched') continue;
+      // Check if any active dispatch references this item
+      const possibleKeys = [`central-work-${item.id}`, `work-${item.id}`];
+      const isActive = possibleKeys.some(k => activeKeys.has(k)) ||
+        (dispatch.active || []).some(d => d.meta?.item?.id === item.id);
+      if (!isActive) {
+        log('warn', `Reconcile: work item ${item.id} is "dispatched" but no active dispatch found — resetting to failed`);
+        item.status = 'failed';
+        item.failReason = 'Agent died or was killed';
+        item.failedAt = ts();
+        changed = true;
+      }
+    }
+    if (changed) safeWrite(wiPath, items);
   }
 }
 
