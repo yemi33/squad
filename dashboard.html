@@ -301,12 +301,12 @@
     <!-- Work Item Form -->
     <div class="cmd-form active" id="cmd-work-item">
       <div class="cmd-row">
-        <div class="cmd-field" style="flex:3"><label>Title</label><input id="wi-title" placeholder="e.g. Add retry logic to API calls"></div>
+        <div class="cmd-field" style="flex:3"><label>Title</label><input id="wi-title" placeholder="e.g. Add retry logic to API calls" oninput="autoDetectWorkItemType()"></div>
         <div class="cmd-field" style="flex:1"><label>Project</label><select id="wi-project"><option value="">Auto (agent decides)</option></select></div>
       </div>
       <div class="cmd-row">
         <div class="cmd-field" style="flex:1"><label>Type</label>
-          <select id="wi-type"><option value="implement">Implement</option><option value="fix">Fix</option><option value="test">Test</option><option value="explore">Explore</option><option value="review">Review</option></select>
+          <select id="wi-type"><option value="auto">Auto-detect</option><option value="implement">Implement</option><option value="fix">Fix</option><option value="test">Test</option><option value="explore">Explore</option><option value="review">Review</option></select>
         </div>
         <div class="cmd-field" style="flex:1"><label>Priority</label>
           <select id="wi-priority"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select>
@@ -317,7 +317,7 @@
         <button class="cmd-submit" onclick="submitWorkItem()">Add</button>
       </div>
       <div class="cmd-row">
-        <div class="cmd-field"><label>Description (optional)</label><textarea id="wi-desc" rows="2" placeholder="Additional details..."></textarea></div>
+        <div class="cmd-field"><label>Description (optional)</label><textarea id="wi-desc" rows="2" placeholder="Additional details..." oninput="autoDetectWorkItemType()"></textarea></div>
       </div>
       <div class="cmd-toast" id="wi-toast"></div>
     </div>
@@ -1175,19 +1175,44 @@ function showToast(id, msg, ok) {
   setTimeout(() => { el.className = 'cmd-toast'; }, 4000);
 }
 
+function detectWorkItemType(text) {
+  const t = text.toLowerCase();
+  const patterns = [
+    { type: 'explore',  words: ['explore', 'investigate', 'understand', 'analyze', 'audit', 'document', 'architecture', 'how does', 'what is', 'look into', 'research', 'survey', 'map out', 'codebase'] },
+    { type: 'fix',      words: ['fix', 'bug', 'broken', 'crash', 'error', 'issue', 'patch', 'repair', 'resolve', 'regression', 'failing', 'doesn\'t work', 'not working'] },
+    { type: 'review',   words: ['review', 'code review', 'check pr', 'look at pr', 'audit code', 'inspect'] },
+    { type: 'test',     words: ['test', 'write tests', 'add tests', 'unit test', 'e2e test', 'coverage', 'testing'] },
+  ];
+  for (const { type, words } of patterns) {
+    if (words.some(w => t.includes(w))) return type;
+  }
+  return 'implement';
+}
+
+function autoDetectWorkItemType() {
+  const sel = document.getElementById('wi-type');
+  if (sel.value !== 'auto') return; // user picked a specific type, don't override
+  // Just update the placeholder hint — actual resolution happens on submit
+}
+
 async function submitWorkItem() {
   const title = document.getElementById('wi-title').value.trim();
   if (!title) return showToast('wi-toast', 'Title is required', false);
+  const desc = document.getElementById('wi-desc').value.trim();
+  let type = document.getElementById('wi-type').value;
+  if (type === 'auto') {
+    type = detectWorkItemType(title + ' ' + desc);
+  }
   try {
     const res = await fetch('/api/work-items', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title,
         project: document.getElementById('wi-project').value,
-        type: document.getElementById('wi-type').value,
+        type,
         priority: document.getElementById('wi-priority').value,
         scope: document.getElementById('wi-scope').value || undefined,
-        description: document.getElementById('wi-desc').value.trim(),
+        description: desc,
       })
     });
     const data = await res.json();
@@ -1195,6 +1220,7 @@ async function submitWorkItem() {
       showToast('wi-toast', 'Work item added: ' + data.id, true);
       document.getElementById('wi-title').value = '';
       document.getElementById('wi-desc').value = '';
+      document.getElementById('wi-type').value = 'auto';
     } else {
       showToast('wi-toast', data.error || 'Failed to add', false);
     }
