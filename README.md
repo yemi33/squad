@@ -12,6 +12,9 @@ A multi-project AI dev team that runs from `~/.squad/`. Five autonomous agents s
 - **Shares workflows** — agents create reusable runbooks that all other agents can follow
 - **Supports cross-repo tasks** — a single work item can span multiple repositories
 - **Fan-out dispatch** — broad tasks can be split across all idle agents in parallel, each assigned a project
+- **Auto-syncs PRs** — engine scans agent output for PR URLs and updates project trackers automatically
+- **Heartbeat monitoring** — detects dead/hung agents via output file activity, not just timeouts
+- **Auto-cleanup** — stale temp files, orphaned worktrees, zombie processes cleaned every 10 minutes
 
 ## Quick Start
 
@@ -54,6 +57,7 @@ node $env:USERPROFILE\.squad\engine.js status     # Check state
 | `node engine.js dispatch` | Force a dispatch cycle |
 | `node engine.js spawn <agent> <prompt>` | Manually spawn an agent |
 | `node engine.js work <title> [opts-json]` | Add to central work queue |
+| `node engine.js cleanup` | Run cleanup manually (temp files, worktrees, zombies) |
 | `node engine.js mcp-sync` | Manually refresh MCP servers from ~/.claude.json |
 
 ### `dashboard.js` — Web dashboard
@@ -97,14 +101,15 @@ The web dashboard at `http://localhost:7331` provides:
 
 - **Projects bar** — all linked projects with descriptions (hover for full text)
 - **Command Center** — add work items (per-project, auto-route, or fan-out), decisions, and PRD items
-- **Squad Members** — agent cards with status, click for charter/history/output detail
-- **Work Items** — all items from central + per-project queues with status, source, assigned agent, linked PRs, and fan-out badges
+- **Squad Members** — agent cards with status, click for charter/history/output detail panel
+  - **Live Output tab** — real-time streaming output for working agents (auto-refreshes every 3s)
+- **Work Items** — paginated table with status, source, type, priority, assigned agent, linked PRs, fan-out badges, and retry button for failed items
 - **PRD** — gap analysis stats + progress bar with item-level breakdown and linked PRs per item
-- **Pull Requests** — paginated PR tracker with review/build/merge status
+- **Pull Requests** — paginated PR tracker sorted by date, with review/build/merge status
 - **Runbooks** — agent-created reusable workflows, click to view full content
 - **Decisions Inbox + Active Decisions** — learnings and team rules
-- **Agent Metrics** — tasks completed, errors, PRs created/approved/rejected, approval rates
 - **Dispatch Queue + Engine Log** — active/pending work and audit trail
+- **Agent Metrics** — tasks completed, errors, PRs created/approved/rejected, approval rates
 
 ## Multi-Project Config
 
@@ -128,17 +133,17 @@ The `description` field is critical — it tells agents what each repo contains 
 
 ## Work Items
 
+All work items use the shared `playbooks/work-item.md` template, which provides consistent branch naming, worktree workflow, PR creation steps, and status tracking.
+
 **Per-project** — scoped to one repo. Select a project in the Command Center dropdown.
 
-**Central (auto-route)** — agent gets all project descriptions and decides where to work. Use "Auto (agent decides)" in the dropdown, or `node engine.js work "title"`.
-
-Central work items can span multiple repos — the agent works on each sequentially, creating separate PRs per repo with cross-repo dependency notes.
+**Central (auto-route)** — agent gets all project descriptions and decides where to work. Use "Auto (agent decides)" in the dropdown, or `node engine.js work "title"`. Can span multiple repos.
 
 ### Fan-Out (Parallel Multi-Agent)
 
 Set Scope to "Fan-out (all agents)" in the Command Center, or add `"scope": "fan-out"` to the work item JSON.
 
-The engine dispatches the task to **all idle agents simultaneously**, assigning each a project (round-robin). Each agent focuses on their assigned project and writes findings to the inbox. The engine consolidates everything into `decisions.md`.
+The engine dispatches the task to **all idle agents simultaneously**, assigning each a project (round-robin). Each agent focuses on their assigned project and writes findings to the inbox.
 
 ```
 "Explore all codebases and write architecture doc"  scope: fan-out
@@ -149,7 +154,9 @@ The engine dispatches the task to **all idle agents simultaneously**, assigning 
        └─→ Ralph    → OfficeAgent (round-robin wraps)
 ```
 
-Fan-out items show a yellow badge in the dashboard work items table.
+### Failed Work Items
+
+When an agent fails (timeout, crash, error), the engine marks the work item as `failed` with a reason. The dashboard shows a **Retry** button that resets it to `pending` for re-dispatch.
 
 ## Auto-Discovery Pipeline
 
@@ -163,25 +170,71 @@ The engine discovers work from 5 sources, in priority order:
 | 4 | Per-project work items | item's `type` |
 | 5 | Central work items | item's `type` |
 
-Each item passes through dedup (dispatch key per project), cooldown, and agent availability gates before being queued. See `docs/auto-discovery.md` for the full pipeline.
+Each item passes through: dedup (checks pending, active, AND recently completed), cooldown, and agent availability gates. See `docs/auto-discovery.md` for the full pipeline.
 
 ## Agent Execution
 
-When dispatched, each agent gets:
+### Spawn Chain
+
+```
+engine.js
+  → spawn node spawn-agent.js <prompt.md> <sysprompt.md> <args...>
+    → spawn-agent.js resolves claude-code cli.js path
+      → spawn node cli.js -p --system-prompt <content> <args...>
+        → prompt piped via stdin (avoids shell metacharacter issues)
+```
+
+No bash or shell involved — Node spawns Node directly. Prompts with special characters (parentheses, backticks, etc.) are safe.
+
+### What Each Agent Gets
 
 - **System prompt** — identity, charter, history, project context, critical rules, runbook index, team decisions
 - **Task prompt** — rendered playbook with `{{variables}}` filled from config
-- **Working directory** — git worktree in the target project (or project root for read-only tasks)
-- **MCP servers** — all servers from `~/.claude.json` (azure-ado, azure-kusto, etc.) via `--mcp-config`
-- **Full tool access** — Edit, Write, Read, Bash, Glob, Grep, Agent, WebFetch, WebSearch, plus all MCP tools
+- **Working directory** — project root (agent creates worktrees as needed)
+- **MCP servers** — all servers from `~/.claude.json` via `--mcp-config`
+- **Full tool access** — all built-in tools plus all MCP tools
+- **Permission mode** — `bypassPermissions` (no interactive prompts)
+- **Output format** — `stream-json` (real-time streaming for live dashboard + heartbeat)
 
-Agents are spawned as `claude -p <prompt> --system-prompt <sysprompt> --mcp-config <mcp>` processes with max 100 turns.
+### Post-Completion
+
+When an agent finishes:
+1. Output saved to `agents/<name>/output.log`
+2. Agent status updated (done/error)
+3. Work item status updated (done/failed)
+4. PRs auto-synced from output → project's `pull-requests.json`
+5. Agent history updated (last 20 tasks)
+6. Quality metrics updated
+7. Review feedback created for PR authors (if review task)
+8. Learnings checked in `decisions/inbox/`
+9. Temp files cleaned up
 
 ## MCP & Tool Access
 
-On engine start, MCP servers are auto-synced from `~/.claude.json` to `mcp-servers.json`. Agents inherit all MCP servers configured in the user's Claude Code instance. Manually refresh with `node engine.js mcp-sync`.
+On engine start, MCP servers are auto-synced from `~/.claude.json` to `mcp-servers.json`. Agents inherit all MCP servers and skills configured in the user's Claude Code instance. Manually refresh with `node engine.js mcp-sync`.
 
-Currently synced servers are visible in `mcp-servers.json` (gitignored, machine-specific).
+## Health Monitoring
+
+### Heartbeat Check (every tick)
+
+Uses `live-output.log` file modification time as a heartbeat:
+- **Process alive + recent output** → healthy, keep running
+- **Process alive + silent >5min** → hung, kill and mark failed
+- **No process + silent >5min** → orphaned (engine restarted), mark failed
+
+Agents can run for hours as long as they're producing output. The `heartbeatTimeout` (default 5min) only triggers on silence.
+
+### Automated Cleanup (every 10 ticks)
+
+| What | Condition |
+|------|-----------|
+| Temp prompt/sysprompt files | >1 hour old |
+| `live-output.log` for idle agents | >1 hour old |
+| Git worktrees for merged/abandoned PRs | PR status is `merged`/`abandoned`/`completed` |
+| Orphaned worktrees | >24 hours old, no active dispatch references them |
+| Zombie processes | In memory but no matching dispatch |
+
+Manual cleanup: `node engine.js cleanup`
 
 ## Self-Improvement Loop
 
@@ -194,13 +247,13 @@ Agents write findings to `decisions/inbox/`. Engine consolidates at 5+ files int
 `agents/{name}/history.md` tracks last 20 tasks with timestamps, results, projects, and branches. Injected into the agent's system prompt so it remembers past work.
 
 ### 3. Review Feedback Loop
-When a reviewer flags issues, the engine creates `feedback-<author>-from-<reviewer>.md` in the inbox. The PR author sees the feedback in their next task, learning from specific review findings.
+When a reviewer flags issues, the engine creates `feedback-<author>-from-<reviewer>.md` in the inbox. The PR author sees the feedback in their next task.
 
 ### 4. Quality Metrics
 `engine/metrics.json` tracks per agent: tasks completed, errors, PRs created/approved/rejected, reviews done. Visible in CLI (`status`) and dashboard with color-coded approval rates.
 
 ### 5. Runbooks
-Agents save repeatable multi-step procedures to `runbooks/<name>.md` with frontmatter (name, trigger, project, author). Engine builds an index injected into all prompts. Future agents match triggers to their task and follow the steps. Visible in dashboard alongside decisions.
+Agents save repeatable workflows to `runbooks/<name>.md` with frontmatter. Engine builds an index injected into all prompts. Visible in dashboard alongside decisions.
 
 See `docs/self-improvement.md` for the full breakdown.
 
@@ -220,13 +273,14 @@ Routing rules in `routing.md`. Charters in `agents/{name}/charter.md`.
 
 | Playbook | Purpose |
 |----------|---------|
+| `work-item.md` | Shared template for all work items (central + per-project) |
 | `implement.md` | Build a PRD item in a git worktree, create PR |
 | `review.md` | Review a PR, post findings to ADO |
 | `fix.md` | Fix review feedback on existing PR branch |
 | `analyze.md` | Generate PRD gap analysis in a worktree |
 | `explore.md` | Read-only codebase exploration |
 
-All playbooks use `{{template_variables}}` filled from project config — no hardcoded project names.
+All playbooks use `{{template_variables}}` filled from project config. The `work-item.md` playbook uses `{{scope_section}}` to inject project-specific or multi-project context.
 
 ## Portability
 
@@ -244,6 +298,12 @@ To move to a new machine: copy `~/.squad/`, delete `engine/control.json`, re-run
 ~/.squad/
   squad.js               <- CLI: init, add, remove, list projects
   engine.js              <- Engine daemon
+  engine/
+    spawn-agent.js       <- Agent spawn wrapper (resolves claude cli.js)
+    control.json         <- running/paused/stopped
+    dispatch.json        <- pending/active/completed queue
+    log.json             <- Audit trail (capped at 500)
+    metrics.json         <- Per-agent quality metrics
   dashboard.js           <- Web dashboard server
   dashboard.html         <- Dashboard UI
   config.json            <- projects[], agents, engine, claude settings
@@ -253,12 +313,8 @@ To move to a new machine: copy `~/.squad/`, delete `engine/control.json`, re-run
   decisions.md           <- Team rules + consolidated learnings
   work-items.json        <- Central work queue (agent decides which project)
   TODO.md                <- Future improvements roadmap
-  engine/
-    control.json         <- running/paused/stopped
-    dispatch.json        <- pending/active/completed queue
-    log.json             <- Audit trail (capped at 500)
-    metrics.json         <- Per-agent quality metrics
   playbooks/
+    work-item.md         <- Shared work item template
     implement.md         <- Build a PRD item
     review.md            <- Review a PR
     fix.md               <- Fix review feedback
@@ -269,6 +325,8 @@ To move to a new machine: copy `~/.squad/`, delete `engine/control.json`, re-run
       charter.md         <- Agent identity and boundaries
       status.json        <- Current state (runtime)
       history.md         <- Task history (last 20, runtime)
+      live-output.log    <- Streaming output while working (runtime)
+      output.log         <- Final output after completion (runtime)
   runbooks/
     README.md            <- Runbook format guide
     <name>.md            <- Agent-created reusable workflows
@@ -278,8 +336,9 @@ To move to a new machine: copy `~/.squad/`, delete `engine/control.json`, re-run
     inbox/               <- Agent findings drop-box
     archive/             <- Processed inbox files
   docs/
-    auto-discovery.md    <- Auto-discovery pipeline docs
-    self-improvement.md  <- Self-improvement loop docs
+    auto-discovery.md              <- Auto-discovery pipeline docs
+    self-improvement.md            <- Self-improvement loop docs
+    blog-first-successful-dispatch.md  <- Debugging saga blog post
 
 Each linked project keeps locally:
   <project>/.squad/
