@@ -5,6 +5,16 @@
 - [ ] **Handoff protocol** — agent can mark a task as "blocked on X" or "ready for Y", engine picks up dependencies and sequences dispatch accordingly
 - [ ] **Shared scratchpad** — in-progress workspace where agents working on related tasks can leave notes for each other without waiting for inbox consolidation
 
+## Proactive / Idle Agent Work
+- [ ] **Idle task system** — when all work sources are empty, engine assigns low-priority background tasks based on agent role:
+  - Ripley: explore repos that haven't been explored recently, audit architecture docs
+  - Lambert: check if PRD is stale, review docs coverage, scan for undocumented features
+  - Dallas/Ralph: run test suites, check for flaky tests, lint passes
+  - Rebecca: audit CI pipelines, check dependency versions, review infra health
+- [ ] **Proactive work discovery** — agents can propose work items themselves (e.g., "I noticed this module has no tests") by writing to a `proposals/` inbox, engine reviews and promotes to work queue
+- [ ] **Scheduled tasks** — cron-style recurring work (e.g., "every Monday Lambert regenerates the PRD", "every day Ripley explores recent commits")
+- [ ] **Idle threshold alert** — if all agents are idle for >N minutes, notify via Teams/dashboard
+
 ## Routing Improvements
 - [ ] **Adaptive routing** — use quality metrics (approval rate, error rate) to adjust routing preferences. Deprioritize underperforming agents for implementation, promote high-performers.
 - [ ] **Auto-escalation** — if an agent errors 3 times in a row, pause their dispatch and alert via dashboard/Teams
