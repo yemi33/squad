@@ -46,7 +46,8 @@
   .status-badge.idle { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
   .status-badge.working { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid var(--yellow); animation: pulse 1.5s infinite; }
   .status-badge.done { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }
-  .agent-action { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agent-action { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .agent-card { min-width: 0; }
   .agent-emoji { font-size: 20px; margin-right: 4px; }
   .click-hint { font-size: 10px; color: var(--border); margin-top: 6px; }
 
@@ -302,6 +303,8 @@
       <div class="cmd-row">
         <div class="cmd-field" style="flex:3"><label>Title</label><input id="wi-title" placeholder="e.g. Add retry logic to API calls"></div>
         <div class="cmd-field" style="flex:1"><label>Project</label><select id="wi-project"><option value="">Auto (agent decides)</option></select></div>
+      </div>
+      <div class="cmd-row">
         <div class="cmd-field" style="flex:1"><label>Type</label>
           <select id="wi-type"><option value="implement">Implement</option><option value="fix">Fix</option><option value="test">Test</option><option value="explore">Explore</option><option value="review">Review</option></select>
         </div>

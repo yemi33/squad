@@ -99,7 +99,9 @@ function getAgents() {
     }
 
     const chartered = fs.existsSync(path.join(SQUAD_DIR, 'agents', a.id, 'charter.md'));
-    return { ...a, status, lastAction, currentTask, chartered, inboxCount: inboxFiles.length };
+    // Truncate lastAction to prevent UI overflow from corrupted data
+    if (lastAction.length > 120) lastAction = lastAction.slice(0, 120) + '...';
+    return { ...a, status, lastAction, currentTask: (currentTask || '').slice(0, 200), chartered, inboxCount: inboxFiles.length };
   });
 }
 
