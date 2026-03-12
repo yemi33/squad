@@ -709,24 +709,37 @@ function updateWorkItemStatus(meta, status, reason) {
 // ─── PR Sync from Output ─────────────────────────────────────────────────────
 
 function syncPrsFromOutput(output, agentId, meta, config) {
-  // Scan agent output for PR URLs and add to the correct project's pull-requests.json
-  // Matches patterns like: pullrequest/4959180, PR #4959180, PR-4959180
+  // Scan agent output for PR URLs — ONLY match full ADO PR URLs to avoid false positives
+  // Stream-json output contains many numbers that could look like PR IDs, so we
+  // only trust the full URL pattern: .../pullrequest/NNNNN
   const prMatches = new Set();
-  const urlPattern = /pullrequest\/(\d+)/g;
-  const idPattern = /PR[# -]*(\d{5,})/gi;
+  const urlPattern = /(?:visualstudio\.com|dev\.azure\.com)[^\s"]*?pullrequest\/(\d+)/g;
   let match;
-  while ((match = urlPattern.exec(output)) !== null) prMatches.add(match[1]);
-  while ((match = idPattern.exec(output)) !== null) prMatches.add(match[1]);
 
-  if (prMatches.size === 0) return;
+  // First extract the "result" text from stream-json (the agent's final summary)
+  // This is more reliable than scanning raw stream-json events
+  let resultText = '';
+  try {
+    const lines = output.split('\n');
+    for (const line of lines) {
+      if (line.includes('"type":"result"')) {
+        const parsed = JSON.parse(line);
+        resultText = parsed.result || '';
+        break;
+      }
+    }
+  } catch {}
 
-  // Also scan inbox files for this agent today
+  // Scan the result text (clean agent output) for PR URLs
+  const scanText = resultText || '';
+  while ((match = urlPattern.exec(scanText)) !== null) prMatches.add(match[1]);
+
+  // Also scan inbox files for this agent today (these are clean markdown, not stream-json)
   const today = dateStamp();
   const inboxFiles = getInboxFiles().filter(f => f.includes(agentId) && f.includes(today));
   for (const f of inboxFiles) {
     const content = safeRead(path.join(INBOX_DIR, f));
     while ((match = urlPattern.exec(content)) !== null) prMatches.add(match[1]);
-    while ((match = idPattern.exec(content)) !== null) prMatches.add(match[1]);
   }
 
   if (prMatches.size === 0) return;
