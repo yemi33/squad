@@ -361,11 +361,15 @@ function renderPlaybook(type, vars) {
   content += `- Patterns you discovered or established\n`;
   content += `- Gotchas or warnings for future agents\n`;
   content += `- Conventions to follow\n\n`;
-  content += `If you discovered a **repeatable workflow** (multi-step procedure that other agents should follow in similar situations), `;
-  content += `save it as a skill. Two locations depending on scope:\n\n`;
-  content += `- **Squad-wide skill** (applies across projects): write to \`${SKILLS_DIR}/<short-name>.md\`\n`;
-  content += `- **Project-specific skill** (applies to one repo): write to \`<project-path>/.claude/skills/<short-name>.md\` — but since this modifies the repo, you MUST create a PR for it (worktree + branch + PR, same as any code change)\n\n`;
-  content += `Use the format documented in \`${SKILLS_DIR}/README.md\`.\n`;
+  content += `### Skill Extraction (IMPORTANT)\n\n`;
+  content += `If during this task you discovered a **repeatable workflow** — a multi-step procedure, workaround, build process, or pattern that other agents should follow in similar situations — output it as a fenced skill block. The engine will automatically extract it.\n\n`;
+  content += `Format your skill as a fenced code block with the \`skill\` language tag:\n\n`;
+  content += '````\n```skill\n';
+  content += `---\nname: short-descriptive-name\ndescription: One-line description of what this skill does\nallowed-tools: Bash, Read, Edit\ntrigger: when should an agent use this\nscope: squad\nproject: any\n---\n\n# Skill Title\n\n## Steps\n1. ...\n2. ...\n\n## Notes\n...\n`;
+  content += '```\n````\n\n';
+  content += `- Set \`scope: squad\` for cross-project skills (engine writes to \`${SKILLS_DIR}/\` automatically)\n`;
+  content += `- Set \`scope: project\` + \`project: <name>\` for repo-specific skills (engine queues a PR)\n`;
+  content += `- Only output a skill block if you genuinely discovered something reusable — don't force it\n`;
 
   // Inject project-level variables from config
   const config = getConfig();
@@ -608,6 +612,11 @@ function spawnAgent(dispatchItem, config) {
 
     // Check for learnings
     checkForLearnings(agentId, config.agents[agentId], dispatchItem.task);
+
+    // Extract skills from output
+    if (code === 0) {
+      extractSkillsFromOutput(stdout, agentId, dispatchItem, config);
+    }
 
     // Update agent history
     updateAgentHistory(agentId, dispatchItem, code === 0 ? 'success' : 'error');
@@ -984,6 +993,107 @@ function checkForLearnings(agentId, agentInfo, taskDesc) {
   }
 
   log('warn', `${agentInfo?.name || agentId} didn't write learnings — no follow-up queued`);
+}
+
+/**
+ * Extract skill candidates from agent output.
+ * Agents are prompted to output a ```skill block when they discover a reusable workflow.
+ * The engine parses it out and writes the skill file automatically.
+ */
+function extractSkillsFromOutput(output, agentId, dispatchItem, config) {
+  if (!output) return;
+
+  // Parse stream-json output to extract assistant text
+  let fullText = '';
+  for (const line of output.split('\n')) {
+    try {
+      const j = JSON.parse(line);
+      if (j.type === 'assistant' && j.message?.content) {
+        for (const c of j.message.content) {
+          if (c.type === 'text') fullText += c.text + '\n';
+        }
+      }
+    } catch {}
+  }
+  if (!fullText) fullText = output; // fallback for non-json output
+
+  // Look for ```skill blocks
+  const skillBlocks = [];
+  const skillRegex = /```skill\s*\n([\s\S]*?)```/g;
+  let match;
+  while ((match = skillRegex.exec(fullText)) !== null) {
+    skillBlocks.push(match[1].trim());
+  }
+
+  if (skillBlocks.length === 0) return;
+
+  const agentName = config.agents[agentId]?.name || agentId;
+
+  for (const block of skillBlocks) {
+    // Parse the skill content — expect frontmatter
+    const fmMatch = block.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+    if (!fmMatch) {
+      log('warn', `Skill block from ${agentName} has no frontmatter, skipping`);
+      continue;
+    }
+
+    const fm = fmMatch[1];
+    const body = fmMatch[2];
+    const m = (key) => { const r = fm.match(new RegExp(`^${key}:\\s*(.+)$`, 'm')); return r ? r[1].trim() : ''; };
+    const name = m('name');
+    if (!name) {
+      log('warn', `Skill block from ${agentName} has no name, skipping`);
+      continue;
+    }
+
+    const scope = m('scope') || 'squad';
+    const project = m('project');
+
+    // Ensure author and created are set
+    let enrichedBlock = block;
+    if (!m('author')) {
+      enrichedBlock = enrichedBlock.replace('---\n', `---\nauthor: ${agentName}\n`);
+    }
+    if (!m('created')) {
+      enrichedBlock = enrichedBlock.replace('---\n', `---\ncreated: ${dateStamp()}\n`);
+    }
+
+    const filename = name.replace(/[^a-z0-9-]/g, '-') + '.md';
+
+    if (scope === 'project' && project) {
+      // Project-level skill — don't write directly, queue a work item to PR it
+      const proj = getProjects(config).find(p => p.name === project);
+      if (proj) {
+        const centralPath = path.join(SQUAD_DIR, 'work-items.json');
+        const items = safeJson(centralPath) || [];
+        const alreadyExists = items.some(i => i.title === `Add skill: ${name}` && i.status !== 'failed');
+        if (!alreadyExists) {
+          const skillId = `SK${String(items.filter(i => i.id?.startsWith('SK')).length + 1).padStart(3, '0')}`;
+          items.push({
+            id: skillId,
+            type: 'implement',
+            title: `Add skill: ${name}`,
+            description: `Create project-level skill \`${filename}\` in ${project}.\n\nWrite this file to \`${proj.localPath}/.claude/skills/${filename}\` via a PR.\n\n## Skill Content\n\n\`\`\`\n${enrichedBlock}\n\`\`\``,
+            priority: 'low',
+            status: 'queued',
+            created: ts(),
+            createdBy: `engine:skill-extraction:${agentName}`
+          });
+          safeWrite(centralPath, items);
+          log('info', `Queued work item ${skillId} to PR project skill "${name}" into ${project}`);
+        }
+      }
+    } else {
+      // Squad-level skill — write directly
+      const skillPath = path.join(SKILLS_DIR, filename);
+      if (!fs.existsSync(skillPath)) {
+        safeWrite(skillPath, enrichedBlock);
+        log('info', `Extracted squad skill "${name}" from ${agentName} → ${filename}`);
+      } else {
+        log('info', `Squad skill "${name}" already exists, skipping`);
+      }
+    }
+  }
 }
 
 function updateAgentHistory(agentId, dispatchItem, result) {
