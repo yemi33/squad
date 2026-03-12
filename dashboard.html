@@ -1106,7 +1106,7 @@ function wiRow(item) {
     '</td>' +
     '<td>' +
       (item.completedAgents && item.completedAgents.length > 0
-        ? '<span class="pr-agent" style="color:var(--green)">' + escHtml(item.completedAgents.join(', ')) + '</span>'
+        ? '<span class="pr-agent">' + escHtml(item.completedAgents.join(', ')) + '</span>'
         : '<span class="pr-agent">' + escHtml(item.dispatched_to || '—') + '</span>') +
       (item.failReason ? '<span style="display:block;font-size:9px;color:var(--red)" title="' + escHtml(item.failReason) + '">' + escHtml(item.failReason.slice(0, 30)) + '</span>' : '') +
     '</td>' +
