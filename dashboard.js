@@ -526,6 +526,25 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
+  // GET /api/agent/:id/live — tail live output for a working agent
+  const liveMatch = req.url.match(/^\/api\/agent\/([\w-]+)\/live(?:\?.*)?$/);
+  if (liveMatch && req.method === 'GET') {
+    const agentId = liveMatch[1];
+    const livePath = path.join(SQUAD_DIR, 'agents', agentId, 'live-output.log');
+    const content = safeRead(livePath);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (!content) {
+      res.end('No live output. Agent may not be running.');
+    } else {
+      // Return last N bytes via ?tail=N param (default last 8KB)
+      const params = new URL(req.url, 'http://localhost').searchParams;
+      const tailBytes = parseInt(params.get('tail')) || 8192;
+      res.end(content.length > tailBytes ? content.slice(-tailBytes) : content);
+    }
+    return;
+  }
+
   // GET /api/runbook?file=<name>.md
   if (req.method === 'GET' && req.url.startsWith('/api/runbook?')) {
     const params = new URL(req.url, 'http://localhost').searchParams;

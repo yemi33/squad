@@ -509,12 +509,20 @@ function spawnAgent(dispatchItem, config) {
   let stdout = '';
   let stderr = '';
 
+  // Live output file — written as data arrives so dashboard can tail it
+  const liveOutputPath = path.join(AGENTS_DIR, agentId, 'live-output.log');
+  safeWrite(liveOutputPath, `# Live output for ${agentId} — ${id}\n# Started: ${startedAt}\n# Task: ${dispatchItem.task}\n\n`);
+
   proc.stdout.on('data', (data) => {
-    if (stdout.length < MAX_OUTPUT) stdout += data.toString().slice(0, MAX_OUTPUT - stdout.length);
+    const chunk = data.toString();
+    if (stdout.length < MAX_OUTPUT) stdout += chunk.slice(0, MAX_OUTPUT - stdout.length);
+    try { fs.appendFileSync(liveOutputPath, chunk); } catch {}
   });
 
   proc.stderr.on('data', (data) => {
-    if (stderr.length < MAX_OUTPUT) stderr += data.toString().slice(0, MAX_OUTPUT - stderr.length);
+    const chunk = data.toString();
+    if (stderr.length < MAX_OUTPUT) stderr += chunk.slice(0, MAX_OUTPUT - stderr.length);
+    try { fs.appendFileSync(liveOutputPath, '[stderr] ' + chunk); } catch {}
   });
 
   proc.on('close', (code) => {

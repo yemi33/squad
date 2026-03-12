@@ -487,11 +487,14 @@ function closeDetail() {
   document.getElementById('detail-overlay').classList.remove('open');
   document.getElementById('detail-panel').classList.remove('open');
   currentAgentId = null;
+  stopLivePolling();
 }
 
 function renderDetailTabs(detail) {
+  const isWorking = detail.statusData?.status === 'working';
   const tabs = [
     { id: 'thought-process', label: 'Thought Process' },
+    ...(isWorking ? [{ id: 'live', label: 'Live Output' }] : []),
     { id: 'charter', label: 'Charter' },
     { id: 'history', label: 'History' },
     { id: 'output', label: 'Output Log' },
@@ -539,6 +542,13 @@ function renderDetailContent(detail, tab) {
     }
 
     el.innerHTML = html;
+  } else if (tab === 'live') {
+    el.innerHTML = '<div class="section" id="live-output" style="max-height:60vh;overflow-y:auto;font-size:11px;line-height:1.6">Loading live output...</div>' +
+      '<div style="margin-top:8px;display:flex;gap:8px;align-items:center">' +
+        '<span class="pulse"></span><span style="font-size:11px;color:var(--green)">Auto-refreshing every 3s</span>' +
+        '<button class="pr-pager-btn" onclick="refreshLiveOutput()" style="font-size:10px">Refresh now</button>' +
+      '</div>';
+    startLivePolling();
   } else if (tab === 'charter') {
     el.innerHTML = '<div class="section">' + escHtml(detail.charter || 'No charter found.') + '</div>';
   } else if (tab === 'history') {
@@ -546,6 +556,31 @@ function renderDetailContent(detail, tab) {
   } else if (tab === 'output') {
     el.innerHTML = '<div class="section">' + escHtml(detail.outputLog || 'No output log. The coordinator will save agent output here when tasks complete.') + '</div>';
   }
+}
+
+let livePollingInterval = null;
+
+function startLivePolling() {
+  stopLivePolling();
+  refreshLiveOutput();
+  livePollingInterval = setInterval(refreshLiveOutput, 3000);
+}
+
+function stopLivePolling() {
+  if (livePollingInterval) { clearInterval(livePollingInterval); livePollingInterval = null; }
+}
+
+async function refreshLiveOutput() {
+  if (!currentAgentId || currentTab !== 'live') { stopLivePolling(); return; }
+  try {
+    const text = await fetch('/api/agent/' + currentAgentId + '/live?tail=16384').then(r => r.text());
+    const el = document.getElementById('live-output');
+    if (el) {
+      const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+      el.textContent = text;
+      if (wasAtBottom) el.scrollTop = el.scrollHeight;
+    }
+  } catch {}
 }
 
 // -- Main Renderers --
