@@ -1,0 +1,53 @@
+{
+  "project": {
+    "name": "YOUR_PROJECT_NAME",
+    "repositoryId": "YOUR_ADO_REPO_ID",
+    "adoOrg": "YOUR_ADO_ORG",
+    "adoProject": "YOUR_ADO_PROJECT",
+    "repoName": "YOUR_REPO_NAME",
+    "mainBranch": "main",
+    "prUrlBase": "https://YOUR_ADO_ORG.visualstudio.com/DefaultCollection/YOUR_ADO_PROJECT/_git/YOUR_REPO_NAME/pullrequest/"
+  },
+  "engine": {
+    "tickInterval": 60000,
+    "staleThreshold": 1800000,
+    "maxConcurrent": 3,
+    "inboxConsolidateThreshold": 5,
+    "agentTimeout": 600000,
+    "maxTurns": 100,
+    "worktreeRoot": "../worktrees"
+  },
+  "claude": {
+    "binary": "claude",
+    "outputFormat": "json",
+    "allowedTools": "Edit,Write,Read,Bash,Glob,Grep,Agent,WebFetch,WebSearch"
+  },
+  "workSources": {
+    "prd": {
+      "enabled": true,
+      "path": "docs/prd-gaps.json",
+      "description": "PRD gap analysis — missing features become implement tasks",
+      "itemFilter": { "status": ["missing", "planned"] },
+      "cooldownMinutes": 30
+    },
+    "pullRequests": {
+      "enabled": true,
+      "path": ".squad/pull-requests.json",
+      "description": "PR tracker — pending PRs become review tasks, changes-requested become fix tasks",
+      "cooldownMinutes": 30
+    },
+    "workItems": {
+      "enabled": true,
+      "path": ".squad/work-items.json",
+      "description": "Manual work items queue — arbitrary tasks added by the coordinator",
+      "cooldownMinutes": 0
+    }
+  },
+  "agents": {
+    "ripley":  { "name": "Ripley",  "emoji": "🏗️",  "role": "Lead / Explorer", "skills": ["architecture", "codebase-exploration", "design-review"] },
+    "dallas":  { "name": "Dallas",  "emoji": "🔧",  "role": "Engineer", "skills": ["implementation", "typescript", "docker", "testing"] },
+    "lambert": { "name": "Lambert", "emoji": "📊",  "role": "Analyst", "skills": ["gap-analysis", "requirements", "documentation"] },
+    "rebecca": { "name": "Rebecca", "emoji": "🧠",  "role": "Architect", "skills": ["system-design", "api-design", "scalability", "implementation"] },
+    "ralph":   { "name": "Ralph",   "emoji": "⚙️",   "role": "Engineer", "skills": ["implementation", "bug-fixes", "testing", "scaffolding"] }
+  }
+}

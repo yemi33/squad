@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Squad Mission Control — OfficeAgent</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👽</text></svg>">
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --green: #3fb950; --yellow: #d29922;
+    --blue: #58a6ff; --purple: #bc8cff; --red: #f85149; --orange: #e3b341;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+
+  header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100;
+  }
+  header h1 { font-size: 16px; font-weight: 600; color: var(--blue); letter-spacing: 0.5px; }
+  header h1 span { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .timestamp { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  section { padding: 20px 24px; border-bottom: 1px solid var(--border); }
+  section:nth-child(odd) { border-right: 1px solid var(--border); }
+  section h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  section h2 .count { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 1px 7px; font-size: 11px; color: var(--text); }
+
+  .agents { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .agent-card {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; transition: all 0.3s; cursor: pointer;
+  }
+  .agent-card:hover { border-color: var(--blue); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  .agent-card.working { border-color: var(--yellow); }
+  .agent-card.done { border-color: var(--green); }
+  .agent-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .agent-name { font-weight: 600; font-size: 14px; }
+  .agent-role { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+  .status-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .status-badge.idle { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+  .status-badge.working { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid var(--yellow); animation: pulse 1.5s infinite; }
+  .status-badge.done { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }
+  .agent-action { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agent-emoji { font-size: 20px; margin-right: 4px; }
+  .click-hint { font-size: 10px; color: var(--border); margin-top: 6px; }
+
+  .inbox-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+
+  /* PRD Progress */
+  .prd-progress-bar { width: 100%; height: 20px; background: var(--bg); border-radius: 10px; overflow: hidden; display: flex; margin-bottom: 12px; border: 1px solid var(--border); }
+  .prd-progress-bar .seg { height: 100%; transition: width 0.5s ease; }
+  .prd-progress-bar .seg.complete { background: var(--green); }
+  .prd-progress-bar .seg.pr-created { background: #2ea043; }
+  .prd-progress-bar .seg.in-progress { background: var(--yellow); }
+  .prd-progress-bar .seg.planned { background: var(--blue); opacity: 0.4; }
+  .prd-progress-bar .seg.missing { background: var(--border); }
+  .prd-progress-pct { font-size: 22px; font-weight: 700; color: var(--green); margin-bottom: 8px; }
+  .prd-progress-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+  .prd-legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+  .prd-legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+  .prd-legend-dot.complete { background: var(--green); }
+  .prd-legend-dot.pr-created { background: #2ea043; }
+  .prd-legend-dot.in-progress { background: var(--yellow); }
+  .prd-legend-dot.planned { background: var(--blue); opacity: 0.4; }
+  .prd-legend-dot.missing { background: var(--border); }
+  .prd-items-list { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
+  .prd-item-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 4px; font-size: 11px; background: var(--surface2); border: 1px solid var(--border); }
+  .prd-item-id { font-family: Consolas, monospace; color: var(--blue); min-width: 36px; }
+  .prd-item-name { flex: 1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .prd-item-priority { font-size: 10px; padding: 1px 6px; border-radius: 8px; }
+  .prd-item-priority.high { background: rgba(248,81,73,0.15); color: var(--red); }
+  .prd-item-priority.medium { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .prd-item-priority.low { background: rgba(139,148,158,0.15); color: var(--muted); }
+
+  .inbox-item { background: var(--surface2); border: 1px solid var(--border); border-left: 3px solid var(--purple); border-radius: 4px; padding: 10px 12px; cursor: pointer; }
+  .inbox-item:hover { border-color: var(--blue); border-left-color: var(--blue); }
+  .inbox-name { font-weight: 500; font-size: 12px; color: var(--purple); margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .inbox-preview { font-size: 11px; color: var(--muted); line-height: 1.5; max-height: 60px; overflow: hidden; }
+
+  .prd-panel, .pr-panel { grid-column: 1 / -1; border-bottom: 1px solid var(--border); }
+  .prd-inner { display: flex; gap: 16px; align-items: flex-start; }
+  .prd-stats { display: flex; gap: 16px; }
+  .prd-stat { text-align: center; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; }
+  .prd-stat-num { font-size: 28px; font-weight: 700; color: var(--blue); }
+  .prd-stat-num.green { color: var(--green); }
+  .prd-stat-num.red { color: var(--red); }
+  .prd-stat-num.orange { color: var(--orange); }
+  .prd-stat-label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .prd-summary { flex: 1; font-size: 13px; color: var(--muted); line-height: 1.6; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .prd-pending { color: var(--yellow); font-style: italic; }
+
+  /* PR Tracker */
+  .pr-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .pr-table th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .pr-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .pr-table tr:last-child td { border-bottom: none; }
+  .pr-table tr:hover { background: var(--surface2); }
+  .pr-title { color: var(--blue); text-decoration: none; font-weight: 500; }
+  .pr-title:hover { text-decoration: underline; }
+  .pr-id { color: var(--muted); font-family: Consolas, monospace; font-size: 11px; }
+  .pr-agent { font-size: 11px; color: var(--text); }
+  .pr-branch { font-family: Consolas, monospace; font-size: 10px; color: var(--muted); background: var(--bg); padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border); }
+  .pr-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+  .pr-badge.draft { background: rgba(139,148,158,0.15); color: var(--muted); border: 1px solid var(--border); }
+  .pr-badge.active { background: rgba(88,166,255,0.15); color: var(--blue); border: 1px solid var(--blue); }
+  .pr-badge.approved { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }
+  .pr-badge.rejected { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }
+  .pr-badge.merged { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid var(--purple); }
+  .pr-badge.building { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid var(--yellow); animation: pulse 1.5s infinite; }
+  .pr-badge.build-pass { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }
+  .pr-badge.build-fail { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }
+  .pr-badge.no-build { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+  .pr-empty { color: var(--muted); font-style: italic; font-size: 12px; padding: 12px 0; }
+  .pr-pager { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .pr-pager-btns { display: flex; gap: 6px; }
+  .pr-pager-btn {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+    font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer; transition: all 0.2s;
+  }
+  .pr-pager-btn:hover { color: var(--text); border-color: var(--text); }
+  .pr-pager-btn.disabled { opacity: 0.3; pointer-events: none; }
+  .pr-pager-btn.see-all { color: var(--blue); border-color: var(--blue); }
+  .pr-pager-btn.see-all:hover { background: rgba(88,166,255,0.1); }
+  .pr-page-info { font-size: 11px; color: var(--muted); }
+  .pr-date { font-size: 11px; color: var(--muted); }
+
+  .archive-btn {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+    font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-left: auto;
+  }
+  .archive-btn:hover { color: var(--purple); border-color: var(--purple); }
+  .archive-list { display: flex; flex-direction: column; gap: 8px; }
+  .archive-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; cursor: pointer; transition: all 0.2s; }
+  .archive-card:hover { border-color: var(--purple); }
+  .archive-card h4 { color: var(--purple); font-size: 13px; margin-bottom: 6px; }
+  .archive-card p { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .archive-detail-section { margin-bottom: 16px; }
+  .archive-detail-section h4 { color: var(--blue); font-size: 13px; margin-bottom: 8px; font-family: 'Segoe UI', sans-serif; }
+  .archive-feature { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; margin-bottom: 6px; }
+  .archive-feature .feat-id { font-family: Consolas, monospace; color: var(--blue); font-size: 11px; }
+  .archive-feature .feat-name { font-weight: 600; font-size: 12px; color: var(--text); margin: 4px 0; }
+  .archive-feature .feat-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .archive-feature .feat-meta { font-size: 10px; color: var(--muted); margin-top: 6px; display: flex; gap: 12px; }
+  .archive-question { background: var(--surface2); border: 1px solid var(--border); border-left: 3px solid var(--orange); border-radius: 4px; padding: 10px 12px; margin-bottom: 6px; }
+  .archive-question .q-id { font-family: Consolas, monospace; color: var(--orange); font-size: 11px; }
+  .archive-question .q-text { font-size: 12px; color: var(--text); margin: 4px 0; }
+  .archive-question .q-context { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .empty { color: var(--muted); font-style: italic; font-size: 12px; padding: 8px 0; }
+
+  /* Command Center */
+  .cmd-center { grid-column: 1 / -1; }
+  .cmd-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .cmd-tab {
+    padding: 8px 16px; font-size: 12px; font-weight: 500; color: var(--muted);
+    cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s;
+  }
+  .cmd-tab:hover { color: var(--text); }
+  .cmd-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+  .cmd-form { display: none; }
+  .cmd-form.active { display: block; }
+  .cmd-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: flex-end; }
+  .cmd-field { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+  .cmd-field label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); font-weight: 600; }
+  .cmd-field input, .cmd-field select, .cmd-field textarea {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 10px; border-radius: 4px; font-size: 12px; font-family: inherit;
+    outline: none; transition: border-color 0.2s;
+  }
+  .cmd-field input:focus, .cmd-field select:focus, .cmd-field textarea:focus { border-color: var(--blue); }
+  .cmd-field textarea { resize: vertical; min-height: 60px; }
+  .cmd-submit {
+    background: var(--blue); color: #fff; border: none; padding: 8px 20px;
+    border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: opacity 0.2s; white-space: nowrap;
+  }
+  .cmd-submit:hover { opacity: 0.85; }
+  .cmd-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+  .cmd-toast {
+    display: none; padding: 8px 14px; border-radius: 4px; font-size: 12px;
+    margin-top: 10px; animation: fadeIn 0.3s;
+  }
+  .cmd-toast.success { display: block; background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }
+  .cmd-toast.error { display: block; background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:translateY(0)} }
+
+  /* Engine Status */
+  .engine-badge { padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 12px; }
+  .engine-badge.running { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }
+  .engine-badge.paused { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid var(--yellow); }
+  .engine-badge.stopped { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }
+
+  /* Dispatch Queue */
+  .dispatch-stats { display: flex; gap: 16px; margin-bottom: 14px; }
+  .dispatch-stat { text-align: center; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 18px; }
+  .dispatch-stat-num { font-size: 24px; font-weight: 700; }
+  .dispatch-stat-num.blue { color: var(--blue); }
+  .dispatch-stat-num.green { color: var(--green); }
+  .dispatch-stat-num.yellow { color: var(--yellow); }
+  .dispatch-stat-num.muted { color: var(--muted); }
+  .dispatch-stat-label { font-size: 10px; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .dispatch-list { display: flex; flex-direction: column; gap: 6px; }
+  .dispatch-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+  .dispatch-type { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 8px; text-transform: uppercase; }
+  .dispatch-type.implement { background: rgba(88,166,255,0.15); color: var(--blue); }
+  .dispatch-type.review { background: rgba(188,140,255,0.15); color: var(--purple); }
+  .dispatch-type.fix { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .dispatch-type.analyze { background: rgba(63,185,80,0.15); color: var(--green); }
+  .dispatch-type.explore { background: rgba(139,148,158,0.15); color: var(--muted); }
+  .dispatch-type.manual { background: rgba(139,148,158,0.15); color: var(--muted); }
+  .dispatch-agent { font-weight: 600; color: var(--text); }
+  .dispatch-task { flex: 1; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dispatch-time { font-size: 10px; color: var(--border); }
+
+  /* Engine Log */
+  .log-list { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .log-entry { font-size: 11px; padding: 4px 8px; border-bottom: 1px solid rgba(48,54,61,0.4); font-family: Consolas, monospace; }
+  .log-ts { color: var(--muted); }
+  .log-level-info { color: var(--blue); }
+  .log-level-warn { color: var(--yellow); }
+  .log-level-error { color: var(--red); }
+
+  /* Agent Detail Panel (slide-in) */
+  .detail-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 300; }
+  .detail-overlay.open { display: block; }
+  .detail-panel {
+    position: fixed; top: 0; right: 0; width: 55%; max-width: 750px; height: 100vh;
+    background: var(--surface); border-left: 1px solid var(--border);
+    z-index: 301; display: flex; flex-direction: column;
+    transform: translateX(100%); transition: transform 0.25s ease;
+  }
+  .detail-panel.open { transform: translateX(0); }
+  .detail-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;
+  }
+  .detail-header h3 { font-size: 16px; color: var(--blue); display: flex; align-items: center; gap: 8px; }
+  .detail-close { background: none; border: 1px solid var(--border); color: var(--muted); font-size: 12px; cursor: pointer; padding: 4px 12px; border-radius: 4px; }
+  .detail-close:hover { color: var(--text); border-color: var(--text); }
+  .detail-body { flex: 1; overflow-y: auto; padding: 0; }
+  .detail-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg); }
+  .detail-tab {
+    padding: 10px 16px; font-size: 12px; font-weight: 500; color: var(--muted);
+    cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s;
+  }
+  .detail-tab:hover { color: var(--text); }
+  .detail-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+  .detail-content {
+    padding: 16px 20px; font-size: 12px; line-height: 1.7;
+    white-space: pre-wrap; word-wrap: break-word; font-family: Consolas, monospace; color: var(--muted);
+  }
+  .detail-content h4 { color: var(--text); font-size: 13px; margin: 12px 0 6px 0; font-family: 'Segoe UI', sans-serif; }
+  .detail-content .section { margin-bottom: 16px; padding: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; }
+  .status-line { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--bg); border-bottom: 1px solid var(--border); font-size: 12px; }
+
+  /* Modal for inbox detail */
+  .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 400; align-items: center; justify-content: center; }
+  .modal-bg.open { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; width: 95%; max-width: 1100px; max-height: 80vh; display: flex; flex-direction: column; }
+  .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .modal-header h3 { font-size: 14px; color: var(--blue); }
+  .modal-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px 8px; }
+  .modal-close:hover { color: var(--text); }
+  .modal-body { padding: 16px 20px; overflow-y: auto; white-space: pre-wrap; font-size: 12px; line-height: 1.7; color: var(--muted); font-family: Consolas, monospace; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Squad Mission Control <span>OfficeAgent</span></h1>
+  <div style="display:flex;align-items:center;gap:8px;">
+    <span class="engine-badge stopped" id="engine-badge">STOPPED</span>
+    <div class="timestamp" id="ts">—</div>
+  </div>
+</header>
+
+<div class="layout">
+  <section class="cmd-center">
+    <h2>Command Center <span style="font-size:10px;color:var(--border);font-weight:400;text-transform:none;letter-spacing:0">give instructions to the squad</span></h2>
+    <div class="cmd-tabs">
+      <div class="cmd-tab active" onclick="switchCmdTab('work-item')">Add Work Item</div>
+      <div class="cmd-tab" onclick="switchCmdTab('decision')">Add Decision</div>
+      <div class="cmd-tab" onclick="switchCmdTab('prd-item')">Add PRD Item</div>
+    </div>
+
+    <!-- Work Item Form -->
+    <div class="cmd-form active" id="cmd-work-item">
+      <div class="cmd-row">
+        <div class="cmd-field" style="flex:3"><label>Title</label><input id="wi-title" placeholder="e.g. Add retry logic to API calls"></div>
+        <div class="cmd-field" style="flex:1"><label>Type</label>
+          <select id="wi-type"><option value="implement">Implement</option><option value="fix">Fix</option><option value="test">Test</option><option value="explore">Explore</option><option value="review">Review</option></select>
+        </div>
+        <div class="cmd-field" style="flex:1"><label>Priority</label>
+          <select id="wi-priority"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select>
+        </div>
+        <button class="cmd-submit" onclick="submitWorkItem()">Add</button>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-field"><label>Description (optional)</label><textarea id="wi-desc" rows="2" placeholder="Additional details..."></textarea></div>
+      </div>
+      <div class="cmd-toast" id="wi-toast"></div>
+    </div>
+
+    <!-- Decision Form -->
+    <div class="cmd-form" id="cmd-decision">
+      <div class="cmd-row">
+        <div class="cmd-field" style="flex:2"><label>Title</label><input id="dec-title" placeholder="e.g. Always use feature flags for new UI"></div>
+        <div class="cmd-field" style="flex:1"><label>Author</label><input id="dec-author" placeholder="yemishin" value="yemishin"></div>
+        <button class="cmd-submit" onclick="submitDecision()">Add</button>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-field"><label>What</label><textarea id="dec-what" rows="2" placeholder="What is the decision or rule?"></textarea></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-field"><label>Why</label><textarea id="dec-why" rows="2" placeholder="Why is this important?"></textarea></div>
+      </div>
+      <div class="cmd-toast" id="dec-toast"></div>
+    </div>
+
+    <!-- PRD Item Form -->
+    <div class="cmd-form" id="cmd-prd-item">
+      <div class="cmd-row">
+        <div class="cmd-field" style="flex:0 0 80px"><label>ID</label><input id="prd-id" placeholder="M099"></div>
+        <div class="cmd-field" style="flex:3"><label>Name</label><input id="prd-name" placeholder="e.g. Dark mode support"></div>
+        <div class="cmd-field" style="flex:1"><label>Priority</label>
+          <select id="prd-priority"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select>
+        </div>
+        <div class="cmd-field" style="flex:1"><label>Complexity</label>
+          <select id="prd-complexity"><option value="small">Small</option><option value="medium" selected>Medium</option><option value="large">Large</option></select>
+        </div>
+        <button class="cmd-submit" onclick="submitPrdItem()">Add</button>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-field"><label>Description</label><textarea id="prd-desc" rows="2" placeholder="What needs to be built?"></textarea></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-field"><label>Rationale (optional)</label><textarea id="prd-rationale" rows="2" placeholder="Why is this needed?"></textarea></div>
+      </div>
+      <div class="cmd-toast" id="prd-toast"></div>
+    </div>
+  </section>
+
+  <section class="prd-panel" id="prd-section">
+    <h2>PRD Gap Analysis <span id="prd-badge"></span></h2>
+    <div id="prd-content"><p class="prd-pending">Lambert is generating docs/prd-gaps.json...</p></div>
+  </section>
+
+  <section class="pr-panel" id="pr-section">
+    <h2>Pull Requests <span class="count" id="pr-count">0</span></h2>
+    <div id="pr-content"><p class="pr-empty">No pull requests yet. PRs created by agents will appear here with review, build, and merge status.</p></div>
+  </section>
+
+  <section>
+    <h2>Squad Members <span style="font-size:10px;color:var(--border);font-weight:400;text-transform:none;letter-spacing:0">click for details</span></h2>
+    <div class="agents" id="agents-grid">Loading...</div>
+  </section>
+
+  <section>
+    <h2>PRD Progress <span class="count" id="prd-progress-count">0%</span> <span id="archive-btns"></span></h2>
+    <div id="prd-progress-content">Loading...</div>
+  </section>
+
+  <section>
+    <h2>Decisions Inbox <span class="count" id="inbox-count">0</span></h2>
+    <div class="inbox-list" id="inbox-list">Loading...</div>
+  </section>
+
+  <section>
+    <h2>Active Decisions</h2>
+    <div id="decisions-list">Loading...</div>
+  </section>
+
+  <section>
+    <h2>Dispatch Queue</h2>
+    <div class="dispatch-stats" id="dispatch-stats"></div>
+    <div id="dispatch-active"></div>
+    <div id="dispatch-pending"></div>
+  </section>
+
+  <section>
+    <h2>Engine Log</h2>
+    <div class="log-list" id="engine-log">No log entries yet.</div>
+  </section>
+
+  <section class="pr-panel" id="completed-section">
+    <h2>Recent Completions <span class="count" id="completed-count">0</span></h2>
+    <div id="completed-content"><p class="empty">No completed dispatches yet.</p></div>
+  </section>
+</div>
+
+<!-- Agent Detail Panel -->
+<div class="detail-overlay" id="detail-overlay" onclick="closeDetail()"></div>
+<div class="detail-panel" id="detail-panel">
+  <div class="detail-header">
+    <h3 id="detail-agent-name">—</h3>
+    <button class="detail-close" onclick="closeDetail()">ESC / Close</button>
+  </div>
+  <div class="status-line" id="detail-status-line">—</div>
+  <div class="detail-tabs" id="detail-tabs"></div>
+  <div class="detail-body">
+    <div class="detail-content" id="detail-content"></div>
+  </div>
+</div>
+
+<!-- Modal for inbox detail -->
+<div class="modal-bg" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">—</h3>
+      <button class="modal-close" onclick="closeModal()">X</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+let inboxData = [];
+let agentData = [];
+let currentAgentId = null;
+let currentTab = 'thought-process';
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function statusColor(s) {
+  return s === 'working' ? 'working' : s === 'done' ? 'done' : '';
+}
+
+// -- Agent Detail Panel --
+async function openAgentDetail(id) {
+  currentAgentId = id;
+  currentTab = 'thought-process';
+  const agent = agentData.find(a => a.id === id);
+  if (!agent) return;
+
+  document.getElementById('detail-agent-name').innerHTML =
+    '<span style="font-size:22px">' + agent.emoji + '</span> ' + agent.name + ' — ' + agent.role;
+
+  const badgeClass = agent.status;
+  document.getElementById('detail-status-line').innerHTML =
+    '<span class="status-badge ' + badgeClass + '">' + agent.status.toUpperCase() + '</span> ' +
+    '<span style="color:var(--muted)">' + escHtml(agent.lastAction) + '</span>';
+
+  try {
+    const detail = await fetch('/api/agent/' + id).then(r => r.json());
+    renderDetailTabs(detail);
+    renderDetailContent(detail, 'thought-process');
+  } catch(e) {
+    document.getElementById('detail-content').textContent = 'Error loading agent detail: ' + e.message;
+  }
+
+  document.getElementById('detail-overlay').classList.add('open');
+  document.getElementById('detail-panel').classList.add('open');
+}
+
+function closeDetail() {
+  document.getElementById('detail-overlay').classList.remove('open');
+  document.getElementById('detail-panel').classList.remove('open');
+  currentAgentId = null;
+}
+
+function renderDetailTabs(detail) {
+  const tabs = [
+    { id: 'thought-process', label: 'Thought Process' },
+    { id: 'charter', label: 'Charter' },
+    { id: 'history', label: 'History' },
+    { id: 'output', label: 'Output Log' },
+  ];
+  document.getElementById('detail-tabs').innerHTML = tabs.map(t =>
+    '<div class="detail-tab ' + (t.id === currentTab ? 'active' : '') + '" onclick="switchTab(\'' + t.id + '\')">' + t.label + '</div>'
+  ).join('');
+
+  document.getElementById('detail-panel').dataset.detail = JSON.stringify(detail);
+}
+
+function switchTab(tabId) {
+  currentTab = tabId;
+  const detail = JSON.parse(document.getElementById('detail-panel').dataset.detail || '{}');
+  renderDetailTabs(detail);
+  renderDetailContent(detail, tabId);
+}
+
+function renderDetailContent(detail, tab) {
+  const el = document.getElementById('detail-content');
+
+  if (tab === 'thought-process') {
+    let html = '';
+
+    if (detail.statusData) {
+      html += '<h4>Current Status</h4><div class="section">';
+      html += 'Status: <span style="color:var(--' + (detail.statusData.status === 'working' ? 'yellow' : detail.statusData.status === 'done' ? 'green' : 'muted') + ')">' + (detail.statusData.status || 'idle').toUpperCase() + '</span>\n';
+      if (detail.statusData.task) html += 'Task: ' + escHtml(detail.statusData.task) + '\n';
+      if (detail.statusData.started_at) html += 'Started: ' + detail.statusData.started_at + '\n';
+      if (detail.statusData.completed_at) html += 'Completed: ' + detail.statusData.completed_at + '\n';
+      html += '</div>';
+    }
+
+    if (detail.inboxContents && detail.inboxContents.length > 0) {
+      html += '<h4>Decisions & Findings (' + detail.inboxContents.length + ')</h4>';
+      detail.inboxContents.forEach(item => {
+        html += '<div class="section"><strong style="color:var(--purple)">' + escHtml(item.name) + '</strong>\n\n' + escHtml(item.content) + '</div>';
+      });
+    } else {
+      html += '<h4>Decisions & Findings</h4><div class="section" style="color:var(--muted);font-style:italic">No decisions or findings written yet.</div>';
+    }
+
+    if (detail.outputLog) {
+      html += '<h4>Latest Output</h4><div class="section">' + escHtml(detail.outputLog) + '</div>';
+    }
+
+    el.innerHTML = html;
+  } else if (tab === 'charter') {
+    el.innerHTML = '<div class="section">' + escHtml(detail.charter || 'No charter found.') + '</div>';
+  } else if (tab === 'history') {
+    el.innerHTML = '<div class="section">' + escHtml(detail.history || 'No history yet.') + '</div>';
+  } else if (tab === 'output') {
+    el.innerHTML = '<div class="section">' + escHtml(detail.outputLog || 'No output log. The coordinator will save agent output here when tasks complete.') + '</div>';
+  }
+}
+
+// -- Main Renderers --
+function renderAgents(agents) {
+  agentData = agents;
+  const grid = document.getElementById('agents-grid');
+  grid.innerHTML = agents.map(a => `
+    <div class="agent-card ${statusColor(a.status)}" onclick="openAgentDetail('${a.id}')">
+      <div class="agent-card-header">
+        <span class="agent-name"><span class="agent-emoji">${a.emoji}</span>${a.name}</span>
+        <span class="status-badge ${a.status}">${a.status}</span>
+      </div>
+      <div class="agent-role">${a.role}</div>
+      <div class="agent-action" title="${escHtml(a.lastAction)}">${escHtml(a.lastAction)}</div>
+    </div>
+  `).join('');
+}
+
+function renderPrdProgress(prog) {
+  const el = document.getElementById('prd-progress-content');
+  const countEl = document.getElementById('prd-progress-count');
+  if (!prog) { el.innerHTML = '<p class="empty">PRD not found.</p>'; return; }
+
+  countEl.textContent = prog.donePercent + '%';
+
+  const pct = (n) => prog.total > 0 ? ((n / prog.total) * 100).toFixed(1) : 0;
+
+  const bar = '<div class="prd-progress-bar">' +
+    '<div class="seg complete" style="width:' + pct(prog.complete) + '%"></div>' +
+    '<div class="seg pr-created" style="width:' + pct(prog.prCreated) + '%"></div>' +
+    '<div class="seg in-progress" style="width:' + pct(prog.inProgress) + '%"></div>' +
+    '<div class="seg planned" style="width:' + pct(prog.planned) + '%"></div>' +
+    '<div class="seg missing" style="width:' + pct(prog.missing) + '%"></div>' +
+  '</div>';
+
+  const legend = '<div class="prd-progress-legend">' +
+    '<div class="prd-legend-item"><span class="prd-legend-dot complete"></span>Complete (' + prog.complete + ')</div>' +
+    '<div class="prd-legend-item"><span class="prd-legend-dot pr-created"></span>PR Created (' + prog.prCreated + ')</div>' +
+    '<div class="prd-legend-item"><span class="prd-legend-dot in-progress"></span>In Progress (' + prog.inProgress + ')</div>' +
+    '<div class="prd-legend-item"><span class="prd-legend-dot planned"></span>Planned (' + prog.planned + ')</div>' +
+    '<div class="prd-legend-item"><span class="prd-legend-dot missing"></span>Missing (' + prog.missing + ')</div>' +
+  '</div>';
+
+  const statusIcon = (s) => s === 'complete' ? 'OK' : s === 'pr-created' ? 'PR' : s === 'in-progress' ? 'WIP' : s === 'planned' ? 'PLAN' : '---';
+
+  const items = '<div class="prd-items-list">' +
+    (prog.items || []).map(i =>
+      '<div class="prd-item-row">' +
+        '<span>' + statusIcon(i.status) + '</span>' +
+        '<span class="prd-item-id">' + escHtml(i.id) + '</span>' +
+        '<span class="prd-item-name" title="' + escHtml(i.name) + '">' + escHtml(i.name) + '</span>' +
+        '<span class="prd-item-priority ' + (i.priority || '') + '">' + escHtml(i.priority || '') + '</span>' +
+      '</div>'
+    ).join('') +
+  '</div>';
+
+  el.innerHTML = '<div class="prd-progress-pct">' + prog.donePercent + '% done</div>' + bar + legend + items;
+}
+
+function renderInbox(inbox) {
+  inboxData = inbox;
+  const list = document.getElementById('inbox-list');
+  const count = document.getElementById('inbox-count');
+  count.textContent = inbox.length;
+  if (!inbox.length) { list.innerHTML = '<p class="empty">No messages yet.</p>'; return; }
+  list.innerHTML = inbox.map((item, i) => `
+    <div class="inbox-item" onclick="openModal(${i})">
+      <div class="inbox-name"><span>${escHtml(item.name)}</span><span>${item.age}</span></div>
+      <div class="inbox-preview">${escHtml(item.content.slice(0,200))}</div>
+    </div>
+  `).join('');
+}
+
+function renderDecisions(decisions) {
+  const el = document.getElementById('decisions-list');
+  if (!decisions.length) { el.innerHTML = '<p class="empty">No decisions yet.</p>'; return; }
+  el.innerHTML = '<div style="display:flex;flex-direction:column;gap:6px">' +
+    decisions.map(d => '<div style="font-size:12px;color:var(--text);padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:4px">' + escHtml(d) + '</div>').join('') +
+  '</div>';
+}
+
+function renderPrd(prd) {
+  const section = document.getElementById('prd-content');
+  const badge = document.getElementById('prd-badge');
+  if (!prd) {
+    section.innerHTML = '<p class="prd-pending">Lambert is generating docs/prd-gaps.json...</p>';
+    return;
+  }
+  if (prd.error) {
+    section.innerHTML = '<p style="color:var(--orange)">PRD file found but has parse errors.</p>';
+    return;
+  }
+  badge.innerHTML = '<span style="color:var(--green);font-size:11px">Generated ' + prd.age + '</span>';
+  section.innerHTML =
+    '<div class="prd-inner">' +
+      '<div class="prd-stats">' +
+        '<div class="prd-stat"><div class="prd-stat-num green">' + prd.existing + '</div><div class="prd-stat-label">Existing</div></div>' +
+        '<div class="prd-stat"><div class="prd-stat-num red">' + prd.missing + '</div><div class="prd-stat-label">Missing</div></div>' +
+        '<div class="prd-stat"><div class="prd-stat-num orange">' + prd.questions + '</div><div class="prd-stat-label">Questions</div></div>' +
+      '</div>' +
+      '<div class="prd-summary">' + escHtml(prd.summary) + '</div>' +
+    '</div>';
+}
+
+let allPrs = [];
+let prPage = 0;
+const PR_PER_PAGE = 3;
+
+function prRow(pr) {
+  const reviewClass = pr.reviewStatus === 'approved' ? 'approved' : pr.reviewStatus === 'rejected' ? 'rejected' : pr.reviewStatus === 'waiting' ? 'active' : 'draft';
+  const reviewLabel = pr.reviewStatus || 'pending';
+  const buildClass = pr.buildStatus === 'passing' ? 'build-pass' : pr.buildStatus === 'failing' ? 'build-fail' : pr.buildStatus === 'running' ? 'building' : 'no-build';
+  const buildLabel = pr.buildStatus || 'none';
+  const statusClass = pr.status === 'merged' ? 'merged' : pr.status === 'abandoned' ? 'rejected' : pr.status === 'active' ? 'active' : 'draft';
+  const statusLabel = pr.status || 'active';
+  const url = pr.url || '#';
+  const prId = pr.id || '—';
+  return '<tr>' +
+    '<td><span class="pr-id">' + escHtml(String(prId)) + '</span></td>' +
+    '<td><a class="pr-title" href="' + escHtml(url) + '" target="_blank">' + escHtml(pr.title || 'Untitled') + '</a></td>' +
+    '<td><span class="pr-agent">' + escHtml(pr.agent || '—') + '</span></td>' +
+    '<td><span class="pr-branch">' + escHtml(pr.branch || '—') + '</span></td>' +
+    '<td><span class="pr-badge ' + reviewClass + '">' + escHtml(reviewLabel) + '</span></td>' +
+    '<td>' + (pr.reviewer ? '<span class="pr-agent" title="' + escHtml(pr.reviewNote || '') + '">' + escHtml(pr.reviewer) + '</span>' : '<span style="color:var(--muted);font-size:11px">—</span>') + '</td>' +
+    '<td><span class="pr-badge ' + buildClass + '">' + escHtml(buildLabel) + '</span></td>' +
+    '<td><span class="pr-badge ' + statusClass + '">' + escHtml(statusLabel) + '</span></td>' +
+    '<td><span class="pr-date">' + escHtml(pr.created || '—') + '</span></td>' +
+    '</tr>';
+}
+
+function prTableHtml(rows) {
+  return '<table class="pr-table"><thead><tr>' +
+    '<th>PR</th><th>Title</th><th>Agent</th><th>Branch</th><th>Review</th><th>Signed Off By</th><th>Build</th><th>Status</th><th>Created</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function renderPrs(prs) {
+  allPrs = prs;
+  const el = document.getElementById('pr-content');
+  const count = document.getElementById('pr-count');
+  count.textContent = prs.length;
+  if (!prs.length) {
+    el.innerHTML = '<p class="pr-empty">No pull requests yet. PRs created by agents will appear here with review, build, and merge status.</p>';
+    return;
+  }
+  const totalPages = Math.ceil(prs.length / PR_PER_PAGE);
+  if (prPage >= totalPages) prPage = totalPages - 1;
+  const start = prPage * PR_PER_PAGE;
+  const pagePrs = prs.slice(start, start + PR_PER_PAGE);
+  const rows = pagePrs.map(prRow).join('');
+
+  let pager = '';
+  if (prs.length > PR_PER_PAGE) {
+    pager = '<div class="pr-pager">' +
+      '<span class="pr-page-info">Showing ' + (start+1) + ' to ' + Math.min(start+PR_PER_PAGE, prs.length) + ' of ' + prs.length + '</span>' +
+      '<div class="pr-pager-btns">' +
+        '<button class="pr-pager-btn ' + (prPage === 0 ? 'disabled' : '') + '" onclick="prPrev()">Prev</button>' +
+        '<button class="pr-pager-btn ' + (prPage >= totalPages-1 ? 'disabled' : '') + '" onclick="prNext()">Next</button>' +
+        '<button class="pr-pager-btn see-all" onclick="openAllPrs()">See all ' + prs.length + ' PRs</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  el.innerHTML = prTableHtml(rows) + pager;
+}
+
+function prPrev() { if (prPage > 0) { prPage--; renderPrs(allPrs); } }
+function prNext() { const totalPages = Math.ceil(allPrs.length / PR_PER_PAGE); if (prPage < totalPages-1) { prPage++; renderPrs(allPrs); } }
+
+function openAllPrs() {
+  document.getElementById('modal-title').textContent = 'All Pull Requests (' + allPrs.length + ')';
+  document.getElementById('modal-body').innerHTML = prTableHtml(allPrs.map(prRow).join(''));
+  document.getElementById('modal-body').style.fontFamily = "'Segoe UI', system-ui, sans-serif";
+  document.getElementById('modal-body').style.whiteSpace = 'normal';
+  document.getElementById('modal').classList.add('open');
+}
+
+function openModal(i) {
+  const item = inboxData[i];
+  if (!item) return;
+  document.getElementById('modal-title').textContent = item.name;
+  document.getElementById('modal-body').textContent = item.content;
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeDetail(); closeModal(); }
+});
+
+let archivedPrds = [];
+
+function renderArchiveButtons(archives) {
+  archivedPrds = archives;
+  const el = document.getElementById('archive-btns');
+  if (!archives.length) { el.innerHTML = ''; return; }
+  el.innerHTML = archives.map((a, i) =>
+    '<button class="archive-btn" onclick="openArchive(' + i + ')">Archived: ' + escHtml(a.version) + ' (' + a.total + ' items)</button>'
+  ).join(' ');
+}
+
+function openArchive(i) {
+  const a = archivedPrds[i];
+  if (!a) return;
+
+  document.getElementById('modal-title').textContent = 'Archived PRD — ' + a.version + ' (' + a.total + ' items)';
+
+  let html = '<div style="font-family:\'Segoe UI\',system-ui,sans-serif;white-space:normal">';
+
+  // Summary
+  if (a.summary) {
+    html += '<div class="archive-detail-section"><h4>Summary</h4><p style="font-size:12px;color:var(--muted);line-height:1.6">' + escHtml(a.summary) + '</p></div>';
+  }
+
+  // Existing features
+  if (a.existing_features.length) {
+    html += '<div class="archive-detail-section"><h4>Existing Features (' + a.existing_features.length + ')</h4>';
+    a.existing_features.forEach(f => {
+      html += '<div class="archive-feature">' +
+        '<span class="feat-id">' + escHtml(f.id) + '</span>' +
+        '<div class="feat-name">' + escHtml(f.name) + '</div>' +
+        '<div class="feat-desc">' + escHtml(f.description || '') + '</div>' +
+        '<div class="feat-meta">' +
+          (f.agent ? '<span>Agent: ' + escHtml(f.agent) + '</span>' : '') +
+          (f.status ? '<span>Status: ' + escHtml(f.status) + '</span>' : '') +
+        '</div>' +
+      '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Missing features
+  if (a.missing_features.length) {
+    html += '<div class="archive-detail-section"><h4>Gap Items (' + a.missing_features.length + ')</h4>';
+    a.missing_features.forEach(f => {
+      const pClass = f.priority === 'high' ? 'high' : f.priority === 'medium' ? 'medium' : 'low';
+      html += '<div class="archive-feature">' +
+        '<span class="feat-id">' + escHtml(f.id) + '</span> ' +
+        '<span class="prd-item-priority ' + pClass + '">' + escHtml(f.priority || '') + '</span>' +
+        (f.status ? ' <span class="pr-badge ' + (f.status === 'complete' ? 'approved' : f.status === 'pr-created' ? 'active' : 'draft') + '" style="font-size:9px">' + escHtml(f.status) + '</span>' : '') +
+        '<div class="feat-name">' + escHtml(f.name) + '</div>' +
+        '<div class="feat-desc">' + escHtml(f.description || '') + '</div>' +
+        (f.rationale ? '<div class="feat-desc" style="margin-top:4px;color:var(--yellow)">Rationale: ' + escHtml(f.rationale) + '</div>' : '') +
+        '<div class="feat-meta">' +
+          (f.estimated_complexity ? '<span>Complexity: ' + escHtml(f.estimated_complexity) + '</span>' : '') +
+          (f.affected_areas ? '<span>Areas: ' + escHtml(f.affected_areas.join(', ')) + '</span>' : '') +
+        '</div>' +
+      '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Open questions
+  if (a.open_questions.length) {
+    html += '<div class="archive-detail-section"><h4>Open Questions (' + a.open_questions.length + ')</h4>';
+    a.open_questions.forEach(q => {
+      html += '<div class="archive-question">' +
+        '<span class="q-id">' + escHtml(q.id) + '</span>' +
+        '<div class="q-text">' + escHtml(q.question) + '</div>' +
+        (q.context ? '<div class="q-context">' + escHtml(q.context) + '</div>' : '') +
+      '</div>';
+    });
+    html += '</div>';
+  }
+
+  html += '</div>';
+
+  document.getElementById('modal-body').innerHTML = html;
+  document.getElementById('modal-body').style.fontFamily = "'Segoe UI', system-ui, sans-serif";
+  document.getElementById('modal-body').style.whiteSpace = 'normal';
+  document.getElementById('modal').classList.add('open');
+}
+
+function renderEngineStatus(engine) {
+  const badge = document.getElementById('engine-badge');
+  const state = engine?.state || 'stopped';
+  badge.className = 'engine-badge ' + state;
+  badge.textContent = state.toUpperCase();
+}
+
+function renderDispatch(dispatch) {
+  if (!dispatch) return;
+
+  // Stats
+  const stats = document.getElementById('dispatch-stats');
+  stats.innerHTML =
+    '<div class="dispatch-stat"><div class="dispatch-stat-num yellow">' + (dispatch.active || []).length + '</div><div class="dispatch-stat-label">Active</div></div>' +
+    '<div class="dispatch-stat"><div class="dispatch-stat-num blue">' + (dispatch.pending || []).length + '</div><div class="dispatch-stat-label">Pending</div></div>' +
+    '<div class="dispatch-stat"><div class="dispatch-stat-num green">' + (dispatch.completed || []).length + '</div><div class="dispatch-stat-label">Completed</div></div>';
+
+  // Active
+  const activeEl = document.getElementById('dispatch-active');
+  if ((dispatch.active || []).length > 0) {
+    activeEl.innerHTML = '<div style="font-size:11px;color:var(--green);margin-bottom:6px;font-weight:600">ACTIVE</div><div class="dispatch-list">' +
+      dispatch.active.map(d =>
+        '<div class="dispatch-item">' +
+          '<span class="dispatch-type ' + (d.type || '') + '">' + escHtml(d.type || '') + '</span>' +
+          '<span class="dispatch-agent">' + escHtml(d.agentName || d.agent || '') + '</span>' +
+          '<span class="dispatch-task" title="' + escHtml(d.task || '') + '">' + escHtml(d.task || '') + '</span>' +
+          '<span class="dispatch-time">' + shortTime(d.started_at) + '</span>' +
+        '</div>'
+      ).join('') + '</div>';
+  } else {
+    activeEl.innerHTML = '<div style="color:var(--muted);font-size:11px;margin-bottom:8px">No active dispatches</div>';
+  }
+
+  // Pending
+  const pendingEl = document.getElementById('dispatch-pending');
+  if ((dispatch.pending || []).length > 0) {
+    pendingEl.innerHTML = '<div style="font-size:11px;color:var(--yellow);margin:8px 0 6px;font-weight:600">PENDING</div><div class="dispatch-list">' +
+      dispatch.pending.map(d =>
+        '<div class="dispatch-item">' +
+          '<span class="dispatch-type ' + (d.type || '') + '">' + escHtml(d.type || '') + '</span>' +
+          '<span class="dispatch-agent">' + escHtml(d.agentName || d.agent || '') + '</span>' +
+          '<span class="dispatch-task" title="' + escHtml(d.task || '') + '">' + escHtml(d.task || '') + '</span>' +
+        '</div>'
+      ).join('') + '</div>';
+  } else {
+    pendingEl.innerHTML = '';
+  }
+
+  // Completed
+  const completedEl = document.getElementById('completed-content');
+  const completedCount = document.getElementById('completed-count');
+  const completed = (dispatch.completed || []).slice().reverse();
+  completedCount.textContent = completed.length;
+
+  if (completed.length > 0) {
+    completedEl.innerHTML = '<table class="pr-table"><thead><tr><th>ID</th><th>Type</th><th>Agent</th><th>Task</th><th>Result</th><th>Completed</th></tr></thead><tbody>' +
+      completed.map(d =>
+        '<tr>' +
+          '<td style="font-family:Consolas;font-size:10px">' + escHtml((d.id || '').slice(0, 20)) + '</td>' +
+          '<td><span class="dispatch-type ' + (d.type || '') + '">' + escHtml(d.type || '') + '</span></td>' +
+          '<td>' + escHtml(d.agentName || d.agent || '') + '</td>' +
+          '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml((d.task || '').slice(0, 60)) + '</td>' +
+          '<td style="color:' + (d.result === 'success' ? 'var(--green)' : 'var(--red)') + '">' + escHtml(d.result || '') + '</td>' +
+          '<td class="pr-date">' + shortTime(d.completed_at) + '</td>' +
+        '</tr>'
+      ).join('') + '</tbody></table>';
+  } else {
+    completedEl.innerHTML = '<p class="empty">No completed dispatches yet.</p>';
+  }
+}
+
+function renderEngineLog(log) {
+  const el = document.getElementById('engine-log');
+  if (!log || log.length === 0) {
+    el.innerHTML = '<div class="empty">No log entries yet.</div>';
+    return;
+  }
+  el.innerHTML = log.slice().reverse().map(e =>
+    '<div class="log-entry">' +
+      '<span class="log-ts">' + shortTime(e.timestamp) + '</span> ' +
+      '<span class="log-level-' + (e.level || 'info') + '">[' + (e.level || 'info') + ']</span> ' +
+      escHtml(e.message || '') +
+    '</div>'
+  ).join('');
+}
+
+function shortTime(t) {
+  if (!t) return '';
+  try { return new Date(t).toLocaleTimeString(); } catch { return t; }
+}
+
+async function refresh() {
+  try {
+    const data = await fetch('/api/status').then(r => r.json());
+    document.getElementById('ts').textContent = new Date(data.timestamp).toLocaleTimeString();
+    renderAgents(data.agents);
+    renderPrdProgress(data.prdProgress);
+    renderInbox(data.inbox);
+    renderDecisions(data.decisions);
+    renderPrd(data.prd);
+    renderPrs(data.pullRequests || []);
+    renderArchiveButtons(data.archivedPrds || []);
+    renderEngineStatus(data.engine);
+    renderDispatch(data.dispatch);
+    renderEngineLog(data.engineLog || []);
+  } catch(e) { console.error('refresh error', e); }
+}
+
+refresh();
+setInterval(refresh, 4000);
+
+// -- Command Center --
+function switchCmdTab(tab) {
+  document.querySelectorAll('.cmd-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.cmd-form').forEach(f => f.classList.remove('active'));
+  document.querySelector(`.cmd-tab[onclick*="${tab}"]`).classList.add('active');
+  document.getElementById('cmd-' + tab).classList.add('active');
+}
+
+function showToast(id, msg, ok) {
+  const el = document.getElementById(id);
+  el.className = 'cmd-toast ' + (ok ? 'success' : 'error');
+  el.textContent = msg;
+  setTimeout(() => { el.className = 'cmd-toast'; }, 4000);
+}
+
+async function submitWorkItem() {
+  const title = document.getElementById('wi-title').value.trim();
+  if (!title) return showToast('wi-toast', 'Title is required', false);
+  try {
+    const res = await fetch('/api/work-items', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        type: document.getElementById('wi-type').value,
+        priority: document.getElementById('wi-priority').value,
+        description: document.getElementById('wi-desc').value.trim(),
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast('wi-toast', 'Work item added: ' + data.id, true);
+      document.getElementById('wi-title').value = '';
+      document.getElementById('wi-desc').value = '';
+    } else {
+      showToast('wi-toast', data.error || 'Failed to add', false);
+    }
+  } catch (e) { showToast('wi-toast', 'Error: ' + e.message, false); }
+}
+
+async function submitDecision() {
+  const title = document.getElementById('dec-title').value.trim();
+  const what = document.getElementById('dec-what').value.trim();
+  if (!title || !what) return showToast('dec-toast', 'Title and What are required', false);
+  try {
+    const res = await fetch('/api/decisions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        author: document.getElementById('dec-author').value.trim() || 'yemishin',
+        what,
+        why: document.getElementById('dec-why').value.trim(),
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast('dec-toast', 'Decision added', true);
+      document.getElementById('dec-title').value = '';
+      document.getElementById('dec-what').value = '';
+      document.getElementById('dec-why').value = '';
+    } else {
+      showToast('dec-toast', data.error || 'Failed to add', false);
+    }
+  } catch (e) { showToast('dec-toast', 'Error: ' + e.message, false); }
+}
+
+async function submitPrdItem() {
+  const id = document.getElementById('prd-id').value.trim();
+  const name = document.getElementById('prd-name').value.trim();
+  const description = document.getElementById('prd-desc').value.trim();
+  if (!id || !name) return showToast('prd-toast', 'ID and Name are required', false);
+  try {
+    const res = await fetch('/api/prd-items', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id, name, description,
+        priority: document.getElementById('prd-priority').value,
+        estimated_complexity: document.getElementById('prd-complexity').value,
+        rationale: document.getElementById('prd-rationale').value.trim(),
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast('prd-toast', 'PRD item added: ' + data.id, true);
+      document.getElementById('prd-id').value = '';
+      document.getElementById('prd-name').value = '';
+      document.getElementById('prd-desc').value = '';
+      document.getElementById('prd-rationale').value = '';
+    } else {
+      showToast('prd-toast', data.error || 'Failed to add', false);
+    }
+  } catch (e) { showToast('prd-toast', 'Error: ' + e.message, false); }
+}
+</script>
+</body>
+</html>

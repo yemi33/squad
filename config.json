@@ -1,0 +1,148 @@
+{
+  "projects": [
+    {
+      "name": "OfficeAgent",
+      "localPath": "C:/Users/yemishin/OfficeAgent",
+      "repositoryId": "61458d25-9f75-41c3-be29-e63727145257",
+      "adoOrg": "office",
+      "adoProject": "ISS",
+      "repoName": "OfficeAgent",
+      "mainBranch": "main",
+      "prUrlBase": "https://office.visualstudio.com/DefaultCollection/ISS/_git/OfficeAgent/pullrequest/",
+      "workSources": {
+        "prd": {
+          "enabled": true,
+          "path": "docs/prd-gaps.json",
+          "itemFilter": {
+            "status": [
+              "missing",
+              "planned"
+            ]
+          },
+          "cooldownMinutes": 30
+        },
+        "pullRequests": {
+          "enabled": true,
+          "path": ".squad/pull-requests.json",
+          "cooldownMinutes": 30
+        },
+        "workItems": {
+          "enabled": true,
+          "path": ".squad/work-items.json",
+          "cooldownMinutes": 0
+        }
+      }
+    },
+    {
+      "name": "office-bohemia",
+      "localPath": "C:/Users/yemishin/office-bohemia",
+      "repositoryId": "74031860-e0cd-45a1-913f-10bbf3f82555",
+      "adoOrg": "office",
+      "adoProject": "OC",
+      "repoName": "office-bohemia",
+      "mainBranch": "master",
+      "prUrlBase": "https://office.visualstudio.com/DefaultCollection/OC/_git/office-bohemia/pullrequest/",
+      "workSources": {
+        "pullRequests": {
+          "enabled": true,
+          "path": ".squad/pull-requests.json",
+          "cooldownMinutes": 30
+        },
+        "workItems": {
+          "enabled": true,
+          "path": ".squad/work-items.json",
+          "cooldownMinutes": 0
+        }
+      }
+    },
+    {
+      "name": "bebop-desktop",
+      "localPath": "C:/Users/yemishin/bebop-desktop",
+      "adoOrg": "open-studio",
+      "adoProject": "Prototypes",
+      "repoName": "bebop-desktop",
+      "mainBranch": "main",
+      "prUrlBase": "https://dev.azure.com/open-studio/Prototypes/_git/bebop-desktop/pullrequest/",
+      "workSources": {
+        "pullRequests": {
+          "enabled": true,
+          "path": ".squad/pull-requests.json",
+          "cooldownMinutes": 30
+        },
+        "workItems": {
+          "enabled": true,
+          "path": ".squad/work-items.json",
+          "cooldownMinutes": 0
+        }
+      }
+    }
+  ],
+  "engine": {
+    "tickInterval": 60000,
+    "staleThreshold": 1800000,
+    "maxConcurrent": 3,
+    "inboxConsolidateThreshold": 5,
+    "agentTimeout": 600000,
+    "maxTurns": 100
+  },
+  "claude": {
+    "binary": "claude",
+    "outputFormat": "json",
+    "allowedTools": "Edit,Write,Read,Bash,Glob,Grep,Agent,WebFetch,WebSearch"
+  },
+  "agents": {
+    "ripley": {
+      "name": "Ripley",
+      "emoji": "🏗️",
+      "role": "Lead / Explorer",
+      "skills": [
+        "architecture",
+        "codebase-exploration",
+        "design-review"
+      ]
+    },
+    "dallas": {
+      "name": "Dallas",
+      "emoji": "🔧",
+      "role": "Engineer",
+      "skills": [
+        "implementation",
+        "typescript",
+        "docker",
+        "testing"
+      ]
+    },
+    "lambert": {
+      "name": "Lambert",
+      "emoji": "📊",
+      "role": "Analyst",
+      "skills": [
+        "gap-analysis",
+        "requirements",
+        "documentation"
+      ]
+    },
+    "rebecca": {
+      "name": "Rebecca",
+      "emoji": "🧠",
+      "role": "Architect",
+      "skills": [
+        "system-design",
+        "api-design",
+        "scalability",
+        "implementation"
+      ]
+    },
+    "ralph": {
+      "name": "Ralph",
+      "emoji": "⚙️",
+      "role": "Engineer",
+      "skills": [
+        "implementation",
+        "bug-fixes",
+        "testing",
+        "scaffolding"
+      ]
+    }
+  }
+}
