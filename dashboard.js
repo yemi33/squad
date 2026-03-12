@@ -89,11 +89,11 @@ function getAgents() {
       } catch {}
     }
 
+    // Show recent inbox output as context, but don't override idle status
     if (status === 'idle' && inboxFiles.length > 0) {
       const lastOutput = path.join(SQUAD_DIR, 'decisions', 'inbox', inboxFiles[inboxFiles.length - 1]);
       try {
         const stat = fs.statSync(lastOutput);
-        status = 'done';
         lastAction = `Output: ${path.basename(lastOutput)} (${timeSince(stat.mtimeMs)})`;
       } catch {}
     }
