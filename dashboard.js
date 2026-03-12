@@ -470,6 +470,24 @@ const server = http.createServer(async (req, res) => {
       delete item.failedAt;
       delete item.fanOutAgents;
       fs.writeFileSync(wiPath, JSON.stringify(items, null, 2));
+
+      // Clear completed dispatch entries so the engine doesn't dedup this item
+      const dispatchPath = path.join(SQUAD_DIR, 'engine', 'dispatch.json');
+      try {
+        const dispatch = JSON.parse(safeRead(dispatchPath) || '{}');
+        if (dispatch.completed) {
+          const sourcePrefix = (!source || source === 'central') ? 'central-work-' : `work-${source}-`;
+          const dispatchKey = sourcePrefix + id;
+          const before = dispatch.completed.length;
+          dispatch.completed = dispatch.completed.filter(d => d.meta?.dispatchKey !== dispatchKey);
+          // Also clear fan-out entries
+          dispatch.completed = dispatch.completed.filter(d => !d.meta?.parentKey || d.meta.parentKey !== dispatchKey);
+          if (dispatch.completed.length !== before) {
+            fs.writeFileSync(dispatchPath, JSON.stringify(dispatch, null, 2));
+          }
+        }
+      } catch {}
+
       return jsonReply(res, 200, { ok: true, id });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
