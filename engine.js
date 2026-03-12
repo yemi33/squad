@@ -2439,13 +2439,10 @@ const commands = {
       fs.unlinkSync(path.join(ENGINE_DIR, f));
     }
 
-    // 2. Move active dispatches to completed, reset their work items
+    // 2. Clear active dispatches and reset their work items to pending
+    // NOTE: we do NOT add killed items to completed — that would block re-dispatch via dedup
     const killed = dispatch.active || [];
     for (const item of killed) {
-      item.status = 'error';
-      item.error = 'Manually killed';
-      item.completed_at = ts();
-      dispatch.completed.push(item);
 
       // Reset the source work item to pending
       if (item.meta) {
