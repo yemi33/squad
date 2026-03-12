@@ -82,9 +82,9 @@
     "status": "failed",
     "created": "2026-03-12T06:53:37.589Z",
     "createdBy": "dashboard",
-    "dispatched_at": "2026-03-12T07:02:23.593Z",
+    "dispatched_at": "2026-03-12T07:23:50.569Z",
     "dispatched_to": "dallas",
-    "failReason": "Agent process died",
-    "failedAt": "2026-03-12T07:22:28.311Z"
+    "failReason": "Orphaned — no process, silent for 300s",
+    "failedAt": "2026-03-12T07:28:51.027Z"
   }
 ]
