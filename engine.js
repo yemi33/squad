@@ -627,6 +627,41 @@ function completeDispatch(id, result = 'success', reason = '') {
     }
     safeWrite(DISPATCH_PATH, dispatch);
     log('info', `Completed dispatch: ${id} (${result}${reason ? ': ' + reason : ''})`);
+
+    // Update source work item status on failure
+    if (result === 'error' && item.meta?.item?.id) {
+      updateWorkItemStatus(item.meta, 'failed', reason);
+    }
+  }
+}
+
+function updateWorkItemStatus(meta, status, reason) {
+  const itemId = meta.item?.id;
+  if (!itemId) return;
+
+  // Determine which work-items file to update
+  let wiPath;
+  if (meta.source === 'central-work-item' || meta.source === 'central-work-item-fanout') {
+    wiPath = path.join(SQUAD_DIR, 'work-items.json');
+  } else if (meta.source === 'work-item' && meta.project?.localPath) {
+    const root = path.resolve(meta.project.localPath);
+    const config = getConfig();
+    const proj = (config.projects || []).find(p => p.name === meta.project.name);
+    const wiSrc = proj?.workSources?.workItems || config.workSources?.workItems || {};
+    wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+  }
+  if (!wiPath) return;
+
+  const items = safeJson(wiPath);
+  if (!items || !Array.isArray(items)) return;
+
+  const target = items.find(i => i.id === itemId);
+  if (target) {
+    target.status = status;
+    if (reason) target.failReason = reason;
+    target.failedAt = ts();
+    safeWrite(wiPath, items);
+    log('info', `Work item ${itemId} → ${status}${reason ? ': ' + reason : ''}`);
   }
 }
 

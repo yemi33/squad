@@ -416,6 +416,42 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // POST /api/work-items/retry — reset a failed/dispatched item to pending
+  if (req.method === 'POST' && req.url === '/api/work-items/retry') {
+    try {
+      const body = await readBody(req);
+      const { id, source } = body;
+      if (!id) return jsonReply(res, 400, { error: 'id required' });
+
+      // Find the right file
+      let wiPath;
+      if (!source || source === 'central') {
+        wiPath = path.join(SQUAD_DIR, 'work-items.json');
+      } else {
+        const proj = PROJECTS.find(p => p.name === source);
+        if (proj) {
+          const root = path.resolve(proj.localPath || path.resolve(SQUAD_DIR, '..'));
+          const wiSrc = proj.workSources?.workItems || CONFIG.workSources?.workItems || {};
+          wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+        }
+      }
+      if (!wiPath) return jsonReply(res, 404, { error: 'source not found' });
+
+      const items = JSON.parse(safeRead(wiPath) || '[]');
+      const item = items.find(i => i.id === id);
+      if (!item) return jsonReply(res, 404, { error: 'item not found' });
+
+      item.status = 'pending';
+      delete item.dispatched_at;
+      delete item.dispatched_to;
+      delete item.failReason;
+      delete item.failedAt;
+      delete item.fanOutAgents;
+      fs.writeFileSync(wiPath, JSON.stringify(items, null, 2));
+      return jsonReply(res, 200, { ok: true, id });
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
   // POST /api/work-items
   if (req.method === 'POST' && req.url === '/api/work-items') {
     try {
