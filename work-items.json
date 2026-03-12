@@ -59,5 +59,29 @@
       "rebecca",
       "ralph"
     ]
+  },
+  {
+    "id": "W003",
+    "title": "explore how bebop-desktop is doing the 'progression ui' and 'ask user question' ui - create a design doc for how to implement this in bebop - office-bohemia",
+    "type": "explore",
+    "priority": "medium",
+    "description": "the code for bebop app lives in apps/bebop inside office-bohemia",
+    "status": "dispatched",
+    "created": "2026-03-12T06:42:25.777Z",
+    "createdBy": "dashboard",
+    "dispatched_at": "2026-03-12T06:42:29.733Z",
+    "dispatched_to": "rebecca"
+  },
+  {
+    "id": "W004",
+    "title": "build dalla's cowork pr locally",
+    "type": "implement",
+    "priority": "medium",
+    "description": "",
+    "status": "dispatched",
+    "created": "2026-03-12T06:45:56.046Z",
+    "createdBy": "dashboard",
+    "dispatched_at": "2026-03-12T06:45:56.405Z",
+    "dispatched_to": "dallas"
   }
 ]
