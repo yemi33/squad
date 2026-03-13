@@ -610,6 +610,8 @@ const server = http.createServer(async (req, res) => {
         status: 'pending', created: new Date().toISOString(), createdBy: 'dashboard',
       };
       if (body.scope) item.scope = body.scope;
+      if (body.agent) item.agent = body.agent;
+      if (body.agents) item.agents = body.agents;
       items.push(item);
       fs.writeFileSync(wiPath, JSON.stringify(items, null, 2));
       return jsonReply(res, 200, { ok: true, id });
