@@ -1697,13 +1697,55 @@ function checkTimeouts(config) {
       }
     } catch {}
 
+    // Check if agent is in a blocking tool call (TaskOutput block:true, Bash with long timeout, etc.)
+    // These tools produce no stdout for extended periods — don't kill them prematurely
+    let isBlocking = false;
+    let blockingTimeout = heartbeatTimeout;
+    if (hasProcess && silentMs > heartbeatTimeout) {
+      try {
+        const liveLog = safeRead(liveLogPath);
+        if (liveLog) {
+          // Find the last tool_use call in the output — check if it's a known blocking tool
+          const lines = liveLog.split('\n');
+          for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
+            const line = lines[i];
+            if (!line.includes('"tool_use"')) continue;
+            try {
+              const parsed = JSON.parse(line);
+              const toolUse = parsed?.message?.content?.find?.(c => c.type === 'tool_use');
+              if (!toolUse) continue;
+              const input = toolUse.input || {};
+              const name = toolUse.name || '';
+              // TaskOutput with block:true — waiting for a background task
+              if (name === 'TaskOutput' && input.block === true) {
+                const taskTimeout = input.timeout || 600000; // default 10min
+                blockingTimeout = Math.max(heartbeatTimeout, taskTimeout + 60000); // task timeout + 1min grace
+                isBlocking = true;
+              }
+              // Bash with explicit long timeout (>5min)
+              if (name === 'Bash' && input.timeout && input.timeout > heartbeatTimeout) {
+                blockingTimeout = Math.max(heartbeatTimeout, input.timeout + 60000);
+                isBlocking = true;
+              }
+              break; // only check the most recent tool_use
+            } catch {}
+          }
+          if (isBlocking) {
+            log('info', `Agent ${item.agent} (${item.id}) is in a blocking tool call — extended timeout to ${Math.round(blockingTimeout / 1000)}s (silent for ${silentSec}s)`);
+          }
+        }
+      } catch {}
+    }
+
+    const effectiveTimeout = isBlocking ? blockingTimeout : heartbeatTimeout;
+
     if (!hasProcess && silentMs > heartbeatTimeout) {
       // No tracked process AND no recent output → orphaned
       log('warn', `Orphan detected: ${item.agent} (${item.id}) — no process tracked, no output for ${silentSec}s`);
       deadItems.push({ item, reason: `Orphaned — no process, silent for ${silentSec}s` });
-    } else if (hasProcess && silentMs > heartbeatTimeout) {
-      // Has process but no output → hung
-      log('warn', `Hung agent: ${item.agent} (${item.id}) — process exists but no output for ${silentSec}s`);
+    } else if (hasProcess && silentMs > effectiveTimeout) {
+      // Has process but no output past effective timeout → hung
+      log('warn', `Hung agent: ${item.agent} (${item.id}) — process exists but no output for ${silentSec}s${isBlocking ? ' (blocking timeout exceeded)' : ''}`);
       const procInfo = activeProcesses.get(item.id);
       if (procInfo) {
         try { procInfo.proc.kill('SIGTERM'); } catch {}
