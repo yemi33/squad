@@ -192,13 +192,10 @@ function syncMcpServers() {
 // ─── Skills ──────────────────────────────────────────────────────────────────
 
 const SKILLS_DIR = path.join(SQUAD_DIR, 'skills');
-// Legacy compat: also check runbooks/ for migration period
-const RUNBOOKS_DIR = path.join(SQUAD_DIR, 'runbooks');
-
 function collectSkillFiles() {
   const skillFiles = [];
   // Squad-level skills (shared across all agents)
-  for (const dir of [SKILLS_DIR, RUNBOOKS_DIR]) {
+  for (const dir of [SKILLS_DIR]) {
     try {
       const files = fs.readdirSync(dir).filter(f => f.endsWith('.md') && f !== 'README.md');
       for (const f of files) skillFiles.push({ file: f, dir, scope: 'squad' });
@@ -433,7 +430,7 @@ function buildSystemPrompt(agentId, config, project) {
   prompt += `   - Squad-wide: \`${SKILLS_DIR}/<name>.md\` (no PR needed)\n`;
   prompt += `   - Project-specific: \`<project>/.claude/skills/<name>.md\` (requires a PR since it modifies the repo)\n\n`;
 
-  // Skills (formerly runbooks)
+  // Skills
   const skillIndex = getSkillIndex();
   if (skillIndex) {
     prompt += skillIndex + '\n';

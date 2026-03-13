@@ -283,7 +283,6 @@ function getMetrics() {
 function getSkills() {
   const skillsDirs = [
     { dir: path.join(SQUAD_DIR, 'skills'), source: 'skills', scope: 'squad' },
-    { dir: path.join(SQUAD_DIR, 'runbooks'), source: 'runbooks', scope: 'squad' }  // legacy compat
   ];
   // Also scan project-level skills
   for (const p of PROJECTS) {
@@ -672,7 +671,7 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
-  // GET /api/skill?file=<name>.md&source=skills|runbooks|project:<name>
+  // GET /api/skill?file=<name>.md&source=skills|project:<name>
   if (req.method === 'GET' && req.url.startsWith('/api/skill?')) {
     const params = new URL(req.url, 'http://localhost').searchParams;
     const file = params.get('file');
@@ -686,7 +685,7 @@ const server = http.createServer(async (req, res) => {
       const proj = PROJECTS.find(p => p.name === projName);
       skillDir = proj ? path.resolve(proj.localPath, '.claude', 'skills') : null;
     } else {
-      skillDir = path.join(SQUAD_DIR, source === 'runbooks' ? 'runbooks' : 'skills');
+      skillDir = path.join(SQUAD_DIR, 'skills');
     }
     const content = skillDir ? safeRead(path.join(skillDir, file)) : '';
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');

@@ -2,6 +2,42 @@
 
 ## Active Decisions
 
+### 2026-03-12: Rebecca W003 Findings — Progression UI & Ask-User-Question Design
+**By:** Persisted from inbox (rebecca-W003-2026-03-12.md)
+**What:** # Rebecca W003 Findings — Progression UI & Ask-User-Question Design
+
+**Date:** 2026-03-12
+**Task:** W003 — Design doc for progression UI and ask-user-question UI
+**PR:** PR-4959405 (office-bohemia)
+
+## What I Learned
+
+### bebop-desktop Patterns
+
+1. **ChainOfThoughtCard is the core progression component** — It renders a list of `CoTProcessingStep` objects per message, each with `Pending → InProgress → Complete` status transitions. Steps are streamed progressively with configurable timin
+
+---
+
+
+### 2026-03-12: Ralph — Learnings from office-bohemia Exploration
+**By:** Persisted from inbox (ralph-2026-03-12.md)
+**What:** # Ralph — Learnings from office-bohemia Exploration
+
+**Date:** 2026-03-12
+
+## Key Learnings
+
+1. **office-bohemia is the Microsoft Loop monorepo** — ~227 packages, Yarn 4.12, Lage 2.14, TypeScript 5.9, Node 24+. Main branch is `master`.
+
+2. **Two main apps with different stacks:**
+   - **Bebop** (M365 Copilot App): TanStack Start + React 19 + Vite 7 + Nitro + SSR/RSC + React Compiler
+   - **Loop App**: React 18 + Webpack + Cloudpack + Fluent UI SPA
+
+3. **Bebop feature-first pattern is
+
+---
+
+
 ### 2026-03-11: Use Azure DevOps (ADO) for all git/repo operations
 **By:** yemishin
 **What:** All repo operations (branches, PRs, commits, work items, code search) must use `mcp__azure-ado__*` MCP tools. NEVER use GitHub CLI (`gh`) or GitHub API.

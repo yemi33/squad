@@ -92,10 +92,12 @@
     "type": "test",
     "priority": "medium",
     "description": "",
-    "status": "dispatched",
+    "status": "failed",
     "created": "2026-03-12T17:58:07.529Z",
     "createdBy": "dashboard",
-    "dispatched_at": "2026-03-12T19:29:55.446Z",
-    "dispatched_to": "dallas"
+    "dispatched_at": "2026-03-12T23:54:23.998Z",
+    "dispatched_to": "dallas",
+    "failReason": "Orphaned — no process, silent for 133s",
+    "failedAt": "2026-03-12T23:59:19.586Z"
   }
 ]

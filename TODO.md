@@ -31,7 +31,7 @@
 
 ## Dashboard
 - [ ] **Live agent output streaming** — show real-time stdout/stderr while agents are working, not just after completion
-- [ ] **Runbook editor** — create/edit runbooks directly in the dashboard UI
+- [ ] **Skill editor** — create/edit skills directly in the dashboard UI
 - [ ] **Work item status updates** — show dispatched agent progress, link to PRs created
 
 ## Engine Resilience

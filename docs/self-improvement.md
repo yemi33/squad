@@ -190,33 +190,39 @@ Metrics are currently informational — displayed in status and dashboard. Plann
              └──────────┘ └──────────┘ └──────────┘
 ```
 
-## 5. Runbooks — Agent-Discovered Workflows
+## 5. Skills — Agent-Discovered Workflows
 
-When an agent discovers a repeatable multi-step procedure, it can save it as a **runbook** — a structured, reusable workflow that all agents can follow.
+When an agent discovers a repeatable multi-step procedure, it can save it as a **skill** — a structured, reusable workflow compatible with Claude Code's skill system. Skills are stored in two locations:
+
+- **Squad-wide:** `~/.squad/skills/<name>.md` — shared across all agents, no PR required
+- **Project-specific:** `<project>/.claude/skills/<name>/SKILL.md` — scoped to one repo, requires a PR
 
 ### Flow
 
 ```
 Agent discovers repeatable pattern during task
-  → writes runbooks/<name>.md with frontmatter (name, trigger, author, project)
-  → engine detects new runbook files on next tick
-  → builds runbook index (name + trigger + file path)
+  → writes skills/<name>.md with frontmatter (name, description, trigger, allowed-tools)
+  → engine detects new skill files on next tick
+  → builds skill index (name + trigger + file path)
   → index injected into every agent's system prompt
-  → future agents see "Available Runbooks" and follow matching ones
+  → future agents see "Available Skills" and follow matching ones
+  → skills are also invocable via Claude Code's /skill-name command
 ```
 
-### Runbook Format
+### Skill Format
 
 ```markdown
 ---
 name: fix-yarn-lock-conflict
+description: Resolves yarn.lock merge conflicts by regenerating the lockfile
 trigger: when merging branches that both modified yarn.lock
+allowed-tools: Bash, Read, Write
 author: dallas
 created: 2026-03-12
 project: OfficeAgent
 ---
 
-# Runbook: Fix Yarn Lock Conflicts
+# Skill: Fix Yarn Lock Conflicts
 
 ## When to Use
 When a git merge or rebase produces conflicts in yarn.lock.
@@ -232,29 +238,18 @@ When a git merge or rebase produces conflicts in yarn.lock.
 - Always run `yarn build` after regenerating to verify
 ```
 
-### What agents see in their prompt
-
-```
-## Available Runbooks
-
-### fix-yarn-lock-conflict
-**When:** when merging branches that both modified yarn.lock
-**Project:** OfficeAgent
-**File:** ~/.squad/runbooks/fix-yarn-lock-conflict.md
-Read the full runbook file before following the steps.
-```
-
 ### How it differs from decisions.md
 
-| | decisions.md | Runbooks |
+| | decisions.md | Skills |
 |---|---|---|
 | **Format** | Free-form prose, appended by engine | Structured with frontmatter, one file per workflow |
 | **Granularity** | Rules, conventions, findings | Step-by-step procedures |
 | **Authored by** | Engine (consolidation) | Agents directly |
 | **Trigger** | Always injected (all context) | Agent matches trigger to current situation |
 | **Lifespan** | Grows forever (pruned at 50KB) | Permanent, individually editable |
+| **Claude Code** | Not directly invocable | Invocable via `/skill-name` |
 
-### When agents should create runbooks
+### When agents should create skills
 
 - Multi-step procedures they had to figure out (build setup, deployment, migration)
 - Error recovery patterns (how to fix a specific class of failure)
