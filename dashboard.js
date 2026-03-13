@@ -505,6 +505,80 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
+  // POST /api/work-items/delete — remove a work item, kill agent, clear dispatch
+  if (req.method === 'POST' && req.url === '/api/work-items/delete') {
+    try {
+      const body = await readBody(req);
+      const { id, source } = body;
+      if (!id) return jsonReply(res, 400, { error: 'id required' });
+
+      // Find the right work-items file
+      let wiPath;
+      if (!source || source === 'central') {
+        wiPath = path.join(SQUAD_DIR, 'work-items.json');
+      } else {
+        const proj = PROJECTS.find(p => p.name === source);
+        if (proj) {
+          const root = path.resolve(proj.localPath || path.resolve(SQUAD_DIR, '..'));
+          const wiSrc = proj.workSources?.workItems || CONFIG.workSources?.workItems || {};
+          wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+        }
+      }
+      if (!wiPath) return jsonReply(res, 404, { error: 'source not found' });
+
+      const items = JSON.parse(safeRead(wiPath) || '[]');
+      const idx = items.findIndex(i => i.id === id);
+      if (idx === -1) return jsonReply(res, 404, { error: 'item not found' });
+
+      const item = items[idx];
+
+      // Kill running agent process if dispatched
+      if (item.dispatched_to) {
+        const agentDir = path.join(SQUAD_DIR, 'agents', item.dispatched_to);
+        const statusPath = path.join(agentDir, 'status.json');
+        try {
+          const status = JSON.parse(safeRead(statusPath) || '{}');
+          if (status.pid) {
+            try { process.kill(status.pid, 'SIGTERM'); } catch {}
+          }
+          // Reset agent to idle
+          status.status = 'idle';
+          delete status.currentTask;
+          delete status.dispatched;
+          fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
+        } catch {}
+      }
+
+      // Remove item from work-items file
+      items.splice(idx, 1);
+      fs.writeFileSync(wiPath, JSON.stringify(items, null, 2));
+
+      // Clear dispatch entries (pending, active, completed + fan-out)
+      const dispatchPath = path.join(SQUAD_DIR, 'engine', 'dispatch.json');
+      try {
+        const dispatch = JSON.parse(safeRead(dispatchPath) || '{}');
+        const sourcePrefix = (!source || source === 'central') ? 'central-work-' : `work-${source}-`;
+        const dispatchKey = sourcePrefix + id;
+        let changed = false;
+        for (const queue of ['pending', 'active', 'completed']) {
+          if (dispatch[queue]) {
+            const before = dispatch[queue].length;
+            dispatch[queue] = dispatch[queue].filter(d =>
+              d.meta?.dispatchKey !== dispatchKey &&
+              (!d.meta?.parentKey || d.meta.parentKey !== dispatchKey)
+            );
+            if (dispatch[queue].length !== before) changed = true;
+          }
+        }
+        if (changed) {
+          fs.writeFileSync(dispatchPath, JSON.stringify(dispatch, null, 2));
+        }
+      } catch {}
+
+      return jsonReply(res, 200, { ok: true, id });
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
   // POST /api/work-items
   if (req.method === 'POST' && req.url === '/api/work-items') {
     try {

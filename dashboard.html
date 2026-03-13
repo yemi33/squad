@@ -97,7 +97,9 @@
   .prd-pending { color: var(--yellow); font-style: italic; }
 
   /* PR Tracker */
+  .pr-table-wrap { overflow-x: auto; }
   .pr-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+  .pr-table th:last-child, .pr-table td:last-child { width: 36px; min-width: 36px; text-align: center; }
   .pr-table th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   .pr-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   .pr-table tr:last-child td { border-bottom: none; }
@@ -372,7 +374,7 @@
     <div class="agents" id="agents-grid">Loading...</div>
   </section>
 
-  <section id="work-items-section">
+  <section id="work-items-section" style="overflow:visible">
     <h2>Work Items <span class="count" id="wi-count">0</span></h2>
     <div id="work-items-content"><p class="empty">No work items. Add tasks via Command Center above.</p></div>
   </section>
@@ -768,7 +770,7 @@ function prRow(pr) {
 
 function prTableHtml(rows) {
   return '<table class="pr-table"><thead><tr>' +
-    '<th>PR</th><th>Title</th><th>Agent</th><th>Branch</th><th>Review</th><th>Signed Off By</th><th>Build</th><th>Status</th><th>Created</th>' +
+    '<th>PR</th><th>Title</th><th>Agent</th><th>Branch</th><th>Review</th><th>Signed Off By</th><th>Build</th><th>Status</th><th>Created</th><th></th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
@@ -1137,9 +1139,9 @@ function renderWorkItems(items) {
   const start = wiPage * WI_PER_PAGE;
   const pageItems = items.slice(start, start + WI_PER_PAGE);
 
-  let html = '<table class="pr-table"><thead><tr><th>ID</th><th>Title</th><th>Source</th><th>Type</th><th>Priority</th><th>Status</th><th>Agent</th><th>PR</th><th>Created</th><th></th></tr></thead><tbody>';
+  let html = '<div class="pr-table-wrap"><table class="pr-table"><thead><tr><th>ID</th><th>Title</th><th>Source</th><th>Type</th><th>Priority</th><th>Status</th><th>Agent</th><th>PR</th><th>Created</th><th></th></tr></thead><tbody>';
   html += pageItems.map(wiRow).join('');
-  html += '</tbody></table>';
+  html += '</tbody></table></div>';
 
   if (items.length > WI_PER_PAGE) {
     html += '<div class="pr-pager">' +
@@ -1187,8 +1189,8 @@ function wiNext() { const tp = Math.ceil(allWorkItems.length / WI_PER_PAGE); if 
 
 function openAllWorkItems() {
   document.getElementById('modal-title').textContent = 'All Work Items (' + allWorkItems.length + ')';
-  const html = '<table class="pr-table"><thead><tr><th>ID</th><th>Title</th><th>Source</th><th>Type</th><th>Priority</th><th>Status</th><th>Agent</th><th>PR</th><th>Created</th><th></th></tr></thead><tbody>' +
-    allWorkItems.map(wiRow).join('') + '</tbody></table>';
+  const html = '<div class="pr-table-wrap"><table class="pr-table"><thead><tr><th>ID</th><th>Title</th><th>Source</th><th>Type</th><th>Priority</th><th>Status</th><th>Agent</th><th>PR</th><th>Created</th><th></th></tr></thead><tbody>' +
+    allWorkItems.map(wiRow).join('') + '</tbody></table></div>';
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('modal-body').style.fontFamily = "'Segoe UI', system-ui, sans-serif";
   document.getElementById('modal-body').style.whiteSpace = 'normal';
