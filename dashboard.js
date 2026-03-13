@@ -407,7 +407,7 @@ function getStatus() {
     agents: getAgents(),
     prdProgress: prdInfo.progress,
     inbox: getInbox(),
-    decisions: getNotes(),
+    notes: getNotes(),
     prd: prdInfo.status,
     pullRequests: getPullRequests(),
     archivedPrds: getArchivedPrds(),
@@ -620,14 +620,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   // POST /api/notes
-  if (req.method === 'POST' && (req.url === '/api/notes' || req.url === '/api/decisions')) {
+  if (req.method === 'POST' && req.url === '/api/notes') {
     try {
       const body = await readBody(req);
       const decPath = path.join(SQUAD_DIR, 'notes.md');
-      let content = safeRead(decPath) || '# Squad Decisions\n\n## Active Decisions\n';
+      let content = safeRead(decPath) || '# Squad Notes\n\n## Active Notes\n';
       const today = new Date().toISOString().slice(0, 10);
       const entry = `\n### ${today}: ${body.title}\n**By:** ${body.author || os.userInfo().username}\n**What:** ${body.what}\n${body.why ? '**Why:** ' + body.why + '\n' : ''}\n---\n`;
-      const marker = '## Active Decisions';
+      // Support both old and new marker formats
+      const marker = '## Active Notes';
       const idx = content.indexOf(marker);
       if (idx !== -1) {
         const insertAt = idx + marker.length;
@@ -693,16 +694,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // GET /api/decisions — return full notes.md content
-  if (req.method === 'GET' && req.url === '/api/decisions-full') {
+  // GET /api/notes-full — return full notes.md content
+  if (req.method === 'GET' && req.url === '/api/notes-full') {
     const content = safeRead(path.join(SQUAD_DIR, 'notes.md'));
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.end(content || 'No decisions file found.');
+    res.end(content || 'No notes file found.');
     return;
   }
 
-  // POST /api/inbox/persist — promote an inbox item to active decision
+  // POST /api/inbox/persist — promote an inbox item to team notes
   if (req.method === 'POST' && req.url === '/api/inbox/persist') {
     try {
       const body = await readBody(req);
@@ -717,21 +718,21 @@ const server = http.createServer(async (req, res) => {
       const titleMatch = content.match(/^#+ (.+)$/m);
       const title = titleMatch ? titleMatch[1].trim() : name.replace('.md', '');
 
-      // Append to notes.md as a new active decision
-      const decPath = path.join(SQUAD_DIR, 'notes.md');
-      let decisions = safeRead(decPath) || '# Squad Decisions\n\n## Active Decisions\n';
+      // Append to notes.md as a new team note
+      const notesPath = path.join(SQUAD_DIR, 'notes.md');
+      let notes = safeRead(notesPath) || '# Squad Notes\n\n## Active Notes\n';
       const today = new Date().toISOString().slice(0, 10);
       const entry = `\n### ${today}: ${title}\n**By:** Persisted from inbox (${name})\n**What:** ${content.slice(0, 500)}\n\n---\n`;
 
-      const marker = '## Active Decisions';
-      const idx = decisions.indexOf(marker);
+      const marker = '## Active Notes';
+      const idx = notes.indexOf(marker);
       if (idx !== -1) {
         const insertAt = idx + marker.length;
-        decisions = decisions.slice(0, insertAt) + '\n' + entry + decisions.slice(insertAt);
+        notes = notes.slice(0, insertAt) + '\n' + entry + notes.slice(insertAt);
       } else {
-        decisions += '\n' + entry;
+        notes += '\n' + entry;
       }
-      fs.writeFileSync(decPath, decisions);
+      fs.writeFileSync(notesPath, notes);
 
       // Move to archive
       const archiveDir = path.join(SQUAD_DIR, 'notes', 'archive');
@@ -754,8 +755,17 @@ const server = http.createServer(async (req, res) => {
       if (!fs.existsSync(filePath)) return jsonReply(res, 404, { error: 'file not found' });
 
       const { exec } = require('child_process');
-      // Windows: select the file in explorer
-      exec(`explorer /select,"${filePath.replace(/\//g, '\\\\')}"`);
+      try {
+        if (process.platform === 'win32') {
+          exec(`explorer /select,"${filePath.replace(/\//g, '\\\\')}"`);
+        } else if (process.platform === 'darwin') {
+          exec(`open -R "${filePath}"`);
+        } else {
+          exec(`xdg-open "${path.dirname(filePath)}"`);
+        }
+      } catch (e) {
+        return jsonReply(res, 500, { error: 'Could not open file manager: ' + e.message });
+      }
       return jsonReply(res, 200, { ok: true });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
@@ -808,6 +818,36 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // GET /api/health — lightweight health check
+  if (req.method === 'GET' && req.url === '/api/health') {
+    try {
+      const engine = getEngineState();
+      const agents = getAgents().map(a => ({ id: a.id, status: a.status }));
+      const projects = PROJECTS.map(p => {
+        let reachable = false;
+        try { reachable = fs.existsSync(p.localPath); } catch {}
+        return { name: p.name || 'Project', reachable };
+      });
+
+      const allIdle = agents.every(a => a.status === 'idle' || a.status === 'done');
+      const engineStopped = engine.state === 'stopped';
+      let status = 'healthy';
+      if (engineStopped && !allIdle) status = 'degraded';
+      if (engineStopped && projects.every(p => !p.reachable)) status = 'stopped';
+
+      return jsonReply(res, 200, {
+        status,
+        engine: { state: engine.state || 'stopped', pid: engine.pid || null },
+        agents,
+        projects,
+        uptime: Math.floor(process.uptime()),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      return jsonReply(res, 500, { status: 'degraded', error: e.message, timestamp: new Date().toISOString() });
+    }
+  }
+
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.end(HTML);
 });
@@ -822,7 +862,18 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  Auto-refreshes every 4s. Ctrl+C to stop.\n`);
 
   const { exec } = require('child_process');
-  exec(`start http://localhost:${PORT}`);
+  try {
+    if (process.platform === 'win32') {
+      exec(`start "" "http://localhost:${PORT}"`);
+    } else if (process.platform === 'darwin') {
+      exec(`open http://localhost:${PORT}`);
+    } else {
+      exec(`xdg-open http://localhost:${PORT}`);
+    }
+  } catch (e) {
+    console.log(`  Could not auto-open browser: ${e.message}`);
+    console.log(`  Please open http://localhost:${PORT} manually.`);
+  }
 });
 
 server.on('error', e => {
