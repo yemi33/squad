@@ -1081,6 +1081,137 @@ function updatePrAfterFix(pr, project) {
   log('info', `Updated ${pr.id} → squad review: waiting (fix pushed)`);
 }
 
+// ─── ADO Build Status Polling ────────────────────────────────────────────────
+
+let _adoTokenCache = { token: null, expiresAt: 0 };
+
+function getAdoToken() {
+  // Cache token for 30 minutes (they typically last 1hr)
+  if (_adoTokenCache.token && Date.now() < _adoTokenCache.expiresAt) {
+    return _adoTokenCache.token;
+  }
+  try {
+    const token = execSync('azureauth ado token --output token', {
+      timeout: 15000, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe']
+    }).trim();
+    if (token && token.startsWith('eyJ')) {
+      _adoTokenCache = { token, expiresAt: Date.now() + 30 * 60 * 1000 };
+      return token;
+    }
+  } catch (e) {
+    log('warn', `Failed to get ADO token: ${e.message}`);
+  }
+  return null;
+}
+
+async function adoFetch(url, token) {
+  const res = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) throw new Error(`ADO API ${res.status}: ${res.statusText}`);
+  return res.json();
+}
+
+/**
+ * Poll ADO for build/CI status on all active PRs.
+ * Uses the PR statuses endpoint — each CI pipeline posts a status context.
+ * We look at the latest status per context, filter to build-related ones
+ * (codecoverage = pipeline results, deploy = deployment checks), and
+ * derive an overall build status.
+ */
+async function pollPrBuildStatus(config) {
+  const token = getAdoToken();
+  if (!token) {
+    log('warn', 'Skipping PR build poll — no ADO token available');
+    return;
+  }
+
+  const projects = getProjects(config);
+  let totalUpdated = 0;
+
+  for (const project of projects) {
+    if (!project.adoOrg || !project.adoProject || !project.repositoryId) continue;
+
+    const prs = getPrs(project);
+    const activePrs = prs.filter(pr => pr.status === 'active');
+    if (activePrs.length === 0) continue;
+
+    let projectUpdated = 0;
+
+    for (const pr of activePrs) {
+      const prNum = (pr.id || '').replace('PR-', '');
+      if (!prNum) continue;
+
+      try {
+        const orgBase = project.adoOrg.includes('.')
+          ? `https://${project.adoOrg}`
+          : `https://dev.azure.com/${project.adoOrg}`;
+
+        const statusUrl = `${orgBase}/${project.adoProject}/_apis/git/repositories/${project.repositoryId}/pullrequests/${prNum}/statuses?api-version=7.1`;
+        const statusData = await adoFetch(statusUrl, token);
+
+        // Dedupe: keep only the latest status per context (API returns newest first)
+        const latest = new Map();
+        for (const s of statusData.value || []) {
+          const key = (s.context?.genre || '') + '/' + (s.context?.name || '');
+          if (!latest.has(key)) latest.set(key, s);
+        }
+
+        // Filter to build/CI-related contexts (pipelines post codecoverage, deploy, build contexts)
+        // Exclude: review policies, security scans, governance, nitpicker, approvers
+        const buildStatuses = [...latest.values()].filter(s => {
+          const ctx = ((s.context?.genre || '') + '/' + (s.context?.name || '')).toLowerCase();
+          return ctx.includes('codecoverage') || ctx.includes('build') ||
+                 ctx.includes('deploy') || ctx.includes('ci/');
+        });
+
+        let buildStatus = 'none';
+        let buildFailReason = '';
+
+        if (buildStatuses.length > 0) {
+          const states = buildStatuses.map(s => s.state).filter(Boolean);
+          const hasFailed = states.some(s => s === 'failed' || s === 'error');
+          const allDone = states.every(s => s === 'succeeded' || s === 'notApplicable');
+          const hasQueued = buildStatuses.some(s => !s.state);
+
+          if (hasFailed) {
+            buildStatus = 'failing';
+            const failed = buildStatuses.find(s => s.state === 'failed' || s.state === 'error');
+            buildFailReason = failed?.description || failed?.context?.name || 'Build failed';
+          } else if (allDone && !hasQueued) {
+            buildStatus = 'passing';
+          } else {
+            buildStatus = 'running';
+          }
+        }
+
+        if (pr.buildStatus !== buildStatus) {
+          const prev = pr.buildStatus || 'none';
+          pr.buildStatus = buildStatus;
+          if (buildFailReason) pr.buildFailReason = buildFailReason;
+          else delete pr.buildFailReason;
+          projectUpdated++;
+          log('info', `PR ${pr.id} build: ${prev} → ${buildStatus}${buildFailReason ? ' (' + buildFailReason + ')' : ''}`);
+        }
+      } catch (e) {
+        log('warn', `Failed to poll build status for ${pr.id}: ${e.message}`);
+      }
+    }
+
+    if (projectUpdated > 0) {
+      const root = path.resolve(project.localPath);
+      const prSrc = project.workSources?.pullRequests || {};
+      const prPath = path.resolve(root, prSrc.path || '.squad/pull-requests.json');
+      safeWrite(prPath, prs);
+      totalUpdated += projectUpdated;
+    }
+  }
+
+  if (totalUpdated > 0) {
+    log('info', `Build status poll: updated ${totalUpdated} PR(s)`);
+  }
+}
+
 function checkForLearnings(agentId, agentInfo, taskDesc) {
   const today = dateStamp();
   const inboxFiles = getInboxFiles();
@@ -2609,7 +2740,12 @@ function tick() {
     runCleanup(config);
   }
 
-  // 2.6. Periodic PR status sync (every 20 ticks = ~10 minutes)
+  // 2.6. Poll ADO build status (every 6 ticks = ~3 minutes)
+  if (tickCount % 6 === 0) {
+    pollPrBuildStatus(config).catch(e => log('warn', `Build poll error: ${e.message}`));
+  }
+
+  // 2.7. Periodic PR status sync via agent (every 20 ticks = ~10 minutes)
   if (tickCount % 20 === 0) {
     schedulePrSync(config);
   }
