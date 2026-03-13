@@ -21,6 +21,40 @@ cd ~/.squad
 
 No `npm install` needed — Squad uses only Node.js built-in modules.
 
+## Setup via Claude Code
+
+If you use Claude Code as your daily driver, you can set up Squad by prompting Claude directly from your home directory (`~`). Here are prompts that work:
+
+**First-time setup:**
+```
+Clone https://github.com/yemi33/squad.git to ~/.squad, then run `node ~/.squad/squad.js init`
+to initialize it. After that, link my project at ~/my-project by running
+`node ~/.squad/squad.js add ~/my-project` — answer the interactive prompts using
+what you can auto-detect from the repo.
+```
+
+**Add another project later:**
+```
+Link ~/another-repo to my squad by running `node ~/.squad/squad.js add ~/another-repo`
+```
+
+**Start the engine:**
+```
+Start my squad engine with `node ~/.squad/engine.js` and open the dashboard
+with `node ~/.squad/dashboard.js` in a second terminal
+```
+
+**Give the squad work:**
+```
+Add a work item to my squad: "Explore the codebase and document the architecture"
+— run `node ~/.squad/engine.js work "Explore the codebase and document the architecture"`
+```
+
+**Check status:**
+```
+Run `node ~/.squad/engine.js status` and tell me what my squad is doing
+```
+
 ## Quick Start
 
 ```powershell
