@@ -43,6 +43,9 @@ git rm --cached decisions.md work-items.json 2>/dev/null
 
 # Notes (session-specific exploration artifacts)
 git rm -r --cached notes/ 2>/dev/null
+
+# Internal project instructions (org-specific context)
+git rm --cached CLAUDE.md 2>/dev/null
 ```
 
 ### 4. Ensure .gitignore excludes these on the clean branch
@@ -57,6 +60,7 @@ decisions/inbox/
 decisions.md
 work-items.json
 notes/
+CLAUDE.md
 ```
 
 If these lines are not already present, add them. If they are (from a previous sync), skip this step.
@@ -118,6 +122,7 @@ gh auth login --hostname github.com --web
 | Decisions summary | `decisions.md` | Synthesized runtime decisions |
 | Work items | `work-items.json` | Runtime dispatch tracking |
 | Notes | `notes/*` | Session-specific exploration artifacts |
+| Project instructions | `CLAUDE.md` | Org-specific context (repo remote purposes, internal notes) |
 
 ## Files Preserved
 
