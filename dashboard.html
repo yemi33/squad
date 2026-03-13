@@ -471,7 +471,7 @@ function statusColor(s) {
 async function openAgentDetail(id) {
   currentAgentId = id;
   const agent = agentData.find(a => a.id === id);
-  currentTab = (agent?.statusData?.status === 'working') ? 'live' : 'thought-process';
+  currentTab = (agent?.status === 'working') ? 'live' : 'thought-process';
   if (!agent) return;
 
   document.getElementById('detail-agent-name').innerHTML =
@@ -485,7 +485,7 @@ async function openAgentDetail(id) {
   try {
     const detail = await fetch('/api/agent/' + id).then(r => r.json());
     renderDetailTabs(detail);
-    renderDetailContent(detail, 'thought-process');
+    renderDetailContent(detail, currentTab);
   } catch(e) {
     document.getElementById('detail-content').textContent = 'Error loading agent detail: ' + e.message;
   }
