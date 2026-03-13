@@ -563,6 +563,7 @@ function sanitizeBranch(name) {
 // ─── Agent Spawner ──────────────────────────────────────────────────────────
 
 const activeProcesses = new Map(); // dispatchId → { proc, agentId, startedAt }
+let engineRestartGraceUntil = 0; // timestamp — suppress orphan detection until this time
 
 function spawnAgent(dispatchItem, config) {
   const { id, agent: agentId, prompt: taskPrompt, type, meta } = dispatchItem;
@@ -1884,9 +1885,8 @@ function checkTimeouts(config) {
 
     const effectiveTimeout = isBlocking ? blockingTimeout : heartbeatTimeout;
 
-    if (!hasProcess && silentMs > effectiveTimeout) {
-      // No tracked process AND no recent output past effective timeout → orphaned
-      // (isBlocking extends the timeout so agents in long builds survive engine restarts)
+    if (!hasProcess && silentMs > effectiveTimeout && Date.now() > engineRestartGraceUntil) {
+      // No tracked process AND no recent output past effective timeout AND grace period expired → orphaned
       log('warn', `Orphan detected: ${item.agent} (${item.id}) — no process tracked, silent for ${silentSec}s${isBlocking ? ' (blocking timeout exceeded)' : ''}`);
       deadItems.push({ item, reason: `Orphaned — no process, silent for ${silentSec}s` });
     } else if (hasProcess && silentMs > effectiveTimeout) {
@@ -3089,6 +3089,18 @@ const commands = {
 
     // Load persistent state
     loadCooldowns();
+
+    // Grace period for agents that survived a restart
+    const dispatch = getDispatch();
+    const activeOnStart = (dispatch.active || []);
+    if (activeOnStart.length > 0) {
+      const gracePeriod = config.engine?.restartGracePeriod || 1200000; // 20min default
+      engineRestartGraceUntil = Date.now() + gracePeriod;
+      console.log(`  ${activeOnStart.length} active dispatch(es) from previous session — ${gracePeriod / 60000}min grace period before orphan detection`);
+      for (const item of activeOnStart) {
+        console.log(`    - ${item.agentName || item.agent}: ${(item.task || '').slice(0, 70)}`);
+      }
+    }
 
     // Initial tick
     tick();

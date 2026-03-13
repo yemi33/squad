@@ -793,6 +793,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // GET /api/health — lightweight health check for monitoring
+  if (req.method === 'GET' && req.url === '/api/health') {
+    const engine = getEngineState();
+    const agents = getAgents();
+    const health = {
+      status: engine.state === 'running' ? 'healthy' : engine.state === 'paused' ? 'degraded' : 'stopped',
+      engine: { state: engine.state, pid: engine.pid },
+      agents: agents.map(a => ({ id: a.id, name: a.name, status: a.status })),
+      projects: PROJECTS.map(p => ({ name: p.name, reachable: fs.existsSync(p.localPath) })),
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString()
+    };
+    return jsonReply(res, 200, health);
+  }
+
   const agentMatch = req.url.match(/^\/api\/agent\/([\w-]+)$/);
   if (agentMatch) {
     res.setHeader('Content-Type', 'application/json');

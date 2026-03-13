@@ -6,21 +6,21 @@ Ordered by difficulty: quick wins first, larger efforts later.
 
 ## Quick Wins (< 1 hour each)
 
-- [ ] **Output.log append, not overwrite** — keep all dispatch outputs, not just the last one. Rotate by dispatch ID.
-- [ ] **Persistent cooldowns** — save cooldown state to disk so engine restarts don't re-dispatch everything
-- [ ] **Worktree cleanup on merge/close** — when `pollPrStatus` detects a PR merged or abandoned, auto-remove its worktree. Currently only `runCleanup` catches old worktrees on a timer.
-- [ ] **Discovery skip logging** — log why items were skipped during discovery (cooldown, already dispatched, no idle agent) so users can diagnose "why isn't my work item being picked up?"
-- [ ] **Idle threshold alert** — if all agents are idle for >N minutes, notify via Teams/dashboard
-- [ ] **Config validation at startup** — verify all project paths exist, all agents defined, all playbooks exist. Fail fast with clear errors instead of silently skipping.
-- [ ] **macOS/Linux browser launch** — replace Windows `start` command with `open` (macOS) / `xdg-open` (Linux)
-- [ ] **Health check endpoint** — `/api/health` returning engine state, project reachability, agent statuses for monitoring
-- [ ] **Fan-out per-agent timeout** — when `@everyone` dispatches, set individual deadlines per agent instead of relying only on global `agentTimeout`
+- [x] **Output.log append, not overwrite** — per-dispatch archive at `output-{id}.log` + latest copy at `output.log`
+- [x] **Persistent cooldowns** — saved to `engine/cooldowns.json`, loaded at startup, 24hr auto-prune
+- [x] **Worktree cleanup on merge/close** — `handlePostMerge` removes worktrees when PR merges or is abandoned
+- [x] **Discovery skip logging** — PRD and work item discovery log skip counts by reason at debug level
+- [x] **Idle threshold alert** — warns when all agents idle >15min (configurable via `engine.idleAlertMinutes`)
+- [x] **Config validation at startup** — checks agents, project paths, playbooks, routing.md. Fatal errors exit(1).
+- [x] **macOS/Linux browser launch** — already platform-aware (was done previously)
+- [x] **Health check endpoint** — `GET /api/health` returning engine state, agents, project reachability, uptime
+- [x] **Fan-out per-agent timeout** — fan-out items carry `meta.deadline`, configurable via `engine.fanOutTimeout`
 
 ## Small Effort (1–3 hours each)
 
 - [ ] **Auto-retry with backoff** — when an agent errors, auto-retry with exponential backoff (5min, 15min, cap at 3 attempts) instead of requiring manual dashboard retry.
 - [ ] **Auto-escalation** — if an agent errors 3 times in a row, pause their dispatch and alert via dashboard/Teams
-- [ ] **Post-merge hooks** — when a PR merges, trigger configurable actions: clean up worktree, update PRD item status to `done`, notify Teams, update metrics
+- [x] **Post-merge hooks** — `handlePostMerge`: worktree cleanup, PRD status → implemented, prsMerged metric, Teams notification
 - [ ] **Pending dispatch explanation** — show in dashboard why each pending item hasn't been dispatched (no idle agent? cooldown? max concurrency?)
 - [ ] **Work item editing** — edit title, description, type, priority, agent assignment from the dashboard UI (currently requires editing JSON)
 - [ ] **Bulk operations** — retry/delete/reassign multiple work items at once
