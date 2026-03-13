@@ -4,7 +4,7 @@ You are {{agent_name}}, the {{agent_role}} on the {{project_name}} project.
 TEAM ROOT: {{team_root}}
 
 Repository ID comes from `.squad/config.json` under `project.repositoryId`.
-ADO org: {{ado_org}}, project: {{ado_project}}, repo: {{repo_name}}
+Repo: {{repo_name}} | Org: {{ado_org}} | Project: {{ado_project}}
 
 ## Your Task
 
@@ -45,7 +45,7 @@ Branch: `{{pr_branch}}`
 If you encounter merge conflicts (e.g., during `git pull` or when the PR shows conflicts):
 1. Resolve conflicts in the worktree, preferring the PR branch changes. Commit the resolution.
 
-## Post Response on ADO PR
+## Post Response on PR
 
 Use `mcp__azure-ado__repo_create_pull_request_thread`:
 - repositoryId: `{{repo_id}}`

@@ -53,7 +53,7 @@ After dispatching, the engine writes `status: "dispatched"` back to the item. Th
 
 **Reads:** `~/.squad/work-items.json` (central, project-agnostic)
 
-These are tasks where the agent decides which project to work in. The engine builds a prompt that includes a list of all linked projects with their paths and ADO config. The agent then navigates to the appropriate project directory based on the task.
+These are tasks where the agent decides which project to work in. The engine builds a prompt that includes a list of all linked projects with their paths and repo config. The agent then navigates to the appropriate project directory based on the task.
 
 | Item State | Action | Dispatch Type |
 |------------|--------|---------------|
@@ -68,10 +68,10 @@ These are tasks where the agent decides which project to work in. The engine bui
 **Project descriptions drive routing.** Each project in `config.json` has a `description` field. The engine injects these into the central work item prompt:
 
 ```
-### OfficeAgent
-- **Path:** C:/Users/you/OfficeAgent
-- **ADO:** office/ISS/OfficeAgent
-- **What it is:** AI agent platform for Office document creation (DOCX, PPTX, XLSX)...
+### MyProject
+- **Path:** C:/Users/you/MyProject
+- **Repo:** org/project/MyProject
+- **What it is:** Description from config.json...
 ```
 
 Better descriptions → better agent routing. Describe what each repo contains, what kind of work happens there, and what technologies it uses.
@@ -79,8 +79,8 @@ Better descriptions → better agent routing. Describe what each repo contains, 
 **Cross-repo tasks.** Central work items can span multiple repositories. The agent's prompt instructs it to:
 1. Determine all repos affected by the task
 2. Work on each sequentially (worktree → commit → push → PR per repo)
-3. Note cross-repo dependencies in PR descriptions (e.g., "Requires OfficeAgent PR #456")
-4. Use the correct ADO config (org, project, repoId) for each repo
+3. Note cross-repo dependencies in PR descriptions (e.g., "Requires MyProject PR #456")
+4. Use the correct repo config (org, project, repoId) for each repo
 5. Document which repos were touched in the learnings file
 
 This means a single work item like "Add telemetry to the document creation pipeline" can result in PRs across multiple repos if the agent determines the change touches shared modules in one repo and the frontend in another.
@@ -99,7 +99,7 @@ Item found
   │
   ├─ isAlreadyDispatched(key)?  → skip if already in pending or active queue
   │    Key format: <source>-<projectName>-<itemId>
-  │    e.g., "prd-OfficeAgent-M001", "review-MyRepo-PR-123"
+  │    e.g., "prd-MyProject-M001", "review-MyRepo-PR-123"
   │
   ├─ isOnCooldown(key)?         → skip if dispatched within cooldown window
   │    Default: 30min for PRD/PRs, 0 for work-items
@@ -182,8 +182,8 @@ Variables injected from config and item metadata:
 Combines:
 - Agent identity (name, role, skills)
 - Agent charter (`agents/<name>/charter.md`)
-- Project context (repo name, ADO config, main branch)
-- Critical rules (worktrees, ADO MCP, PowerShell, learnings)
+- Project context (repo name, repo host config, main branch)
+- Critical rules (worktrees, MCP tools, PowerShell, learnings)
 - Full `decisions.md` content
 
 ### 5. Spawn Claude CLI

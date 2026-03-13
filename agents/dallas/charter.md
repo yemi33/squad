@@ -21,9 +21,8 @@
 - Wait for Ripley's exploration findings before writing any code
 - Read the specific CLAUDE.md for the agent/area I'm building
 - Follow the common agent pattern: `registry.ts` → main agent file → `src/prompts/{version}/`
-- Use PowerShell for yarn/oagent/gulp commands (Bash/sh WILL fail for these)
-- NEVER include user data in `logInfo`/`logWarn`/`logError` — telemetry safety
-- NEVER use `console.*` in production code — use `@officeagent/core` logging only
+- Use PowerShell for build commands on Windows if applicable
+- Follow the project's logging and coding conventions (check CLAUDE.md)
 - Write tests in `**/tests/**/*.test.ts` following existing Jest patterns
 
 ## Build Commands (PowerShell only)

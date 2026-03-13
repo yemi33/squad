@@ -25,7 +25,7 @@ Inspired by and initially scaffolded from [Brady Gaster's Squad](https://bradyga
 # 1. Initialize the squad (one-time)
 node $env:USERPROFILE\.squad\init.js
 
-# 2. Link your projects (interactive — prompts for description, ADO config)
+# 2. Link your projects (interactive — prompts for description, repo host config)
 node $env:USERPROFILE\.squad\init.js C:\path\to\repo1
 node $env:USERPROFILE\.squad\init.js C:\path\to\repo2
 
@@ -42,7 +42,7 @@ node $env:USERPROFILE\.squad\engine.js status     # Check state
 | Command | Description |
 |---------|-------------|
 | `node init.js` | Initialize squad with default agents and config (no projects) |
-| `node init.js <dir>` | Link a project (prompts for description, ADO config) |
+| `node init.js <dir>` | Link a project (prompts for description, repo host config) |
 | `node init.js <dir> --remove` | Unlink a project |
 | `node init.js --list` | List all linked projects with descriptions |
 
@@ -153,10 +153,10 @@ The engine dispatches the task to **all idle agents simultaneously**, assigning 
 ```
 "Explore all codebases and write architecture doc"  scope: fan-out
        │
-       ├─→ Ripley   → OfficeAgent
-       ├─→ Lambert  → office-bohemia
-       ├─→ Rebecca  → bebop-desktop
-       └─→ Ralph    → OfficeAgent (round-robin wraps)
+       ├─→ Ripley   → Project A
+       ├─→ Lambert  → Project B
+       ├─→ Rebecca  → Project C
+       └─→ Ralph    → Project A (round-robin wraps)
 ```
 
 ### Failed Work Items
@@ -295,7 +295,7 @@ Routing rules in `routing.md`. Charters in `agents/{name}/charter.md`.
 |----------|---------|
 | `work-item.md` | Shared template for all work items (central + per-project) |
 | `implement.md` | Build a PRD item in a git worktree, create PR |
-| `review.md` | Review a PR, post findings to ADO |
+| `review.md` | Review a PR, post findings to repo host |
 | `fix.md` | Fix review feedback on existing PR branch |
 | `analyze.md` | Generate PRD gap analysis in a worktree |
 | `explore.md` | Read-only codebase exploration |

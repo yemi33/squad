@@ -4,7 +4,7 @@
 
 ## Context
 
-ADO org: {{ado_org}}, project: {{ado_project}}, repo: {{repo_name}}
+Repo: {{repo_name}} | Org: {{ado_org}} | Project: {{ado_project}}
 Team root: {{team_root}}
 
 {{scope_section}}
@@ -36,7 +36,7 @@ This is a **test/build/run task**. Your goal is to build, run, test, or verify s
 - **Do NOT create pull requests** — this is a test/verification task only
 - **Do NOT push commits** unless the task explicitly asks you to fix something
 - **Do NOT modify code** unless the task explicitly asks for a fix
-- Use PowerShell for yarn/oagent/gulp commands if applicable
+- Use PowerShell for build commands on Windows if applicable
 - If a build or test fails, report the error clearly — don't try to fix it unless asked
 - If running a local server, report the URL (e.g., http://localhost:3000)
 
@@ -49,7 +49,7 @@ When the build succeeds and the task involves running a server or app, you MUST 
 cd <absolute-path-to-project-or-worktree> && <exact command to start the server>
 ```
 
-Example: `cd C:/Users/yemishin/office-bohemia && yarn dev --filter bebop`
+Example: `cd C:/Users/you/my-project && yarn dev`
 
 The agent process terminates after completion, so any dev server you start will die with it. The user needs this command to run it themselves.
 

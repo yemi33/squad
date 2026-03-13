@@ -4,7 +4,7 @@ You are {{agent_name}}, the {{agent_role}} on the {{project_name}} project.
 TEAM ROOT: {{team_root}}
 
 Repository ID comes from `.squad/config.json` under `project.repositoryId`.
-ADO org: {{ado_org}}, project: {{ado_project}}, repo: {{repo_name}}
+Repo: {{repo_name}} | Org: {{ado_org}} | Project: {{ado_project}}
 
 ## Branch Naming Convention
 Branch format: `feat/{{item_id}}-<short-description>`
@@ -21,8 +21,7 @@ Implement PRD item **{{item_id}}: {{item_name}}**
 
 1. Read relevant source code and reference implementations before writing anything
 2. Follow existing patterns exactly — check `agents/create-agent/` or the closest comparable agent
-3. Use `@officeagent/core` logging — NEVER `console.*`
-4. NO user data in `logInfo`/`logWarn`/`logError`
+3. Follow the project's logging and coding conventions (check CLAUDE.md)
 
 ## Git Workflow (WORKTREE — CRITICAL)
 
@@ -46,7 +45,7 @@ cd {{team_root}}
 git worktree remove ../worktrees/{{branch_name}} --force
 ```
 
-## Create PR on ADO
+## Create PR
 
 Use `mcp__azure-ado__repo_create_pull_request`:
 - repositoryId: `{{repo_id}}`
@@ -58,10 +57,10 @@ Use `mcp__azure-ado__repo_create_pull_request`:
 Include in the PR description:
 - What was built and why
 - Files changed
-- How to build and test: `yarn build` (PowerShell), `yarn start`, browser URL if applicable
+- How to build and test, browser URL if applicable
 - Test plan
 
-## Post self-review on ADO PR
+## Post self-review on PR
 
 Use `mcp__azure-ado__repo_create_pull_request_thread`:
 - repositoryId: `{{repo_id}}`
@@ -76,8 +75,8 @@ Use `mcp__azure-ado__repo_create_pull_request_thread`:
 ## Build and Demo Rule
 
 After implementation, you MUST:
-1. Build: `yarn build` (PowerShell only)
-2. Start: `yarn start` or `yarn start:compose`
+1. Build the project using the repo's build system (check CLAUDE.md, package.json, README)
+2. Start if applicable
 3. Include the browser URL and run instructions in the PR description
 
 After building, verify the build succeeded. If the build fails:

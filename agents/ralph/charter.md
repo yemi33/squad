@@ -20,9 +20,8 @@
 
 - Study existing agent patterns in the codebase before writing code
 - Follow the common agent pattern: `registry.ts` → main agent file → `src/prompts/{version}/`
-- Use PowerShell for yarn/oagent/gulp commands (Bash/sh WILL fail for these)
-- NEVER include user data in `logInfo`/`logWarn`/`logError` — telemetry safety
-- NEVER use `console.*` in production code — use `@officeagent/core` logging only
+- Use PowerShell for build commands on Windows if applicable
+- Follow the project's logging and coding conventions (check CLAUDE.md)
 
 ## Boundaries
 

@@ -5,7 +5,7 @@
 ## Context
 
 Repository ID: from `.squad/config.json` under `project.repositoryId`
-ADO org: {{ado_org}}, project: {{ado_project}}, repo: {{repo_name}}
+Repo: {{repo_name}} | Org: {{ado_org}} | Project: {{ado_project}}
 Team root: {{team_root}}
 
 ## Mission
@@ -53,7 +53,7 @@ If the task is purely exploratory (no deliverable requested), skip this step.
 
 ## Rules
 - Do NOT modify existing code unless the task explicitly asks for it.
-- Do NOT use `gh` CLI or GitHub API. This repo uses Azure DevOps.
+- Use the appropriate MCP tools for PR creation — check available tools before starting.
 - Do NOT checkout branches in the main working tree — use worktrees.
 - Read `decisions.md` for all team rules before starting.
 - If you discover a repeatable workflow, save it as a skill: squad-wide at `{{team_root}}/skills/<name>.md`, or project-specific at `<project>/.claude/skills/<name>.md` (requires PR)

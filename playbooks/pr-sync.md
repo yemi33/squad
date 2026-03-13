@@ -18,17 +18,17 @@ Check the live status of all active PRs across all projects and update the local
 
 For each project with active PRs:
 
-1. **Fetch PR status from ADO** using `mcp__azure-ado__repo_get_pull_request_by_id`:
+1. **Fetch PR status from repo host** using `mcp__azure-ado__repo_get_pull_request_by_id`:
    - Pass the project's `repositoryId` and the PR's numeric ID (extract from `PR-NNNNN` format)
 2. **Compare with local tracker** and update these fields:
-   - `status`: map ADO status (1=active, 2=abandoned, 3=completed/merged)
+   - `status`: map repo host status (1=active, 2=abandoned, 3=completed/merged)
      - If status is 3 (completed), also set `status: "merged"`
    - `reviewStatus`: check `reviewers[].vote` (10=approved, 5=approved-with-suggestions, -5=waiting, -10=rejected, 0=no-vote)
      - Any vote >= 5 → `"approved"`
      - Any vote == -10 → `"changes-requested"`
      - Any vote == -5 → `"waiting"`
      - All votes 0 and at least one reviewer → `"pending"`
-   - `buildStatus`: check `mergeStatus` field from ADO response:
+   - `buildStatus`: check `mergeStatus` field from repo host response:
      - `mergeStatus: 3` (succeeded) → `"passing"`
      - `mergeStatus: 2` (conflicts) → `"conflicts"`
      - Also check PR statuses endpoint if available for CI build status
@@ -40,9 +40,9 @@ For each project with active PRs:
 Report a summary of changes:
 ```
 ## PR Sync Results
-- office-bohemia: 2 PRs checked, 1 updated (PR-4959092: pending → merged)
-- OfficeAgent: 0 active PRs
-- bebop-desktop: 1 PR checked, no changes
+- ProjectA: 2 PRs checked, 1 updated (PR-123: pending → merged)
+- ProjectB: 0 active PRs
+- ProjectC: 1 PR checked, no changes
 ```
 
 ## Rules
@@ -50,5 +50,5 @@ Report a summary of changes:
 - Do NOT create any PRs, branches, or commits
 - Do NOT modify any code
 - Only update `.squad/pull-requests.json` files
-- If ADO API returns null/error for a PR, skip it (don't mark as failed)
+- If repo host API returns null/error for a PR, skip it (don't mark as failed)
 - Use the exact repositoryId from the project config for each API call

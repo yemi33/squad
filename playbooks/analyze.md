@@ -4,7 +4,7 @@ You are {{agent_name}}, the {{agent_role}} on the {{project_name}} project.
 TEAM ROOT: {{team_root}}
 
 Repository ID comes from `.squad/config.json` under `project.repositoryId`.
-ADO org: {{ado_org}}, project: {{ado_project}}, repo: {{repo_name}}
+Repo: {{repo_name}} | Org: {{ado_org}} | Project: {{ado_project}}
 
 ## Your Task
 
@@ -45,7 +45,7 @@ Do ALL work in the worktree. NEVER commit directly to main.
    git push -u origin prd/{{next_version}}
    ```
 
-## Create PR on ADO
+## Create PR
 
 Use `mcp__azure-ado__repo_create_pull_request`:
 - repositoryId: `{{repo_id}}`

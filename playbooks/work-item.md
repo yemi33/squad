@@ -5,7 +5,7 @@
 ## Context
 
 Repository ID: from `.squad/config.json` under `project.repositoryId`
-ADO org: {{ado_org}}, project: {{ado_project}}, repo: {{repo_name}}
+Repo: {{repo_name}} | Org: {{ado_org}} | Project: {{ado_project}}
 Team root: {{team_root}}
 
 {{scope_section}}
@@ -62,8 +62,8 @@ Write your findings to: `{{team_root}}/decisions/inbox/{{agent_id}}-{{item_id}}-
 
 ## Rules
 - NEVER checkout branches in the main working tree — use worktrees
-- Use Azure DevOps MCP tools (`mcp__azure-ado__*`) — NEVER use `gh` CLI
-- Use PowerShell for yarn/oagent/gulp commands if applicable
+- Use the repo host's MCP tools for PR creation — check available MCP tools before starting
+- Use PowerShell for build commands on Windows if applicable
 - If you discover a repeatable workflow, save it as a skill: squad-wide at `{{team_root}}/skills/<name>.md`, or project-specific at `<project>/.claude/skills/<name>.md` (requires PR)
 
 ## Handling Merge Conflicts

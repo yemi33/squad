@@ -219,7 +219,7 @@ trigger: when merging branches that both modified yarn.lock
 allowed-tools: Bash, Read, Write
 author: dallas
 created: 2026-03-12
-project: OfficeAgent
+project: any
 ---
 
 # Skill: Fix Yarn Lock Conflicts

@@ -21,7 +21,7 @@
 
 ```json
 {
-  "project": "OfficeAgent",
+  "project": "MyProject",
   "generated_at": "<ISO timestamp>",
   "version": "1.0.0",
   "summary": "<1-2 sentence overview>",
