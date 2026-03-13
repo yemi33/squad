@@ -122,7 +122,7 @@
     "created": "2026-03-13T09:30:51.902Z",
     "createdBy": "dashboard",
     "agent": "rebecca",
-    "dispatched_at": "2026-03-13T09:42:07.052Z",
+    "dispatched_at": "2026-03-13T10:19:37.636Z",
     "dispatched_to": "rebecca"
   },
   {
@@ -131,10 +131,11 @@
     "type": "implement",
     "priority": "medium",
     "description": "",
-    "status": "dispatched",
+    "status": "done",
     "created": "2026-03-13T09:37:31.666Z",
     "createdBy": "dashboard",
     "dispatched_at": "2026-03-13T09:37:36.987Z",
-    "dispatched_to": "dallas"
+    "dispatched_to": "dallas",
+    "completedAt": "2026-03-13T09:46:19.311Z"
   }
 ]

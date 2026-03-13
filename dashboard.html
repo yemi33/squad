@@ -426,12 +426,12 @@
   </section>
 
   <section>
-    <h2>Decisions Inbox <span class="count" id="inbox-count">0</span></h2>
+    <h2>Notes Inbox <span class="count" id="inbox-count">0</span></h2>
     <div class="inbox-list" id="inbox-list">Loading...</div>
   </section>
 
   <section>
-    <h2>Active Decisions</h2>
+    <h2>Team Notes</h2>
     <div id="decisions-list">Loading...</div>
   </section>
 
@@ -578,12 +578,12 @@ function renderDetailContent(detail, tab) {
     }
 
     if (detail.inboxContents && detail.inboxContents.length > 0) {
-      html += '<h4>Decisions & Findings (' + detail.inboxContents.length + ')</h4>';
+      html += '<h4>Notes & Findings (' + detail.inboxContents.length + ')</h4>';
       detail.inboxContents.forEach(item => {
         html += '<div class="section"><strong style="color:var(--purple)">' + escHtml(item.name) + '</strong>\n\n' + escHtml(item.content) + '</div>';
       });
     } else {
-      html += '<h4>Decisions & Findings</h4><div class="section" style="color:var(--muted);font-style:italic">No decisions or findings written yet.</div>';
+      html += '<h4>Notes & Findings</h4><div class="section" style="color:var(--muted);font-style:italic">No decisions or findings written yet.</div>';
     }
 
     if (detail.outputLog) {
@@ -706,7 +706,7 @@ function renderInbox(inbox) {
       </div>
       <div class="inbox-preview" onclick="openModal(${i})" style="cursor:pointer">${escHtml(item.content.slice(0,200))}</div>
       <div style="display:flex;gap:6px;margin-top:6px">
-        <button class="pr-pager-btn" style="font-size:9px;padding:2px 8px" onclick="event.stopPropagation();persistInboxItem('${escHtml(item.name)}')">Persist as Decision</button>
+        <button class="pr-pager-btn" style="font-size:9px;padding:2px 8px" onclick="event.stopPropagation();persistInboxItem('${escHtml(item.name)}')">Persist as Note</button>
         <button class="pr-pager-btn" style="font-size:9px;padding:2px 8px" onclick="event.stopPropagation();openInboxInExplorer('${escHtml(item.name)}')">Open in Explorer</button>
       </div>
     </div>
@@ -739,7 +739,7 @@ async function openInboxInExplorer(name) {
 
 function renderDecisions(decisions) {
   const el = document.getElementById('decisions-list');
-  if (!decisions.length) { el.innerHTML = '<p class="empty">No decisions yet.</p>'; return; }
+  if (!decisions.length) { el.innerHTML = '<p class="empty">No team notes yet.</p>'; return; }
   el.innerHTML = '<div style="display:flex;flex-direction:column;gap:6px">' +
     decisions.map(d => '<div style="font-size:12px;color:var(--text);padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;cursor:pointer" onclick="openDecisionsFile()">' + escHtml(d) + '</div>').join('') +
   '</div>';
@@ -748,7 +748,7 @@ function renderDecisions(decisions) {
 async function openDecisionsFile() {
   try {
     const content = await fetch('/api/decisions-full').then(r => r.text());
-    document.getElementById('modal-title').textContent = 'decisions.md';
+    document.getElementById('modal-title').textContent = 'Team Notes (decisions.md)';
     document.getElementById('modal-body').textContent = content;
     document.getElementById('modal-body').style.fontFamily = 'Consolas, monospace';
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
@@ -1654,7 +1654,7 @@ async function cmdSubmitDecision(parsed) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to add');
-  showToast('cmd-toast', 'Decision added', true);
+  showToast('cmd-toast', 'Note added', true);
 }
 
 async function cmdSubmitPrd(parsed) {
