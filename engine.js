@@ -555,7 +555,7 @@ function spawnAgent(dispatchItem, config) {
       log('error', `Failed to create worktree for ${branchName}: ${err.message}`);
       // Fall back to main directory for non-writing tasks
       if (type === 'review' || type === 'analyze' || type === 'plan-to-prd') {
-        cwd = ROOT_DIR;
+        cwd = rootDir;
       } else {
         completeDispatch(id, 'error', 'Worktree creation failed');
         return null;
@@ -2296,12 +2296,8 @@ function discoverFromPrs(config, project) {
       const prompt = renderPlaybook('build-and-test', vars);
       if (!prompt) continue;
 
-      // Mark PR so we don't re-dispatch
+      // Mark PR so we don't re-dispatch (written after loop)
       pr.buildTested = 'dispatched';
-      const prRoot = path.resolve(project.localPath);
-      const prSrc = project.workSources?.pullRequests || {};
-      const prPath = path.resolve(prRoot, prSrc.path || '.squad/pull-requests.json');
-      safeWrite(prPath, prs);
 
       newWork.push({
         type: 'test',
@@ -2315,6 +2311,14 @@ function discoverFromPrs(config, project) {
 
       setCooldown(key);
     }
+  }
+
+  // Batch-write PR state changes (buildTested flags) once after the loop
+  if (newWork.some(w => w.meta?.source === 'pr-build-test')) {
+    const prRoot = path.resolve(project.localPath);
+    const prSrc = project.workSources?.pullRequests || {};
+    const prPath = path.resolve(prRoot, prSrc.path || '.squad/pull-requests.json');
+    safeWrite(prPath, prs);
   }
 
   return newWork;
@@ -2504,7 +2508,7 @@ function materializeSpecsAsWorkItems(config, project) {
     }
 
     for (const doc of matchedSpecs) {
-      if (existingItems.some(i => i.sourceSpec === doc.file || i.sourcePr === pr.id)) continue;
+      if (existingItems.some(i => i.sourceSpec === doc.file)) continue;
 
       const info = extractSpecInfo(doc.file, root);
       if (!info) continue;
@@ -2779,7 +2783,21 @@ function discoverWork(config) {
 
 let tickCount = 0;
 
-function tick() {
+let tickRunning = false;
+
+async function tick() {
+  if (tickRunning) return; // prevent overlapping ticks
+  tickRunning = true;
+  try {
+    await tickInner();
+  } catch (e) {
+    log('error', `Tick error: ${e.message}`);
+  } finally {
+    tickRunning = false;
+  }
+}
+
+async function tickInner() {
   const control = getControl();
   if (control.state !== 'running') return;
 
@@ -2798,8 +2816,9 @@ function tick() {
   }
 
   // 2.6. Poll ADO for full PR status: build, review, merge (every 6 ticks = ~3 minutes)
+  // Awaited so PR state is consistent before discoverWork reads it
   if (tickCount % 6 === 0) {
-    pollPrStatus(config).catch(e => log('warn', `PR status poll error: ${e.message}`));
+    try { await pollPrStatus(config); } catch (e) { log('warn', `PR status poll error: ${e.message}`); }
   }
 
   // 3. Discover new work from sources
@@ -2821,7 +2840,7 @@ function tick() {
   const slotsAvailable = maxConcurrent - activeCount;
 
   // Priority dispatch: fixes > reviews > plan-to-prd > implement > other
-  const typePriority = { fix: 0, review: 1, 'plan-to-prd': 2, 'implement:large': 3, implement: 4 };
+  const typePriority = { fix: 0, review: 1, test: 2, 'plan-to-prd': 3, 'implement:large': 4, implement: 5 };
   const itemPriority = { high: 0, medium: 1, low: 2 };
   dispatch.pending.sort((a, b) => {
     const ta = typePriority[a.type] ?? 5, tb = typePriority[b.type] ?? 5;
