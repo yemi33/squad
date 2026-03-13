@@ -1117,16 +1117,17 @@ async function adoFetch(url, token) {
 }
 
 /**
- * Poll ADO for build/CI status on all active PRs.
- * Uses the PR statuses endpoint — each CI pipeline posts a status context.
- * We look at the latest status per context, filter to build-related ones
- * (codecoverage = pipeline results, deploy = deployment checks), and
- * derive an overall build status.
+ * Poll ADO for full PR status: build/CI, review votes, and merge/completion state.
+ * Replaces the agent-based pr-sync — does everything in direct API calls.
+ *
+ * Per PR, makes 2 calls:
+ *   1. GET pullrequests/{id} → status, mergeStatus, reviewers[].vote
+ *   2. GET pullrequests/{id}/statuses → CI pipeline results
  */
-async function pollPrBuildStatus(config) {
+async function pollPrStatus(config) {
   const token = getAdoToken();
   if (!token) {
-    log('warn', 'Skipping PR build poll — no ADO token available');
+    log('warn', 'Skipping PR status poll — no ADO token available');
     return;
   }
 
@@ -1147,7 +1148,6 @@ async function pollPrBuildStatus(config) {
       if (!prNum) continue;
 
       try {
-        // Derive API base from prUrlBase if available (handles visualstudio.com orgs)
         let orgBase;
         if (project.prUrlBase) {
           const m = project.prUrlBase.match(/^(https?:\/\/[^/]+(?:\/DefaultCollection)?)/);
@@ -1159,18 +1159,55 @@ async function pollPrBuildStatus(config) {
             : `https://dev.azure.com/${project.adoOrg}`;
         }
 
-        const statusUrl = `${orgBase}/${project.adoProject}/_apis/git/repositories/${project.repositoryId}/pullrequests/${prNum}/statuses?api-version=7.1`;
-        const statusData = await adoFetch(statusUrl, token);
+        const repoBase = `${orgBase}/${project.adoProject}/_apis/git/repositories/${project.repositoryId}/pullrequests/${prNum}`;
 
-        // Dedupe: keep only the latest status per context (API returns newest first)
+        // ── Call 1: PR details (status, mergeStatus, reviewers) ──
+        const prData = await adoFetch(`${repoBase}?api-version=7.1`, token);
+
+        // Status: active / completed / abandoned
+        let newStatus = pr.status;
+        if (prData.status === 'completed') newStatus = 'merged';
+        else if (prData.status === 'abandoned') newStatus = 'abandoned';
+        else if (prData.status === 'active') newStatus = 'active';
+
+        if (pr.status !== newStatus) {
+          log('info', `PR ${pr.id} status: ${pr.status} → ${newStatus}`);
+          pr.status = newStatus;
+          projectUpdated++;
+        }
+
+        // Review status from human reviewers (ADO votes)
+        // 10=approved, 5=approved-with-suggestions, 0=no-vote, -5=waiting, -10=rejected
+        const reviewers = prData.reviewers || [];
+        const votes = reviewers.map(r => r.vote).filter(v => v !== undefined);
+        let newReviewStatus = pr.reviewStatus || 'pending';
+        if (votes.length > 0) {
+          if (votes.some(v => v === -10)) newReviewStatus = 'changes-requested';
+          else if (votes.some(v => v >= 5)) newReviewStatus = 'approved';
+          else if (votes.some(v => v === -5)) newReviewStatus = 'waiting';
+          else newReviewStatus = 'pending';
+        }
+
+        if (pr.reviewStatus !== newReviewStatus) {
+          log('info', `PR ${pr.id} reviewStatus: ${pr.reviewStatus} → ${newReviewStatus}`);
+          pr.reviewStatus = newReviewStatus;
+          projectUpdated++;
+        }
+
+        // Skip build status poll for non-active PRs
+        if (newStatus !== 'active') continue;
+
+        // ── Call 2: CI/build statuses ──
+        const statusData = await adoFetch(`${repoBase}/statuses?api-version=7.1`, token);
+
+        // Dedupe: latest status per context (API returns newest first)
         const latest = new Map();
         for (const s of statusData.value || []) {
           const key = (s.context?.genre || '') + '/' + (s.context?.name || '');
           if (!latest.has(key)) latest.set(key, s);
         }
 
-        // Filter to build/CI-related contexts (pipelines post codecoverage, deploy, build contexts)
-        // Exclude: review policies, security scans, governance, nitpicker, approvers
+        // Filter to build/CI contexts
         const buildStatuses = [...latest.values()].filter(s => {
           const ctx = ((s.context?.genre || '') + '/' + (s.context?.name || '')).toLowerCase();
           return ctx.includes('codecoverage') || ctx.includes('build') ||
@@ -1198,15 +1235,14 @@ async function pollPrBuildStatus(config) {
         }
 
         if (pr.buildStatus !== buildStatus) {
-          const prev = pr.buildStatus || 'none';
+          log('info', `PR ${pr.id} build: ${pr.buildStatus || 'none'} → ${buildStatus}${buildFailReason ? ' (' + buildFailReason + ')' : ''}`);
           pr.buildStatus = buildStatus;
           if (buildFailReason) pr.buildFailReason = buildFailReason;
           else delete pr.buildFailReason;
           projectUpdated++;
-          log('info', `PR ${pr.id} build: ${prev} → ${buildStatus}${buildFailReason ? ' (' + buildFailReason + ')' : ''}`);
         }
       } catch (e) {
-        log('warn', `Failed to poll build status for ${pr.id}: ${e.message}`);
+        log('warn', `Failed to poll status for ${pr.id}: ${e.message}`);
       }
     }
 
@@ -1220,7 +1256,7 @@ async function pollPrBuildStatus(config) {
   }
 
   if (totalUpdated > 0) {
-    log('info', `Build status poll: updated ${totalUpdated} PR(s)`);
+    log('info', `PR status poll: updated ${totalUpdated} PR(s)`);
   }
 }
 
@@ -1985,14 +2021,15 @@ function discoverFromPrd(config, project) {
  * Scan ~/.squad/plans/ for plan-generated PRD files → queue implement tasks.
  * Plans are project-scoped JSON files written by the plan-to-prd playbook.
  */
-function discoverFromPlans(config) {
-  if (!fs.existsSync(PLANS_DIR)) return [];
+/**
+ * Convert plan files into project work items (side-effect, like design docs).
+ * Plans write to the target project's work-items.json — picked up by discoverFromWorkItems next tick.
+ */
+function materializePlansAsWorkItems(config) {
+  if (!fs.existsSync(PLANS_DIR)) return;
 
   let planFiles;
-  try { planFiles = fs.readdirSync(PLANS_DIR).filter(f => f.endsWith('.json')); } catch { return []; }
-
-  const newWork = [];
-  const cooldownMs = (config.engine?.planCooldownMinutes || 30) * 60 * 1000;
+  try { planFiles = fs.readdirSync(PLANS_DIR).filter(f => f.endsWith('.json')); } catch { return; }
 
   for (const file of planFiles) {
     const plan = safeJson(path.join(PLANS_DIR, file));
@@ -2000,64 +2037,48 @@ function discoverFromPlans(config) {
 
     const projectName = plan.project || file.replace(/-\d{4}-\d{2}-\d{2}\.json$/, '');
     const project = getProjects(config).find(p => p.name?.toLowerCase() === projectName.toLowerCase());
-    if (!project) {
-      log('warn', `Plan ${file} references unknown project "${projectName}" — skipping`);
-      continue;
-    }
+    if (!project) continue;
 
+    const wiPath = projectWorkItemsPath(project);
+    const existingItems = safeJson(wiPath) || [];
+
+    let created = 0;
     const statusFilter = ['missing', 'planned'];
     const items = plan.missing_features.filter(f => statusFilter.includes(f.status));
 
     for (const item of items) {
-      const key = `plan-${projectName}-${item.id}`;
-      if (isAlreadyDispatched(key)) continue;
-      if (isOnCooldown(key, cooldownMs)) continue;
+      // Skip if already materialized
+      if (existingItems.some(w => w.sourcePlan === file && w.sourcePlanItem === item.id)) continue;
 
-      const workType = item.estimated_complexity === 'large' ? 'implement:large' : 'implement';
-      const agentId = resolveAgent(workType, config);
-      if (!agentId) continue;
+      const maxNum = existingItems.reduce((max, i) => {
+        const m = (i.id || '').match(/(\d+)$/);
+        return m ? Math.max(max, parseInt(m[1])) : max;
+      }, 0);
+      const id = 'PL-W' + String(maxNum + 1).padStart(3, '0');
 
-      const branchName = `feat/${item.id.toLowerCase()}-${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`;
-      const vars = {
-        agent_id: agentId,
-        agent_name: config.agents[agentId]?.name || agentId,
-        agent_role: config.agents[agentId]?.role || 'Agent',
-        item_id: item.id,
-        item_name: item.name,
-        item_priority: item.priority || 'medium',
-        item_complexity: item.estimated_complexity || 'medium',
-        item_description: item.description || '',
-        item_acceptance_criteria: (item.acceptance_criteria || []).map(c => `- ${c}`).join('\n'),
-        branch_name: branchName,
-        commit_message: `feat(${item.id.toLowerCase()}): ${item.name}`,
-        team_root: SQUAD_DIR,
-        project_path: project.localPath,
-        main_branch: project.mainBranch || 'main',
-        repo_id: project.repositoryId || '',
-        project_name: project.name || 'Unknown',
-        ado_org: project.adoOrg || config.project?.adoOrg || 'Unknown',
-        ado_project: project.adoProject || config.project?.adoProject || 'Unknown',
-        repo_name: project.repoName || config.project?.repoName || 'Unknown'
-      };
+      const complexity = item.estimated_complexity || 'medium';
+      const criteria = (item.acceptance_criteria || []).map(c => `- ${c}`).join('\n');
 
-      const prompt = renderPlaybook('implement', vars);
-      if (!prompt) continue;
-
-      newWork.push({
-        type: workType,
-        agent: agentId,
-        agentName: config.agents[agentId]?.name,
-        agentRole: config.agents[agentId]?.role,
-        task: `[${project.name}] Implement ${item.id}: ${item.name}`,
-        prompt,
-        meta: { dispatchKey: key, source: 'plan', planFile: file, branch: branchName, item, project: { name: project.name, localPath: project.localPath } }
+      existingItems.push({
+        id,
+        title: `Implement: ${item.name}`,
+        type: complexity === 'large' ? 'implement:large' : 'implement',
+        priority: item.priority || 'medium',
+        description: `${item.description || ''}\n\n**Plan:** ${file}\n**Plan Item:** ${item.id}\n**Complexity:** ${complexity}${criteria ? '\n\n**Acceptance Criteria:**\n' + criteria : ''}`,
+        status: 'pending',
+        created: ts(),
+        createdBy: 'engine:plan-discovery',
+        sourcePlan: file,
+        sourcePlanItem: item.id
       });
+      created++;
+    }
 
-      setCooldown(key);
+    if (created > 0) {
+      safeWrite(wiPath, existingItems);
+      log('info', `Plan discovery: created ${created} work item(s) from ${file} → ${project.name}`);
     }
   }
-
-  return newWork;
 }
 
 /**
@@ -2075,7 +2096,7 @@ function discoverFromPrs(config, project) {
   for (const pr of prs) {
     if (pr.status !== 'active') continue;
 
-    // PRs needing review — use squad review state (not ADO reviewStatus which pr-sync manages)
+    // PRs needing review — use squad review state (not ADO reviewStatus which pollPrStatus manages)
     const squadStatus = pr.squadReview?.status;
     const needsReview = !squadStatus || squadStatus === 'waiting';
     if (needsReview) {
@@ -2672,77 +2693,6 @@ function discoverCentralWorkItems(config) {
   return newWork;
 }
 
-/**
- * Schedule a lightweight PR sync agent to poll ADO for live PR statuses.
- * Only dispatches if there are active PRs and no pr-sync is already running.
- */
-function schedulePrSync(config) {
-  const projects = getProjects(config);
-
-  // Collect all active PRs across projects
-  let prContext = '';
-  let totalActive = 0;
-  for (const project of projects) {
-    const prs = getPrs(project);
-    const active = prs.filter(pr => pr.status === 'active');
-    if (active.length === 0) {
-      prContext += `### ${project.name}\nNo active PRs.\n\n`;
-      continue;
-    }
-    totalActive += active.length;
-    prContext += `### ${project.name}\n`;
-    prContext += `- **Repository ID:** ${project.repositoryId}\n`;
-    prContext += `- **Repo:** ${project.adoOrg}/${project.adoProject}/${project.repoName} (${getRepoHostLabel(project)})\n`;
-    prContext += `- **Tracker file:** ${path.resolve(project.localPath, project.workSources?.pullRequests?.path || '.squad/pull-requests.json')}\n`;
-    prContext += `- **Active PRs:**\n`;
-    for (const pr of active) {
-      const prNum = (pr.id || '').replace('PR-', '');
-      const sqReview = pr.squadReview?.status ? `squad: ${pr.squadReview.status}` : 'squad: none';
-      prContext += `  - ${pr.id}: "${pr.title}" by ${pr.agent || 'unknown'} | ADO: ${pr.reviewStatus || 'unknown'} | ${sqReview} | PR number: ${prNum}\n`;
-    }
-    prContext += '\n';
-  }
-
-  if (totalActive === 0) return;
-
-  // Don't dispatch if one is already running or was dispatched recently.
-  // Use a 10-minute cooldown (aligned with the scheduling interval) instead of the
-  // default 1-hour dedup window, so syncs run regularly.
-  const syncKey = 'pr-sync';
-  const syncCooldownMs = (config.engine?.prSyncCooldownMinutes || 10) * 60 * 1000;
-  const dispatch = getDispatch();
-  const inFlight = [...dispatch.pending, ...(dispatch.active || [])];
-  if (inFlight.some(d => d.meta?.dispatchKey === syncKey)) return;
-  if (isOnCooldown(syncKey, syncCooldownMs)) return;
-
-  // Pick the lightest-touch agent (prefer Lambert for analyst work, fallback to any idle)
-  const agentId = resolveAgent('analyze', config) || resolveAgent('explore', config);
-  if (!agentId) return;
-
-  const vars = {
-    agent_id: agentId,
-    agent_name: config.agents[agentId]?.name || agentId,
-    agent_role: config.agents[agentId]?.role || 'Agent',
-    pr_sync_context: prContext,
-    team_root: SQUAD_DIR
-  };
-
-  const prompt = renderPlaybook('pr-sync', vars);
-  if (!prompt) return;
-
-  addToDispatch({
-    type: 'pr-sync',
-    agent: agentId,
-    agentName: config.agents[agentId]?.name,
-    agentRole: config.agents[agentId]?.role,
-    task: `[auto] PR status sync (${totalActive} active PRs)`,
-    prompt,
-    meta: { dispatchKey: syncKey, source: 'pr-sync' }
-  });
-
-  setCooldown(syncKey);
-  log('info', `Scheduled PR sync: ${totalActive} active PRs across ${projects.length} projects → ${config.agents[agentId]?.name}`);
-}
 
 /**
  * Run all work discovery sources and queue new items
@@ -2752,32 +2702,41 @@ function discoverWork(config) {
   const projects = getProjects(config);
   let allFixes = [], allReviews = [], allImplements = [], allWorkItems = [];
 
+  // Side-effect passes: materialize plans and design docs into work-items.json
+  // These write to project work queues — picked up by discoverFromWorkItems below.
+  materializePlansAsWorkItems(config);
+
   for (const project of projects) {
     const root = project.localPath ? path.resolve(project.localPath) : null;
     if (!root || !fs.existsSync(root)) continue;
+
+    // Source 1: Pull Requests → fixes, reviews, build-test
     const prWork = discoverFromPrs(config, project);
     allFixes.push(...prWork.filter(w => w.type === 'fix'));
     allReviews.push(...prWork.filter(w => w.type === 'review'));
+    allWorkItems.push(...prWork.filter(w => w.type === 'test'));
+
+    // Source 2: PRD gaps → implements
     allImplements.push(...discoverFromPrd(config, project));
-    discoverFromMergedDesignDocs(config, project); // side-effect: creates work items for next tick
+
+    // Side-effect: design docs → work items (picked up below)
+    discoverFromMergedDesignDocs(config, project);
+
+    // Source 3: Work items (includes auto-filed from plans, design docs, build failures)
     allWorkItems.push(...discoverFromWorkItems(config, project));
   }
-
-  // Plan-generated PRDs (project-agnostic — plan files specify their target project)
-  allImplements.push(...discoverFromPlans(config));
 
   // Central work items (project-agnostic — agent decides where to work)
   const centralWork = discoverCentralWorkItems(config);
 
-  const fixes = allFixes, reviews = allReviews, implements_ = allImplements, workItems = allWorkItems;
-  const allWork = [...fixes, ...reviews, ...implements_, ...workItems, ...centralWork];
+  const allWork = [...allFixes, ...allReviews, ...allImplements, ...allWorkItems, ...centralWork];
 
   for (const item of allWork) {
     addToDispatch(item);
   }
 
   if (allWork.length > 0) {
-    log('info', `Discovered ${allWork.length} new work items: ${fixes.length} fixes, ${reviews.length} reviews, ${implements_.length} implements, ${workItems.length} work-items`);
+    log('info', `Discovered ${allWork.length} new work items: ${allFixes.length} fixes, ${allReviews.length} reviews, ${allImplements.length} implements, ${allWorkItems.length} work-items`);
   }
 
   return allWork.length;
@@ -2805,14 +2764,9 @@ function tick() {
     runCleanup(config);
   }
 
-  // 2.6. Poll ADO build status (every 6 ticks = ~3 minutes)
+  // 2.6. Poll ADO for full PR status: build, review, merge (every 6 ticks = ~3 minutes)
   if (tickCount % 6 === 0) {
-    pollPrBuildStatus(config).catch(e => log('warn', `Build poll error: ${e.message}`));
-  }
-
-  // 2.7. Periodic PR status sync via agent (every 20 ticks = ~10 minutes)
-  if (tickCount % 20 === 0) {
-    schedulePrSync(config);
+    pollPrStatus(config).catch(e => log('warn', `PR status poll error: ${e.message}`));
   }
 
   // 3. Discover new work from sources
@@ -3325,12 +3279,12 @@ const commands = {
     const config = getConfig();
     console.log('\n=== Work Discovery (dry run) ===\n');
 
+    materializePlansAsWorkItems(config);
     const prdWork = discoverFromPrd(config);
-    const planWork = discoverFromPlans(config);
     const prWork = discoverFromPrs(config);
     const workItemWork = discoverFromWorkItems(config);
 
-    const all = [...prdWork, ...planWork, ...prWork, ...workItemWork];
+    const all = [...prdWork, ...prWork, ...workItemWork];
 
     if (all.length === 0) {
       console.log('No new work discovered from any source.');

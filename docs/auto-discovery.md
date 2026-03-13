@@ -11,8 +11,7 @@ tick()
   1. checkTimeouts()       Kill stale/hung agents (>heartbeatTimeout)
   2. consolidateInbox()    Merge learnings into decisions.md (at 5+ inbox files)
   2.5 runCleanup()         Periodic cleanup (every 10 ticks ≈ 5min)
-  2.6 pollPrBuildStatus()  Poll ADO for CI/build status (every 6 ticks ≈ 3min)
-  2.7 schedulePrSync()     Dispatch agent for full PR status sync (every 20 ticks ≈ 10min)
+  2.6 pollPrStatus()       Poll ADO for build, review, merge status (every 6 ticks ≈ 3min)
   3. discoverWork()        Scan ALL linked projects for new tasks
   4. updateSnapshot()      Write identity/now.md
   5. dispatch              Spawn agents for pending items (up to maxConcurrent)
@@ -20,7 +19,9 @@ tick()
 
 ## Work Discovery
 
-`discoverWork()` iterates every project in `config.projects[]` and runs multiple discovery functions per project. Results are prioritized: fixes > reviews > plan-to-prd > implements > work-items.
+`discoverWork()` iterates every project in `config.projects[]` and runs three core discovery sources. Results are prioritized: fixes > reviews > implements > work-items.
+
+Before scanning, the engine materializes plans and design docs into project work items (side-effect writes to `work-items.json`), so they're picked up by the work items source below.
 
 ### Source 1: Pull Requests (`discoverFromPrs`)
 
@@ -97,37 +98,38 @@ This means a single work item like "Add telemetry to the document creation pipel
 - CLI: `node engine.js work "task title"` (defaults to central queue)
 - Direct edit: `~/.squad/work-items.json`
 
-### Source 5: Merged Design Docs (`discoverFromMergedDesignDocs`)
+### Materialization: Design Docs and Plans → Work Items
 
-**Reads:** Design doc files matching `workSources.mergedDesignDocs.filePatterns` (e.g., `docs/design-*.md`)
+Before the 3 core sources run, the engine materializes indirect sources into work items:
 
-Tracks design docs that have been merged into the main branch. When a new design doc appears (within `lookbackDays`), the engine creates work items to implement the design. State is tracked in `.squad/design-doc-tracker.json` to avoid re-processing.
+**Merged Design Docs** (`discoverFromMergedDesignDocs`): Scans `docs/design-*.md` for newly merged design docs. Creates implementation work items in `{project}/.squad/work-items.json` with `createdBy: 'engine:design-doc-discovery'`. State tracked in `.squad/design-doc-tracker.json`.
 
-### Source 6: Plans (`discoverFromPlans`)
+**Plans** (`materializePlansAsWorkItems`): Scans `~/.squad/plans/*.json` for plan files with `missing`/`planned` items. Creates work items in the target project's queue with `createdBy: 'engine:plan-discovery'`. Deduped via `sourcePlan` + `sourcePlanItem` fields.
 
-**Reads:** `~/.squad/plans/*.md` (project-agnostic)
+Both write to `work-items.json` and are picked up by Source 3 on the same or next tick.
 
-Plans generated via `/prd` or plan-to-prd flow. When a plan file exists with unimplemented items, the engine creates implementation work items targeting the plan's specified project.
+## ADO PR Status Polling (`pollPrStatus`)
 
-## ADO Build Status Polling
+**Runs:** Every 6 ticks (≈ 3 minutes), independently of work discovery. Replaces the retired agent-based `pr-sync`.
 
-**Runs:** Every 6 ticks (≈ 3 minutes), independently of work discovery.
+The engine directly polls the Azure DevOps REST API for **all** PR metadata: build/CI status, human review votes, and completion state. Two API calls per PR — no agent dispatch needed.
 
-The engine directly polls the Azure DevOps REST API for CI/build status on all active PRs. This is a lightweight HTTP call — no agent dispatch needed.
+**Per PR:**
+1. `GET pullrequests/{id}` → `status` (active/completed/abandoned), `mergeStatus`, `reviewers[].vote`
+2. `GET pullrequests/{id}/statuses` → CI pipeline results
 
-**How it works:**
-1. Gets a bearer token via `azureauth ado token` (cached for 30 minutes)
-2. For each active PR, hits `GET /{project}/_apis/git/repositories/{repoId}/pullrequests/{prNum}/statuses`
-3. Deduplicates statuses by context (keeps latest per pipeline)
-4. Filters to build-related contexts: `codecoverage`, `deploy`, `build`, `ci/`
-5. Derives overall status:
-   - **failing** — any pipeline has `failed`/`error` state
-   - **passing** — all pipelines `succeeded`/`notApplicable`
-   - **running** — pipelines are `pending`/`queued`
-   - **none** — no build pipelines found
-6. Writes `buildStatus` (and `buildFailReason` on failure) back to `pull-requests.json`
+**Fields updated in `pull-requests.json`:**
 
-This feeds the `discoverFromPrs` build-failure routing — when `buildStatus` flips to `"failing"`, the next discovery tick dispatches a fix agent.
+| Field | Source | Values |
+|-------|--------|--------|
+| `status` | PR details | `active` / `merged` / `abandoned` |
+| `reviewStatus` | `reviewers[].vote` | `approved` (vote ≥ 5) / `changes-requested` (-10) / `waiting` (-5) / `pending` (0) |
+| `buildStatus` | PR statuses (codecoverage/deploy/build/ci contexts) | `passing` / `failing` / `running` / `none` |
+| `buildFailReason` | Failed status description | Set on failure, cleared otherwise |
+
+**Auth:** Bearer token via `azureauth ado token --output token` (cached 30 minutes).
+
+This feeds `discoverFromPrs` — when `buildStatus` flips to `"failing"`, the next discovery tick dispatches a fix agent. When `status` becomes `"merged"`, the PR drops out of active polling.
 
 ## Discovery Gates
 
