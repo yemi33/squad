@@ -1,12 +1,13 @@
 {
   "project": {
     "name": "YOUR_PROJECT_NAME",
-    "repositoryId": "YOUR_ADO_REPO_ID",
-    "adoOrg": "YOUR_ADO_ORG",
-    "adoProject": "YOUR_ADO_PROJECT",
+    "repoHost": "ado",
+    "repositoryId": "YOUR_REPO_ID",
+    "adoOrg": "YOUR_ORG",
+    "adoProject": "YOUR_PROJECT",
     "repoName": "YOUR_REPO_NAME",
     "mainBranch": "main",
-    "prUrlBase": "https://YOUR_ADO_ORG.visualstudio.com/DefaultCollection/YOUR_ADO_PROJECT/_git/YOUR_REPO_NAME/pullrequest/"
+    "prUrlBase": ""
   },
   "engine": {
     "tickInterval": 60000,

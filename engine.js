@@ -371,11 +371,19 @@ function renderPlaybook(type, vars) {
   // Inject project-level variables from config
   const config = getConfig();
   const project = config.project || {};
+  // Find the specific project being dispatched (match by repo_id or repo_name from vars)
+  const dispatchProject = (vars.repo_id && config.projects?.find(p => p.repositoryId === vars.repo_id))
+    || (vars.repo_name && config.projects?.find(p => p.repoName === vars.repo_name))
+    || project;
   const projectVars = {
     project_name: project.name || 'Unknown Project',
     ado_org: project.adoOrg || 'Unknown',
     ado_project: project.adoProject || 'Unknown',
     repo_name: project.repoName || 'Unknown',
+    pr_create_instructions: getPrCreateInstructions(dispatchProject),
+    pr_comment_instructions: getPrCommentInstructions(dispatchProject),
+    pr_fetch_instructions: getPrFetchInstructions(dispatchProject),
+    repo_host_label: getRepoHostLabel(dispatchProject),
   };
   const allVars = { ...projectVars, ...vars };
 
@@ -385,6 +393,51 @@ function renderPlaybook(type, vars) {
   }
 
   return content;
+}
+
+// ─── Repo Host Helpers ──────────────────────────────────────────────────────
+
+function getRepoHost(project) {
+  return project?.repoHost || 'ado';
+}
+
+function getPrCreateInstructions(project) {
+  const host = getRepoHost(project);
+  const repoId = project?.repositoryId || '';
+  if (host === 'github') {
+    return `Use \`gh pr create\` or the GitHub MCP tools to create a pull request.`;
+  }
+  // Default: Azure DevOps
+  return `Use \`mcp__azure-ado__repo_create_pull_request\`:\n- repositoryId: \`${repoId}\``;
+}
+
+function getPrCommentInstructions(project) {
+  const host = getRepoHost(project);
+  const repoId = project?.repositoryId || '';
+  if (host === 'github') {
+    return `Use \`gh pr comment\` or the GitHub MCP tools to post a comment on the PR.`;
+  }
+  return `Use \`mcp__azure-ado__repo_create_pull_request_thread\`:\n- repositoryId: \`${repoId}\``;
+}
+
+function getPrFetchInstructions(project) {
+  const host = getRepoHost(project);
+  if (host === 'github') {
+    return `Use \`gh pr view\` or the GitHub MCP tools to fetch PR status.`;
+  }
+  return `Use \`mcp__azure-ado__repo_get_pull_request_by_id\` to fetch PR status.`;
+}
+
+function getRepoHostLabel(project) {
+  const host = getRepoHost(project);
+  if (host === 'github') return 'GitHub';
+  return 'Azure DevOps';
+}
+
+function getRepoHostToolRule(project) {
+  const host = getRepoHost(project);
+  if (host === 'github') return 'Use GitHub MCP tools or `gh` CLI for PR operations';
+  return 'Use Azure DevOps MCP tools (mcp__azure-ado__*) for PR operations — NEVER use gh CLI';
 }
 
 // ─── System Prompt Builder ──────────────────────────────────────────────────
@@ -417,13 +470,14 @@ function buildSystemPrompt(agentId, config, project) {
   prompt += `## Project: ${project.name || 'Unknown Project'}\n\n`;
   prompt += `- Repo: ${project.repoName || 'Unknown'} (${project.adoOrg || 'Unknown'}/${project.adoProject || 'Unknown'})\n`;
   prompt += `- Repo ID: ${project.repositoryId || ''}\n`;
+  prompt += `- Repo host: ${getRepoHostLabel(project)}\n`;
   prompt += `- Main branch: ${project.mainBranch || 'main'}\n\n`;
 
   // Critical rules
   prompt += `## Critical Rules\n\n`;
   prompt += `1. Use git worktrees — NEVER checkout on main working tree\n`;
-  prompt += `2. Use Azure DevOps MCP tools (mcp__azure-ado__*) — NEVER use gh CLI\n`;
-  prompt += `3. Use PowerShell for yarn/oagent/gulp commands\n`;
+  prompt += `2. ${getRepoHostToolRule(project)}\n`;
+  prompt += `3. Use PowerShell for build commands on Windows if applicable\n`;
   prompt += `4. Write learnings to: ${SQUAD_DIR}/decisions/inbox/${agentId}-${dateStamp()}.md\n`;
   prompt += `5. Do NOT write to agents/*/status.json — the engine manages agent status automatically\n`;
   prompt += `6. If you discover a repeatable workflow, save it as a skill:\n`;
@@ -1947,7 +2001,7 @@ function buildProjectContext(projects, assignedProject, isFanOut, agentName, age
   const projectList = projects.map(p => {
     let line = `### ${p.name}\n`;
     line += `- **Path:** ${p.localPath}\n`;
-    line += `- **ADO:** ${p.adoOrg}/${p.adoProject}/${p.repoName} (repo ID: ${p.repositoryId || 'unknown'})\n`;
+    line += `- **Repo:** ${p.adoOrg}/${p.adoProject}/${p.repoName} (ID: ${p.repositoryId || 'unknown'}, host: ${getRepoHostLabel(p)})\n`;
     if (p.description) line += `- **What it is:** ${p.description}\n`;
     return line;
   }).join('\n');
@@ -2284,12 +2338,12 @@ function schedulePrSync(config) {
     totalActive += active.length;
     prContext += `### ${project.name}\n`;
     prContext += `- **Repository ID:** ${project.repositoryId}\n`;
-    prContext += `- **ADO:** ${project.adoOrg}/${project.adoProject}/${project.repoName}\n`;
+    prContext += `- **Repo:** ${project.adoOrg}/${project.adoProject}/${project.repoName} (${getRepoHostLabel(project)})\n`;
     prContext += `- **Tracker file:** ${path.resolve(project.localPath, project.workSources?.pullRequests?.path || '.squad/pull-requests.json')}\n`;
     prContext += `- **Active PRs:**\n`;
     for (const pr of active) {
       const prNum = (pr.id || '').replace('PR-', '');
-      prContext += `  - ${pr.id}: "${pr.title}" by ${pr.agent || 'unknown'} | reviewStatus: ${pr.reviewStatus || 'unknown'} | ADO PR number: ${prNum}\n`;
+      prContext += `  - ${pr.id}: "${pr.title}" by ${pr.agent || 'unknown'} | reviewStatus: ${pr.reviewStatus || 'unknown'} | PR number: ${prNum}\n`;
     }
     prContext += '\n';
   }

@@ -43,7 +43,8 @@ Write your findings to `{{team_root}}/decisions/inbox/{{agent_id}}-explore-{{tas
 If the task asks you to write a design doc, architecture doc, or any durable artifact:
 1. Create a git worktree: `git worktree add ../worktrees/explore-{{task_id}} -b feat/{{task_id}}-<short-desc> {{main_branch}}`
 2. Write the document (e.g., `docs/design-<topic>.md`)
-3. Commit, push, and create a PR via `mcp__azure-ado__repo_create_pull_request`
+3. Commit, push, and create a PR:
+   {{pr_create_instructions}}
 4. Clean up worktree when done
 
 If the task is purely exploratory (no deliverable requested), skip this step.

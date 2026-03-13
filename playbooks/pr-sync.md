@@ -18,7 +18,8 @@ Check the live status of all active PRs across all projects and update the local
 
 For each project with active PRs:
 
-1. **Fetch PR status from repo host** using `mcp__azure-ado__repo_get_pull_request_by_id`:
+1. **Fetch PR status from repo host:**
+   {{pr_fetch_instructions}}
    - Pass the project's `repositoryId` and the PR's numeric ID (extract from `PR-NNNNN` format)
 2. **Compare with local tracker** and update these fields:
    - `status`: map repo host status (1=active, 2=abandoned, 3=completed/merged)

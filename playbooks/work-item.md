@@ -38,12 +38,13 @@ Keep branch names lowercase, use hyphens, max 60 chars.
    git commit -m "feat({{item_id}}): <description>"
    git push -u origin feat/{{item_id}}-<short-desc>
    ```
-7. **Create a PR** via `mcp__azure-ado__repo_create_pull_request`:
-   - repositoryId: {{repo_id}}
+7. **Create a PR:**
+   {{pr_create_instructions}}
    - sourceRefName: `refs/heads/feat/{{item_id}}-<short-desc>`
    - targetRefName: `refs/heads/{{main_branch}}`
    - title: `feat({{item_id}}): <description>`
-8. **Post implementation notes** as a PR thread comment via `mcp__azure-ado__repo_create_pull_request_thread`
+8. **Post implementation notes** as a PR thread comment:
+   {{pr_comment_instructions}}
 9. **Add PR to tracker** — append to `{{project_path}}/.squad/pull-requests.json`:
    ```json
    { "id": "PR-<number>", "title": "...", "agent": "{{agent_name}}", "branch": "...", "reviewStatus": "pending", "status": "active", "created": "<date>", "url": "<pr-url>", "prdItems": ["{{item_id}}"] }

@@ -47,8 +47,7 @@ git worktree remove ../worktrees/{{branch_name}} --force
 
 ## Create PR
 
-Use `mcp__azure-ado__repo_create_pull_request`:
-- repositoryId: `{{repo_id}}`
+{{pr_create_instructions}}
 - sourceRefName: `refs/heads/{{branch_name}}`
 - targetRefName: `refs/heads/main`
 - title: `{{commit_message}}`
@@ -62,8 +61,7 @@ Include in the PR description:
 
 ## Post self-review on PR
 
-Use `mcp__azure-ado__repo_create_pull_request_thread`:
-- repositoryId: `{{repo_id}}`
+{{pr_comment_instructions}}
 - pullRequestId: `<from PR creation>`
 - Re-read your own diff critically before posting
 - Sign: `Built by Squad ({{agent_name}} — {{agent_role}})`

@@ -47,8 +47,7 @@ If you encounter merge conflicts (e.g., during `git pull` or when the PR shows c
 
 ## Post Response on PR
 
-Use `mcp__azure-ado__repo_create_pull_request_thread`:
-- repositoryId: `{{repo_id}}`
+{{pr_comment_instructions}}
 - pullRequestId: `{{pr_number}}`
 - content: Explain what was fixed, reference each review finding
 - Sign: `Fixed by Squad ({{agent_name}} — {{agent_role}})`

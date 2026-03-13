@@ -47,8 +47,7 @@ Do ALL work in the worktree. NEVER commit directly to main.
 
 ## Create PR
 
-Use `mcp__azure-ado__repo_create_pull_request`:
-- repositoryId: `{{repo_id}}`
+{{pr_create_instructions}}
 - sourceRefName: `refs/heads/prd/{{next_version}}`
 - targetRefName: `refs/heads/main`
 - title: `feat(squad): PRD v{{next_version}} — {{focus_area}} gap analysis`

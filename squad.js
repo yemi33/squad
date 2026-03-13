@@ -62,26 +62,32 @@ async function addProject(targetDir) {
 
   const name = await ask('Project name', path.basename(target));
   const description = await ask('Description (what this repo contains/does)', '');
-  const adoOrg = await ask('ADO organization', '');
-  const adoProject = await ask('ADO project', '');
+  const repoHost = await ask('Repo host (ado/github)', 'ado');
+  const adoOrg = await ask('Organization', '');
+  const adoProject = await ask('Project', '');
   const repoName = await ask('Repo name', name);
-  const repoId = await ask('ADO repository ID (GUID)', '');
+  const repoId = await ask('Repository ID (GUID, optional)', '');
   const mainBranch = await ask('Main branch', 'main');
 
   rl.close();
+
+  const prUrlBase = repoHost === 'github'
+    ? (adoOrg && repoName ? `https://github.com/${adoOrg}/${repoName}/pull/` : '')
+    : (adoOrg && adoProject && repoName
+      ? `https://${adoOrg}.visualstudio.com/DefaultCollection/${adoProject}/_git/${repoName}/pullrequest/`
+      : '');
 
   const project = {
     name,
     description,
     localPath: target.replace(/\\/g, '/'),
+    repoHost,
     repositoryId: repoId,
     adoOrg,
     adoProject,
     repoName,
     mainBranch,
-    prUrlBase: adoOrg && adoProject && repoName
-      ? `https://${adoOrg}.visualstudio.com/DefaultCollection/${adoProject}/_git/${repoName}/pullrequest/`
-      : '',
+    prUrlBase,
     workSources: {
       prd: {
         enabled: true,
@@ -156,7 +162,7 @@ function listProjects() {
     console.log(`  ${p.name}`);
     if (p.description) console.log(`    Desc: ${p.description}`);
     console.log(`    Path: ${p.localPath} ${exists ? '' : '(NOT FOUND)'}`);
-    console.log(`    ADO:  ${p.adoOrg}/${p.adoProject}/${p.repoName}`);
+    console.log(`    Repo: ${p.adoOrg}/${p.adoProject}/${p.repoName} (${p.repoHost || 'ado'})`);
     console.log(`    ID:   ${p.repositoryId || 'none'}`);
     console.log('');
   }

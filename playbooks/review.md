@@ -37,8 +37,7 @@ Branch: `{{pr_branch}}`
 
 ## Post Review
 
-Use `mcp__azure-ado__repo_create_pull_request_thread`:
-- repositoryId: `{{repo_id}}`
+{{pr_comment_instructions}}
 - pullRequestId: `{{pr_number}}`
 - content: Your full review with verdict, findings, and sign-off
 - Sign: `Review by Squad ({{agent_name}} — {{agent_role}})`

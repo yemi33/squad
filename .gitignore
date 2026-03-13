@@ -17,3 +17,4 @@ mcp-servers.json
 agents/ralph/next-action.json
 agents/ralph/loop.log
 sessions/
+engine/spawn-debug.log

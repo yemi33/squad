@@ -156,9 +156,10 @@ When you run `squad.js add <dir>`, it prompts for project details and saves them
   "name": "MyProject",
   "description": "What this repo is for — agents read this to decide where to work",
   "localPath": "C:/Users/you/MyProject",
-  "repositoryId": "repo-guid-if-applicable",
-  "adoOrg": "your-org",
-  "adoProject": "your-project",
+  "repoHost": "github",
+  "repositoryId": "",
+  "adoOrg": "your-github-org",
+  "adoProject": "",
   "repoName": "MyProject",
   "mainBranch": "main",
   "workSources": {
@@ -171,7 +172,10 @@ When you run `squad.js add <dir>`, it prompts for project details and saves them
 
 **Key fields:**
 - `description` — critical for auto-routing. Agents read this to decide which repo to work in.
-- `repositoryId`, `adoOrg`, `adoProject` — used for PR creation via MCP tools. Leave blank if your repo host doesn't need them.
+- `repoHost` — `"ado"` (Azure DevOps) or `"github"`. Controls which MCP tools agents use for PR creation, review comments, and status checks. Defaults to `"ado"`.
+- `repositoryId` — required for ADO (the repo GUID), optional for GitHub.
+- `adoOrg` — ADO organization or GitHub org/user.
+- `adoProject` — ADO project name (leave blank for GitHub).
 - `workSources` — toggle which work sources the engine scans for each project.
 
 The init script also creates `<project>/.squad/` with empty `work-items.json` and `pull-requests.json`.
