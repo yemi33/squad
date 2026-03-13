@@ -129,23 +129,25 @@ function safeWrite(p, data) {
   try {
     fs.writeFileSync(tmp, content);
     // Atomic rename — retry on Windows EPERM (file locking)
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
         fs.renameSync(tmp, p);
         return;
       } catch (e) {
-        if (e.code === 'EPERM' && attempt < 2) {
-          // Brief sync sleep (10ms) then retry
-          const start = Date.now(); while (Date.now() - start < 10) {}
+        if (e.code === 'EPERM' && attempt < 4) {
+          const delay = 50 * (attempt + 1); // 50, 100, 150, 200ms
+          const start = Date.now(); while (Date.now() - start < delay) {}
           continue;
         }
-        throw e;
+        // Final attempt failed — fall through to direct write
       }
     }
-  } catch (e) {
-    // Fallback: direct write if atomic rename fails entirely
+    // All rename attempts failed — direct write as fallback (not atomic but won't lose data)
     try { fs.unlinkSync(tmp); } catch {}
-    try { fs.writeFileSync(p, content); } catch {}
+    fs.writeFileSync(p, content);
+  } catch {
+    // Even direct write failed — clean up tmp silently
+    try { fs.unlinkSync(tmp); } catch {}
   }
 }
 
@@ -851,6 +853,8 @@ function completeDispatch(id, result = 'success', reason = '') {
     item.completed_at = ts();
     item.result = result;
     if (reason) item.reason = reason;
+    // Strip prompt from completed items (saves ~10KB per item, reduces file lock contention)
+    delete item.prompt;
     dispatch.completed = dispatch.completed || [];
     dispatch.completed.push(item);
     // Keep last 100 completed
@@ -3008,7 +3012,10 @@ async function tick() {
 
 async function tickInner() {
   const control = getControl();
-  if (control.state !== 'running') return;
+  if (control.state !== 'running') {
+    log('info', `Engine state is "${control.state}" — exiting process`);
+    process.exit(0);
+  }
 
   const config = getConfig();
   tickCount++;
@@ -3081,8 +3088,16 @@ const commands = {
   start() {
     const control = getControl();
     if (control.state === 'running') {
-      console.log('Engine is already running.');
-      return;
+      // Check if the PID is actually alive
+      let alive = false;
+      if (control.pid) {
+        try { process.kill(control.pid, 0); alive = true; } catch {}
+      }
+      if (alive) {
+        console.log(`Engine is already running (PID ${control.pid}).`);
+        return;
+      }
+      console.log(`Engine was running (PID ${control.pid}) but process is dead — restarting.`);
     }
 
     safeWrite(CONTROL_PATH, { state: 'running', pid: process.pid, started_at: ts() });
@@ -3146,6 +3161,11 @@ const commands = {
       console.log('\n  These agents will continue running but the engine won\'t monitor them.');
       console.log('  On next start, they\'ll get a 20-min grace period before being marked as orphans.');
       console.log('  To kill them now, run: node engine.js kill\n');
+    }
+    // Kill the running engine process by PID
+    const control = getControl();
+    if (control.pid && control.pid !== process.pid) {
+      try { process.kill(control.pid); } catch {}
     }
     safeWrite(CONTROL_PATH, { state: 'stopped', stopped_at: ts() });
     log('info', 'Engine stopped');
