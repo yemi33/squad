@@ -100,7 +100,7 @@
   ],
   "engine": {
     "tickInterval": 30000,
-    "heartbeatTimeout": 120000,
+    "heartbeatTimeout": 300000,
     "maxConcurrent": 4,
     "inboxConsolidateThreshold": 5,
     "agentTimeout": 18000000,
