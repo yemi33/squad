@@ -84,7 +84,7 @@
   .inbox-name { font-weight: 500; font-size: 12px; color: var(--purple); margin-bottom: 4px; display: flex; justify-content: space-between; }
   .inbox-preview { font-size: 11px; color: var(--muted); line-height: 1.5; max-height: 60px; overflow: hidden; }
 
-  .prd-panel, .pr-panel { grid-column: 1 / -1; border-bottom: 1px solid var(--border); overflow: hidden; }
+  .prd-panel, .pr-panel { grid-column: 1 / -1; border-bottom: 1px solid var(--border); overflow: visible; min-width: 0; }
   .prd-inner { display: flex; gap: 16px; align-items: flex-start; }
   .prd-stats { display: flex; gap: 16px; }
   .prd-stat { text-align: center; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; }
@@ -98,10 +98,10 @@
 
   /* PR Tracker */
   .pr-table-wrap { overflow-x: auto; }
-  .pr-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+  .pr-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: auto; }
   .pr-table th:last-child, .pr-table td:last-child { width: 36px; min-width: 36px; text-align: center; }
   .pr-table th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-  .pr-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .pr-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
   .pr-table tr:last-child td { border-bottom: none; }
   .pr-table tr:hover { background: var(--surface2); }
   .pr-title { color: var(--blue); text-decoration: none; font-weight: 500; }
@@ -265,7 +265,7 @@
   .dispatch-stat-label { font-size: 10px; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
   .dispatch-list { display: flex; flex-direction: column; gap: 6px; }
   .dispatch-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
-  .dispatch-type { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 8px; text-transform: uppercase; }
+  .dispatch-type { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 8px; text-transform: uppercase; white-space: nowrap; }
   .dispatch-type.implement { background: rgba(88,166,255,0.15); color: var(--blue); }
   .dispatch-type.review { background: rgba(188,140,255,0.15); color: var(--purple); }
   .dispatch-type.fix { background: rgba(210,153,34,0.15); color: var(--yellow); }
@@ -327,6 +327,41 @@
   .modal-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px 8px; }
   .modal-close:hover { color: var(--text); }
   .modal-body { padding: 16px 20px; overflow-y: auto; white-space: pre-wrap; font-size: 12px; line-height: 1.7; color: var(--muted); font-family: Consolas, monospace; }
+
+  /* Responsive: tablet / narrow window */
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: 1fr; }
+    section:nth-child(odd) { border-right: none; }
+    .prd-inner { flex-direction: column; }
+    .prd-stats { flex-wrap: wrap; }
+    .dispatch-stats { flex-wrap: wrap; }
+    .agents { grid-template-columns: 1fr 1fr; }
+  }
+
+  /* Responsive: mobile / very narrow */
+  @media (max-width: 640px) {
+    header { padding: 10px 14px; flex-wrap: wrap; gap: 6px; }
+    header h1 { font-size: 14px; }
+    header h1 span { display: none; }
+    section { padding: 14px 12px; }
+    .agents { grid-template-columns: 1fr; }
+    .prd-stats { gap: 8px; }
+    .prd-stat { padding: 8px 12px; }
+    .dispatch-stats { gap: 8px; }
+    .dispatch-stat { padding: 8px 12px; flex: 1; min-width: 80px; }
+    .dispatch-stat-num { font-size: 18px; }
+    .pr-table { font-size: 11px; }
+    .pr-table td { padding: 8px 6px; }
+    .pr-table th { padding: 6px; font-size: 10px; }
+    .cmd-input-wrap { flex-direction: column; }
+    .cmd-send-btn { width: 100%; }
+    .cmd-hints { gap: 8px; }
+    .modal { width: 95vw; max-height: 80vh; }
+    #projects-bar { flex-wrap: wrap; padding: 6px 12px; }
+  }
+
+  /* Ensure all tables scroll horizontally on narrow screens */
+  .pr-table-wrap, #pr-content, #completed-content, #work-items-content { overflow-x: auto; min-width: 0; }
 </style>
 </head>
 <body>
@@ -768,9 +803,9 @@ function prRow(pr) {
 }
 
 function prTableHtml(rows) {
-  return '<table class="pr-table"><thead><tr>' +
+  return '<div class="pr-table-wrap"><table class="pr-table"><thead><tr>' +
     '<th>PR</th><th>Title</th><th>Agent</th><th>Branch</th><th>Review</th><th>Signed Off By</th><th>Build</th><th>Status</th><th>Created</th><th></th>' +
-    '</tr></thead><tbody>' + rows + '</tbody></table>';
+    '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 
 function renderPrs(prs) {

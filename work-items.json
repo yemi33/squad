@@ -111,5 +111,32 @@
     "dispatched_at": "2026-03-13T07:38:39.160Z",
     "dispatched_to": "dallas",
     "completedAt": "2026-03-13T08:18:05.692Z"
+  },
+  {
+    "id": "W008",
+    "title": "build and test dallas's latest pr",
+    "type": "test",
+    "priority": "medium",
+    "description": "",
+    "status": "failed",
+    "created": "2026-03-13T09:30:51.902Z",
+    "createdBy": "dashboard",
+    "agent": "rebecca",
+    "dispatched_at": "2026-03-13T09:31:06.877Z",
+    "dispatched_to": "rebecca",
+    "failReason": "Hung — no output for 301s",
+    "failedAt": "2026-03-13T09:40:07.037Z"
+  },
+  {
+    "id": "W009",
+    "title": "implement rebecca's design",
+    "type": "implement",
+    "priority": "medium",
+    "description": "",
+    "status": "dispatched",
+    "created": "2026-03-13T09:37:31.666Z",
+    "createdBy": "dashboard",
+    "dispatched_at": "2026-03-13T09:37:36.987Z",
+    "dispatched_to": "dallas"
   }
 ]
