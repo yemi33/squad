@@ -2226,6 +2226,71 @@ function discoverCentralWorkItems(config) {
 }
 
 /**
+ * Schedule a lightweight PR sync agent to poll ADO for live PR statuses.
+ * Only dispatches if there are active PRs and no pr-sync is already running.
+ */
+function schedulePrSync(config) {
+  const projects = getProjects(config);
+
+  // Collect all active PRs across projects
+  let prContext = '';
+  let totalActive = 0;
+  for (const project of projects) {
+    const prs = getPrs(project);
+    const active = prs.filter(pr => pr.status === 'active');
+    if (active.length === 0) {
+      prContext += `### ${project.name}\nNo active PRs.\n\n`;
+      continue;
+    }
+    totalActive += active.length;
+    prContext += `### ${project.name}\n`;
+    prContext += `- **Repository ID:** ${project.repositoryId}\n`;
+    prContext += `- **ADO:** ${project.adoOrg}/${project.adoProject}/${project.repoName}\n`;
+    prContext += `- **Tracker file:** ${path.resolve(project.localPath, project.workSources?.pullRequests?.path || '.squad/pull-requests.json')}\n`;
+    prContext += `- **Active PRs:**\n`;
+    for (const pr of active) {
+      const prNum = (pr.id || '').replace('PR-', '');
+      prContext += `  - ${pr.id}: "${pr.title}" by ${pr.agent || 'unknown'} | reviewStatus: ${pr.reviewStatus || 'unknown'} | ADO PR number: ${prNum}\n`;
+    }
+    prContext += '\n';
+  }
+
+  if (totalActive === 0) return;
+
+  // Don't dispatch if one is already running or recently completed
+  const syncKey = 'pr-sync';
+  if (isAlreadyDispatched(syncKey) || isOnCooldown(syncKey, 0)) return;
+
+  // Pick the lightest-touch agent (prefer Lambert for analyst work, fallback to any idle)
+  const agentId = resolveAgent('analyze', config) || resolveAgent('explore', config);
+  if (!agentId) return;
+
+  const vars = {
+    agent_id: agentId,
+    agent_name: config.agents[agentId]?.name || agentId,
+    agent_role: config.agents[agentId]?.role || 'Agent',
+    pr_sync_context: prContext,
+    team_root: SQUAD_DIR
+  };
+
+  const prompt = renderPlaybook('pr-sync', vars);
+  if (!prompt) return;
+
+  addToDispatch({
+    type: 'pr-sync',
+    agent: agentId,
+    agentName: config.agents[agentId]?.name,
+    agentRole: config.agents[agentId]?.role,
+    task: `[auto] PR status sync (${totalActive} active PRs)`,
+    prompt,
+    meta: { dispatchKey: syncKey, source: 'pr-sync' }
+  });
+
+  setCooldown(syncKey);
+  log('info', `Scheduled PR sync: ${totalActive} active PRs across ${projects.length} projects → ${config.agents[agentId]?.name}`);
+}
+
+/**
  * Run all work discovery sources and queue new items
  * Priority: fix (0) > review (1) > implement (2) > work-items (3) > central (4)
  */
@@ -2278,9 +2343,14 @@ function tick() {
   // 2. Consolidate inbox
   consolidateInbox(config);
 
-  // 2.5. Periodic cleanup (every 10 ticks = ~10 minutes)
+  // 2.5. Periodic cleanup (every 10 ticks = ~5 minutes)
   if (tickCount % 10 === 0) {
     runCleanup(config);
+  }
+
+  // 2.6. Periodic PR status sync (every 20 ticks = ~10 minutes)
+  if (tickCount % 20 === 0) {
+    schedulePrSync(config);
   }
 
   // 3. Discover new work from sources
