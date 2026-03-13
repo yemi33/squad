@@ -1816,6 +1816,45 @@ function discoverFromPrs(config, project) {
 
       setCooldown(key);
     }
+
+    // PRs with build failures → route to author for fix
+    if (pr.status === 'active' && pr.buildStatus === 'failing') {
+      const key = `build-fix-${project?.name || 'default'}-${pr.id}`;
+      if (isAlreadyDispatched(key) || isOnCooldown(key, cooldownMs)) continue;
+
+      const agentId = resolveAgent('fix', config, pr.agent);
+      if (!agentId) continue;
+
+      const vars = {
+        agent_id: agentId,
+        agent_name: config.agents[agentId]?.name || agentId,
+        agent_role: config.agents[agentId]?.role || 'Agent',
+        pr_id: pr.id,
+        pr_branch: pr.branch || '',
+        review_note: `Build is failing: ${pr.buildFailReason || 'Check CI pipeline for details'}. Fix the build errors and push.`,
+        team_root: SQUAD_DIR,
+        repo_id: project?.repositoryId || config.project?.repositoryId || '',
+        project_name: project?.name || 'Unknown Project',
+        ado_org: project?.adoOrg || 'Unknown',
+        ado_project: project?.adoProject || 'Unknown',
+        repo_name: project?.repoName || 'Unknown'
+      };
+
+      const prompt = renderPlaybook('fix', vars);
+      if (!prompt) continue;
+
+      newWork.push({
+        type: 'fix',
+        agent: agentId,
+        agentName: config.agents[agentId]?.name,
+        agentRole: config.agents[agentId]?.role,
+        task: `[${project?.name || 'project'}] Fix build failure on PR ${pr.id}`,
+        prompt,
+        meta: { dispatchKey: key, source: 'pr', pr, branch: pr.branch, project: { name: project?.name, localPath: project?.localPath } }
+      });
+
+      setCooldown(key);
+    }
   }
 
   return newWork;
@@ -2257,9 +2296,15 @@ function schedulePrSync(config) {
 
   if (totalActive === 0) return;
 
-  // Don't dispatch if one is already running or recently completed
+  // Don't dispatch if one is already running or was dispatched recently.
+  // Use a 10-minute cooldown (aligned with the scheduling interval) instead of the
+  // default 1-hour dedup window, so syncs run regularly.
   const syncKey = 'pr-sync';
-  if (isAlreadyDispatched(syncKey) || isOnCooldown(syncKey, 0)) return;
+  const syncCooldownMs = (config.engine?.prSyncCooldownMinutes || 10) * 60 * 1000;
+  const dispatch = getDispatch();
+  const inFlight = [...dispatch.pending, ...(dispatch.active || [])];
+  if (inFlight.some(d => d.meta?.dispatchKey === syncKey)) return;
+  if (isOnCooldown(syncKey, syncCooldownMs)) return;
 
   // Pick the lightest-touch agent (prefer Lambert for analyst work, fallback to any idle)
   const agentId = resolveAgent('analyze', config) || resolveAgent('explore', config);

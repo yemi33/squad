@@ -22,13 +22,17 @@ For each project with active PRs:
    - Pass the project's `repositoryId` and the PR's numeric ID (extract from `PR-NNNNN` format)
 2. **Compare with local tracker** and update these fields:
    - `status`: map ADO status (1=active, 2=abandoned, 3=completed/merged)
+     - If status is 3 (completed), also set `status: "merged"`
    - `reviewStatus`: check `reviewers[].vote` (10=approved, 5=approved-with-suggestions, -5=waiting, -10=rejected, 0=no-vote)
      - Any vote >= 5 → `"approved"`
      - Any vote == -10 → `"changes-requested"`
      - Any vote == -5 → `"waiting"`
      - All votes 0 and at least one reviewer → `"pending"`
-   - `mergeStatus`: if ADO status is 3 (completed), set to `"merged"`
-   - `buildStatus`: check if `lastMergeCommit` exists (indicates merge is possible)
+   - `buildStatus`: check `mergeStatus` field from ADO response:
+     - `mergeStatus: 3` (succeeded) → `"passing"`
+     - `mergeStatus: 2` (conflicts) → `"conflicts"`
+     - Also check PR statuses endpoint if available for CI build status
+   - **Build failure detection**: if you can determine the build/CI failed (from PR statuses, merge conflicts, or policy evaluations), set `buildStatus: "failing"` and add `buildFailReason` with a brief explanation
 3. **Write updated tracker** back to the project's `pull-requests.json`
 
 ## Output Format
