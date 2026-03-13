@@ -27,7 +27,7 @@ Implement PRD item **{{item_id}}: {{item_name}}**
 
 ```bash
 cd {{team_root}}
-git worktree add ../worktrees/{{branch_name}} -b {{branch_name}} main
+git worktree add ../worktrees/{{branch_name}} -b {{branch_name}} {{main_branch}}
 cd ../worktrees/{{branch_name}}
 ```
 
@@ -49,7 +49,7 @@ git worktree remove ../worktrees/{{branch_name}} --force
 
 {{pr_create_instructions}}
 - sourceRefName: `refs/heads/{{branch_name}}`
-- targetRefName: `refs/heads/main`
+- targetRefName: `refs/heads/{{main_branch}}`
 - title: `{{commit_message}}`
 - labels: `["squad:{{agent_id}}"]`
 

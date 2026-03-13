@@ -102,3 +102,17 @@
 - **rebecca-fanout-W002-2026-03-12.md**: **By:** Rebecca (Architect)
 - **ripley-2026-03-12.md**: 1. **Bebop thin-route pattern**: New routes in Bebop follow a thin-route pattern under `apps/bebop/src/routes/`. Layout routes are prefixed with `_mai
 
+
+
+---
+
+### 2026-03-13: Consolidated from 5 inbox items
+**By:** Engine (auto-consolidation)
+
+#### Other (5)
+- **dallas-W005-2026-03-12.md**: **Date:** 2026-03-12
+- **dallas-W006-2026-03-13.md**: **Date:** 2026-03-13
+- **lambert-2026-03-12.md**: 1. **Bebop MessageTemplates pattern**: The `MessageTemplates` interface in `bebop-conversation-orchestrator` uses a render-function-per-message-type p
+- **lambert-2026-03-13.md**: 1. **ADO PR status codes**: `status: 1` = active, `status: 2` = abandoned, `status: 3` = completed/merged. The `mergeStatus` field is separate — `merg
+- **ralph-2026-03-13.md**: **Date:** 2026-03-13
+

@@ -11,7 +11,6 @@
   },
   "engine": {
     "tickInterval": 60000,
-    "staleThreshold": 1800000,
     "maxConcurrent": 3,
     "inboxConsolidateThreshold": 5,
     "agentTimeout": 600000,

@@ -125,9 +125,9 @@ function getPrdInfo() {
       byStatus[s].push({ id: item.id, name: item.name || item.title, priority: item.priority, complexity: item.estimated_complexity || item.size, status: s });
     });
 
-    const complete = (byStatus['complete'] || []).length;
+    const complete = (byStatus['complete'] || []).length + (byStatus['completed'] || []).length + (byStatus['implemented'] || []).length;
     const prCreated = (byStatus['pr-created'] || []).length;
-    const inProgress = (byStatus['in-progress'] || []).length;
+    const inProgress = (byStatus['in-progress'] || []).length + (byStatus['dispatched'] || []).length;
     const planned = (byStatus['planned'] || []).length;
     const missing = (byStatus['missing'] || []).length;
     const total = items.length;

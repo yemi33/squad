@@ -105,10 +105,11 @@
     "type": "implement",
     "priority": "medium",
     "description": "",
-    "status": "dispatched",
+    "status": "done",
     "created": "2026-03-13T07:38:18.744Z",
     "createdBy": "dashboard",
     "dispatched_at": "2026-03-13T07:38:39.160Z",
-    "dispatched_to": "dallas"
+    "dispatched_to": "dallas",
+    "completedAt": "2026-03-13T08:18:05.692Z"
   }
 ]

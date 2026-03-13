@@ -298,6 +298,20 @@ function parseRoutingTable() {
   return routes;
 }
 
+function getAgentErrorRate(agentId) {
+  const metricsPath = path.join(ENGINE_DIR, 'metrics.json');
+  const metrics = safeJson(metricsPath) || {};
+  const m = metrics[agentId];
+  if (!m) return 0;
+  const total = m.tasksCompleted + m.tasksErrored;
+  return total > 0 ? m.tasksErrored / total : 0;
+}
+
+function isAgentIdle(agentId) {
+  const status = getAgentStatus(agentId);
+  return ['idle', 'done', 'completed'].includes(status.status);
+}
+
 function resolveAgent(workType, config, authorAgent = null) {
   const routes = parseRoutingTable();
   const route = routes[workType] || routes['implement'];
@@ -307,31 +321,16 @@ function resolveAgent(workType, config, authorAgent = null) {
   let preferred = route.preferred === '_author_' ? authorAgent : route.preferred;
   let fallback = route.fallback === '_author_' ? authorAgent : route.fallback;
 
-  // Check if preferred is idle
-  if (preferred && agents[preferred]) {
-    const status = getAgentStatus(preferred);
-    if (['idle', 'done', 'completed'].includes(status.status)) {
-      return preferred;
-    }
-  }
+  // Check preferred and fallback first (routing table order)
+  if (preferred && agents[preferred] && isAgentIdle(preferred)) return preferred;
+  if (fallback && agents[fallback] && isAgentIdle(fallback)) return fallback;
 
-  // Try fallback
-  if (fallback && agents[fallback]) {
-    const status = getAgentStatus(fallback);
-    if (['idle', 'done', 'completed'].includes(status.status)) {
-      return fallback;
-    }
-  }
+  // Fall back to any idle agent, preferring lower error rates
+  const idle = Object.keys(agents)
+    .filter(id => id !== preferred && id !== fallback && isAgentIdle(id))
+    .sort((a, b) => getAgentErrorRate(a) - getAgentErrorRate(b));
 
-  // Find any idle agent
-  for (const [id] of Object.entries(agents)) {
-    const status = getAgentStatus(id);
-    if (['idle', 'done', 'completed'].includes(status.status)) {
-      return id;
-    }
-  }
-
-  return null; // All agents busy
+  return idle[0] || null;
 }
 
 // ─── Playbook Renderer ──────────────────────────────────────────────────────
@@ -795,9 +794,10 @@ function completeDispatch(id, result = 'success', reason = '') {
     safeWrite(DISPATCH_PATH, dispatch);
     log('info', `Completed dispatch: ${id} (${result}${reason ? ': ' + reason : ''})`);
 
-    // Update source work item status on failure
-    if (result === 'error' && item.meta?.item?.id) {
-      updateWorkItemStatus(item.meta, 'failed', reason);
+    // Update source work item status on failure + apply backoff cooldown
+    if (result === 'error') {
+      if (item.meta?.dispatchKey) setCooldownFailure(item.meta.dispatchKey);
+      if (item.meta?.item?.id) updateWorkItemStatus(item.meta, 'failed', reason);
     }
   }
 }
@@ -1713,16 +1713,28 @@ function runCleanup(config, verbose = false) {
 
 // ─── Work Discovery ─────────────────────────────────────────────────────────
 
-const dispatchCooldowns = new Map(); // key → timestamp of last dispatch
+const dispatchCooldowns = new Map(); // key → { timestamp, failures }
 
 function isOnCooldown(key, cooldownMs) {
-  const last = dispatchCooldowns.get(key);
-  if (!last) return false;
-  return (Date.now() - last) < cooldownMs;
+  const entry = dispatchCooldowns.get(key);
+  if (!entry) return false;
+  // Exponential backoff: cooldown doubles per failure, max 8x
+  const backoff = Math.min(Math.pow(2, entry.failures || 0), 8);
+  return (Date.now() - entry.timestamp) < (cooldownMs * backoff);
 }
 
 function setCooldown(key) {
-  dispatchCooldowns.set(key, Date.now());
+  const existing = dispatchCooldowns.get(key);
+  dispatchCooldowns.set(key, { timestamp: Date.now(), failures: existing?.failures || 0 });
+}
+
+function setCooldownFailure(key) {
+  const existing = dispatchCooldowns.get(key);
+  const failures = (existing?.failures || 0) + 1;
+  dispatchCooldowns.set(key, { timestamp: Date.now(), failures });
+  if (failures >= 3) {
+    log('warn', `${key} has failed ${failures} times — cooldown is now ${Math.min(Math.pow(2, failures), 8)}x`);
+  }
 }
 
 function isAlreadyDispatched(key) {
@@ -1775,6 +1787,8 @@ function discoverFromPrd(config, project) {
       item_complexity: item.estimated_complexity || 'medium',
       item_description: item.description || '',
       branch_name: branchName,
+      project_path: root,
+      main_branch: project?.mainBranch || 'main',
       worktree_path: path.resolve(root, config.engine?.worktreeRoot || '../worktrees', branchName),
       commit_message: `feat(${item.id.toLowerCase()}): ${item.name}`,
       team_root: SQUAD_DIR,
@@ -1789,7 +1803,7 @@ function discoverFromPrd(config, project) {
     if (!prompt) continue;
 
     newWork.push({
-      type: 'implement',
+      type: workType,
       agent: agentId,
       agentName: config.agents[agentId]?.name,
       agentRole: config.agents[agentId]?.role,
@@ -2039,7 +2053,11 @@ function discoverFromWorkItems(config, project) {
     const key = `work-${project?.name || 'default'}-${item.id}`;
     if (isAlreadyDispatched(key) || isOnCooldown(key, cooldownMs)) continue;
 
-    const workType = item.type || 'implement';
+    let workType = item.type || 'implement';
+    // Route large items to architecture agents, matching PRD/plan behavior
+    if (workType === 'implement' && (item.complexity === 'large' || item.estimated_complexity === 'large')) {
+      workType = 'implement:large';
+    }
     const agentId = item.agent || resolveAgent(workType, config);
     if (!agentId) continue;
 
@@ -2070,10 +2088,18 @@ function discoverFromWorkItems(config, project) {
     };
 
     // Use type-specific playbook if it exists (e.g., explore.md, review.md), fall back to work-item.md
-    const typeSpecificPlaybooks = ['explore', 'review', 'analyze', 'test', 'plan-to-prd'];
+    const typeSpecificPlaybooks = ['explore', 'review', 'test', 'plan-to-prd'];
     const playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
     const prompt = item.prompt || renderPlaybook(playbookName, vars) || renderPlaybook('work-item', vars) || item.description;
-    if (!prompt) continue;
+    if (!prompt) {
+      log('warn', `No playbook rendered for ${item.id} (type: ${workType}, playbook: ${playbookName}) — skipping`);
+      continue;
+    }
+
+    // Mark item as dispatched BEFORE adding to newWork (prevents race on next tick)
+    item.status = 'dispatched';
+    item.dispatched_at = ts();
+    item.dispatched_to = agentId;
 
     newWork.push({
       type: workType,
@@ -2085,14 +2111,10 @@ function discoverFromWorkItems(config, project) {
       meta: { dispatchKey: key, source: 'work-item', branch: branchName, item, project: { name: project?.name, localPath: project?.localPath } }
     });
 
-    // Mark item as dispatched in the source file
-    item.status = 'dispatched';
-    item.dispatched_at = ts();
-    item.dispatched_to = agentId;
     setCooldown(key);
   }
 
-  // Write back updated statuses only if we dispatched something
+  // Write back updated statuses (always, since we mark items dispatched before newWork check)
   if (newWork.length > 0) {
     const workItemsPath = path.resolve(root, src.path);
     safeWrite(workItemsPath, items);
@@ -2347,7 +2369,7 @@ function discoverCentralWorkItems(config) {
           date: dateStamp()
         };
 
-        const typeSpecificPlaybooks = ['explore', 'review', 'analyze', 'test', 'plan-to-prd'];
+        const typeSpecificPlaybooks = ['explore', 'review', 'test', 'plan-to-prd'];
         const playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
         const prompt = renderPlaybook(playbookName, vars) || renderPlaybook('work-item', vars);
         if (!prompt) continue;
@@ -2402,7 +2424,7 @@ function discoverCentralWorkItems(config) {
         date: dateStamp()
       };
 
-      const typeSpecificPlaybooks = ['explore', 'review', 'analyze', 'test', 'plan-to-prd'];
+      const typeSpecificPlaybooks = ['explore', 'review', 'test', 'plan-to-prd'];
       const playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
       const prompt = renderPlaybook(playbookName, vars) || renderPlaybook('work-item', vars);
       if (!prompt) continue;
@@ -2582,6 +2604,18 @@ function tick() {
   }
 
   const slotsAvailable = maxConcurrent - activeCount;
+
+  // Priority dispatch: fixes > reviews > plan-to-prd > implement > other
+  const typePriority = { fix: 0, review: 1, 'plan-to-prd': 2, 'implement:large': 3, implement: 4 };
+  const itemPriority = { high: 0, medium: 1, low: 2 };
+  dispatch.pending.sort((a, b) => {
+    const ta = typePriority[a.type] ?? 5, tb = typePriority[b.type] ?? 5;
+    if (ta !== tb) return ta - tb;
+    const pa = itemPriority[a.meta?.item?.priority] ?? 1, pb = itemPriority[b.meta?.item?.priority] ?? 1;
+    return pa - pb;
+  });
+  safeWrite(DISPATCH_PATH, dispatch);
+
   const toDispatch = dispatch.pending.slice(0, slotsAvailable);
 
   // Collect IDs to dispatch, then spawn — spawnAgent mutates dispatch.pending
