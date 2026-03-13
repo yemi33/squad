@@ -15,6 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { execSync } = require('child_process');
 
 const SQUAD_HOME = __dirname;
 const CONFIG_PATH = path.join(SQUAD_HOME, 'config.json');
@@ -34,6 +35,75 @@ function ask(q, def) {
   return new Promise(resolve => {
     rl.question(`  ${q}${def ? ` [${def}]` : ''}: `, ans => resolve(ans.trim() || def || ''));
   });
+}
+
+function autoDiscover(targetDir) {
+  const result = { _found: [] };
+
+  // 1. Detect main branch from git
+  try {
+    const head = execSync('git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || git symbolic-ref HEAD', { cwd: targetDir, encoding: 'utf8', timeout: 5000 }).trim();
+    const branch = head.replace('refs/remotes/origin/', '').replace('refs/heads/', '');
+    if (branch) { result.mainBranch = branch; result._found.push('main branch'); }
+  } catch {}
+
+  // 2. Detect repo host, org, project, repo name from git remote URL
+  try {
+    const remoteUrl = execSync('git remote get-url origin', { cwd: targetDir, encoding: 'utf8', timeout: 5000 }).trim();
+    if (remoteUrl.includes('github.com')) {
+      result.repoHost = 'github';
+      // https://github.com/org/repo.git or git@github.com:org/repo.git
+      const m = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
+      if (m) { result.org = m[1]; result.repoName = m[2]; }
+      result._found.push('GitHub remote');
+    } else if (remoteUrl.includes('visualstudio.com') || remoteUrl.includes('dev.azure.com')) {
+      result.repoHost = 'ado';
+      // https://org.visualstudio.com/project/_git/repo or https://dev.azure.com/org/project/_git/repo
+      const m1 = remoteUrl.match(/https:\/\/([^.]+)\.visualstudio\.com[^/]*\/([^/]+)\/_git\/([^/\s]+)/);
+      const m2 = remoteUrl.match(/https:\/\/dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/\s]+)/);
+      const m = m1 || m2;
+      if (m) { result.org = m[1]; result.project = m[2]; result.repoName = m[3]; }
+      result._found.push('Azure DevOps remote');
+    }
+  } catch {}
+
+  // 3. Read description from CLAUDE.md first line or README.md first paragraph
+  try {
+    const claudeMdPath = path.join(targetDir, 'CLAUDE.md');
+    if (fs.existsSync(claudeMdPath)) {
+      const content = fs.readFileSync(claudeMdPath, 'utf8');
+      // Look for a description-like first line or paragraph (skip headings)
+      const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+      if (lines[0] && lines[0].length < 200) {
+        result.description = lines[0].trim();
+        result._found.push('description from CLAUDE.md');
+      }
+    }
+  } catch {}
+  if (!result.description) {
+    try {
+      const readmePath = path.join(targetDir, 'README.md');
+      if (fs.existsSync(readmePath)) {
+        const content = fs.readFileSync(readmePath, 'utf8').slice(0, 2000);
+        const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#') && !l.startsWith('!'));
+        if (lines[0] && lines[0].length < 200) {
+          result.description = lines[0].trim();
+          result._found.push('description from README.md');
+        }
+      }
+    } catch {}
+  }
+
+  // 4. Detect project name
+  try {
+    const pkgPath = path.join(targetDir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (pkg.name) { result.name = pkg.name.replace(/^@[^/]+\//, ''); result._found.push('name from package.json'); }
+    }
+  } catch {}
+
+  return result;
 }
 
 async function addProject(targetDir) {
@@ -60,14 +130,20 @@ async function addProject(targetDir) {
   console.log(`  Squad home: ${SQUAD_HOME}`);
   console.log(`  Project:    ${target}\n`);
 
-  const name = await ask('Project name', path.basename(target));
-  const description = await ask('Description (what this repo contains/does)', '');
-  const repoHost = await ask('Repo host (ado/github)', 'ado');
-  const adoOrg = await ask('Organization', '');
-  const adoProject = await ask('Project', '');
-  const repoName = await ask('Repo name', name);
+  // Auto-discover what we can from the repo
+  const detected = autoDiscover(target);
+  if (detected._found.length > 0) {
+    console.log(`  Auto-detected: ${detected._found.join(', ')}\n`);
+  }
+
+  const name = await ask('Project name', detected.name || path.basename(target));
+  const description = await ask('Description (what this repo contains/does)', detected.description || '');
+  const repoHost = await ask('Repo host (ado/github)', detected.repoHost || 'ado');
+  const adoOrg = await ask('Organization', detected.org || '');
+  const adoProject = await ask('Project', detected.project || '');
+  const repoName = await ask('Repo name', detected.repoName || name);
   const repoId = await ask('Repository ID (GUID, optional)', '');
-  const mainBranch = await ask('Main branch', 'main');
+  const mainBranch = await ask('Main branch', detected.mainBranch || 'main');
 
   rl.close();
 

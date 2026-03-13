@@ -58,7 +58,7 @@ node ~/.squad/engine.js work "Explore the codebase and document the architecture
 | Command | Description |
 |---------|-------------|
 | `node squad.js init` | Initialize squad with default agents and config |
-| `node squad.js add <dir>` | Link a project (interactive prompts) |
+| `node squad.js add <dir>` | Link a project (auto-detects settings from git, prompts to confirm) |
 | `node squad.js remove <dir>` | Unlink a project |
 | `node squad.js list` | List all linked projects with descriptions |
 
@@ -179,6 +179,24 @@ When you run `squad.js add <dir>`, it prompts for project details and saves them
 - `workSources` — toggle which work sources the engine scans for each project.
 
 The init script also creates `<project>/.squad/` with empty `work-items.json` and `pull-requests.json`.
+
+### Auto-Discovery
+
+When you run `squad.js add`, the tool automatically detects what it can from the repo:
+
+| What | How |
+|------|-----|
+| Main branch | `git symbolic-ref` |
+| Repo host | Git remote URL (github.com → `github`, visualstudio.com/dev.azure.com → `ado`) |
+| Org / project / repo | Parsed from git remote URL |
+| Description | First non-heading line from `CLAUDE.md` or `README.md` |
+| Project name | `name` field from `package.json` |
+
+All detected values are shown as defaults in the interactive prompts — just press Enter to accept or type to override.
+
+### Project Conventions (CLAUDE.md)
+
+When dispatching agents, the engine reads each project's `CLAUDE.md` and injects it into the agent's system prompt as "Project Conventions". This means agents automatically follow repo-specific rules (logging, build commands, coding style, etc.) without needing to discover them each time. Each project can have different conventions.
 
 ## MCP Server Integration
 

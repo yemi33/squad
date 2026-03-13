@@ -473,11 +473,21 @@ function buildSystemPrompt(agentId, config, project) {
   prompt += `- Repo host: ${getRepoHostLabel(project)}\n`;
   prompt += `- Main branch: ${project.mainBranch || 'main'}\n\n`;
 
+  // Project conventions (from CLAUDE.md)
+  if (project.localPath) {
+    const claudeMd = safeRead(path.join(project.localPath, 'CLAUDE.md'));
+    if (claudeMd && claudeMd.trim()) {
+      // Truncate to 4KB to avoid bloating the system prompt
+      const truncated = claudeMd.length > 4096 ? claudeMd.slice(0, 4096) + '\n\n...(truncated)' : claudeMd;
+      prompt += `## Project Conventions (from CLAUDE.md)\n\n${truncated}\n\n`;
+    }
+  }
+
   // Critical rules
   prompt += `## Critical Rules\n\n`;
   prompt += `1. Use git worktrees — NEVER checkout on main working tree\n`;
   prompt += `2. ${getRepoHostToolRule(project)}\n`;
-  prompt += `3. Use PowerShell for build commands on Windows if applicable\n`;
+  prompt += `3. Follow the project conventions above (from CLAUDE.md) if present\n`;
   prompt += `4. Write learnings to: ${SQUAD_DIR}/decisions/inbox/${agentId}-${dateStamp()}.md\n`;
   prompt += `5. Do NOT write to agents/*/status.json — the engine manages agent status automatically\n`;
   prompt += `6. If you discover a repeatable workflow, save it as a skill:\n`;
