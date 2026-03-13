@@ -13,6 +13,7 @@ How the engine decides who handles what. Parsed by engine.js — keep the table 
 | review:docs | lambert | ripley |
 | fix | _author_ | dallas |
 | analyze | lambert | rebecca |
+| plan-to-prd | lambert | rebecca |
 | explore | ripley | rebecca |
 | test | dallas | ralph |
 

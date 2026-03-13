@@ -10,6 +10,9 @@ agents/*/output.log
 agents/*/live-output.log
 identity/now.md
 
+# Plan-generated PRDs (squad-internal work records)
+plans/
+
 # Machine-specific (synced from ~/.claude.json on engine start)
 mcp-servers.json
 

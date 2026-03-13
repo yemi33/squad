@@ -39,6 +39,7 @@ const DISPATCH_PATH = path.join(ENGINE_DIR, 'dispatch.json');
 const LOG_PATH = path.join(ENGINE_DIR, 'log.json');
 const INBOX_DIR = path.join(SQUAD_DIR, 'decisions', 'inbox');
 const ARCHIVE_DIR = path.join(SQUAD_DIR, 'decisions', 'archive');
+const PLANS_DIR = path.join(SQUAD_DIR, 'plans');
 const IDENTITY_DIR = path.join(SQUAD_DIR, 'identity');
 
 // ─── Multi-Project Support ──────────────────────────────────────────────────
@@ -544,7 +545,7 @@ function spawnAgent(dispatchItem, config) {
     } catch (err) {
       log('error', `Failed to create worktree for ${branchName}: ${err.message}`);
       // Fall back to main directory for non-writing tasks
-      if (type === 'review' || type === 'analyze') {
+      if (type === 'review' || type === 'analyze' || type === 'plan-to-prd') {
         cwd = ROOT_DIR;
       } else {
         completeDispatch(id, 'error', 'Worktree creation failed');
@@ -804,6 +805,23 @@ function completeDispatch(id, result = 'success', reason = '') {
 function updateWorkItemStatus(meta, status, reason) {
   const itemId = meta.item?.id;
   if (!itemId) return;
+
+  // Handle plan-sourced items — update status in the plan JSON file
+  if (meta.source === 'plan' && meta.planFile) {
+    const planPath = path.join(PLANS_DIR, meta.planFile);
+    const plan = safeJson(planPath);
+    if (plan?.missing_features) {
+      const feature = plan.missing_features.find(f => f.id === itemId);
+      if (feature) {
+        feature.status = status === 'done' ? 'implemented' : status === 'failed' ? 'failed' : feature.status;
+        if (status === 'done') feature.implementedAt = ts();
+        if (status === 'failed' && reason) feature.failReason = reason;
+        safeWrite(planPath, plan);
+        log('info', `Plan item ${itemId} (${meta.planFile}) → ${feature.status}`);
+      }
+    }
+    return;
+  }
 
   // Determine which work-items file to update
   let wiPath;
@@ -1787,6 +1805,85 @@ function discoverFromPrd(config, project) {
 }
 
 /**
+ * Scan ~/.squad/plans/ for plan-generated PRD files → queue implement tasks.
+ * Plans are project-scoped JSON files written by the plan-to-prd playbook.
+ */
+function discoverFromPlans(config) {
+  if (!fs.existsSync(PLANS_DIR)) return [];
+
+  let planFiles;
+  try { planFiles = fs.readdirSync(PLANS_DIR).filter(f => f.endsWith('.json')); } catch { return []; }
+
+  const newWork = [];
+  const cooldownMs = (config.engine?.planCooldownMinutes || 30) * 60 * 1000;
+
+  for (const file of planFiles) {
+    const plan = safeJson(path.join(PLANS_DIR, file));
+    if (!plan?.missing_features) continue;
+
+    const projectName = plan.project || file.replace(/-\d{4}-\d{2}-\d{2}\.json$/, '');
+    const project = getProjects(config).find(p => p.name?.toLowerCase() === projectName.toLowerCase());
+    if (!project) {
+      log('warn', `Plan ${file} references unknown project "${projectName}" — skipping`);
+      continue;
+    }
+
+    const statusFilter = ['missing', 'planned'];
+    const items = plan.missing_features.filter(f => statusFilter.includes(f.status));
+
+    for (const item of items) {
+      const key = `plan-${projectName}-${item.id}`;
+      if (isAlreadyDispatched(key)) continue;
+      if (isOnCooldown(key, cooldownMs)) continue;
+
+      const workType = item.estimated_complexity === 'large' ? 'implement:large' : 'implement';
+      const agentId = resolveAgent(workType, config);
+      if (!agentId) continue;
+
+      const branchName = `feat/${item.id.toLowerCase()}-${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`;
+      const vars = {
+        agent_id: agentId,
+        agent_name: config.agents[agentId]?.name || agentId,
+        agent_role: config.agents[agentId]?.role || 'Agent',
+        item_id: item.id,
+        item_name: item.name,
+        item_priority: item.priority || 'medium',
+        item_complexity: item.estimated_complexity || 'medium',
+        item_description: item.description || '',
+        item_acceptance_criteria: (item.acceptance_criteria || []).map(c => `- ${c}`).join('\n'),
+        branch_name: branchName,
+        commit_message: `feat(${item.id.toLowerCase()}): ${item.name}`,
+        team_root: SQUAD_DIR,
+        project_path: project.localPath,
+        main_branch: project.mainBranch || 'main',
+        repo_id: project.repositoryId || '',
+        project_name: project.name || 'Unknown',
+        ado_org: project.adoOrg || config.project?.adoOrg || 'Unknown',
+        ado_project: project.adoProject || config.project?.adoProject || 'Unknown',
+        repo_name: project.repoName || config.project?.repoName || 'Unknown'
+      };
+
+      const prompt = renderPlaybook('implement', vars);
+      if (!prompt) continue;
+
+      newWork.push({
+        type: workType,
+        agent: agentId,
+        agentName: config.agents[agentId]?.name,
+        agentRole: config.agents[agentId]?.role,
+        task: `[${project.name}] Implement ${item.id}: ${item.name}`,
+        prompt,
+        meta: { dispatchKey: key, source: 'plan', planFile: file, branch: branchName, item, project: { name: project.name, localPath: project.localPath } }
+      });
+
+      setCooldown(key);
+    }
+  }
+
+  return newWork;
+}
+
+/**
  * Scan pull-requests.json for PRs needing review or fixes
  */
 function discoverFromPrs(config, project) {
@@ -1973,7 +2070,8 @@ function discoverFromWorkItems(config, project) {
     };
 
     // Use type-specific playbook if it exists (e.g., explore.md, review.md), fall back to work-item.md
-    const playbookName = (workType === 'explore' || workType === 'review' || workType === 'analyze' || workType === 'test') ? workType : 'work-item';
+    const typeSpecificPlaybooks = ['explore', 'review', 'analyze', 'test', 'plan-to-prd'];
+    const playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
     const prompt = item.prompt || renderPlaybook(playbookName, vars) || renderPlaybook('work-item', vars) || item.description;
     if (!prompt) continue;
 
@@ -2249,7 +2347,8 @@ function discoverCentralWorkItems(config) {
           date: dateStamp()
         };
 
-        const playbookName = (workType === 'explore' || workType === 'review' || workType === 'analyze' || workType === 'test') ? workType : 'work-item';
+        const typeSpecificPlaybooks = ['explore', 'review', 'analyze', 'test', 'plan-to-prd'];
+        const playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
         const prompt = renderPlaybook(playbookName, vars) || renderPlaybook('work-item', vars);
         if (!prompt) continue;
 
@@ -2303,7 +2402,8 @@ function discoverCentralWorkItems(config) {
         date: dateStamp()
       };
 
-      const playbookName = (workType === 'explore' || workType === 'review' || workType === 'analyze' || workType === 'test') ? workType : 'work-item';
+      const typeSpecificPlaybooks = ['explore', 'review', 'analyze', 'test', 'plan-to-prd'];
+      const playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
       const prompt = renderPlaybook(playbookName, vars) || renderPlaybook('work-item', vars);
       if (!prompt) continue;
 
@@ -2417,6 +2517,9 @@ function discoverWork(config) {
     discoverFromMergedDesignDocs(config, project); // side-effect: creates work items for next tick
     allWorkItems.push(...discoverFromWorkItems(config, project));
   }
+
+  // Plan-generated PRDs (project-agnostic — plan files specify their target project)
+  allImplements.push(...discoverFromPlans(config));
 
   // Central work items (project-agnostic — agent decides where to work)
   const centralWork = discoverCentralWorkItems(config);
@@ -2724,6 +2827,114 @@ const commands = {
     console.log(`  Type: ${item.type} | Priority: ${item.priority} | Agent: ${item.agent || 'auto'}`);
   },
 
+  plan(source, projectName) {
+    if (!source) {
+      console.log('Usage: node .squad/engine.js plan <source> [project]');
+      console.log('');
+      console.log('Source can be:');
+      console.log('  - A file path (markdown, txt, or json)');
+      console.log('  - Inline text wrapped in quotes');
+      console.log('');
+      console.log('Examples:');
+      console.log('  node engine.js plan ./my-plan.md');
+      console.log('  node engine.js plan ./my-plan.md OfficeAgent');
+      console.log('  node engine.js plan "Add auth middleware with JWT tokens and role-based access"');
+      return;
+    }
+
+    const config = getConfig();
+    const projects = getProjects(config);
+    const targetProject = projectName
+      ? projects.find(p => p.name?.toLowerCase() === projectName.toLowerCase()) || projects[0]
+      : projects[0];
+
+    if (!targetProject) {
+      console.log('No projects configured. Run: node squad.js add <dir>');
+      return;
+    }
+
+    // Read plan content from file or use inline text
+    let planContent;
+    let planSummary;
+    const sourcePath = path.resolve(source);
+    if (fs.existsSync(sourcePath)) {
+      planContent = fs.readFileSync(sourcePath, 'utf8');
+      planSummary = path.basename(sourcePath, path.extname(sourcePath));
+      console.log(`Reading plan from: ${sourcePath}`);
+    } else {
+      planContent = source;
+      planSummary = source.substring(0, 60).replace(/[^a-zA-Z0-9 -]/g, '').trim();
+      console.log('Using inline plan text.');
+    }
+
+    console.log(`Target project: ${targetProject.name}`);
+    console.log(`Plan summary: ${planSummary}`);
+    console.log('');
+
+    // Dispatch as a plan-to-prd work item
+    const agentId = resolveAgent('analyze', config) || resolveAgent('explore', config);
+    if (!agentId) {
+      console.log('No agents available. All agents are busy.');
+      return;
+    }
+
+    const vars = {
+      agent_id: agentId,
+      agent_name: config.agents[agentId]?.name,
+      agent_role: config.agents[agentId]?.role,
+      project_name: targetProject.name || 'Unknown',
+      project_path: targetProject.localPath || '',
+      main_branch: targetProject.mainBranch || 'main',
+      ado_org: targetProject.adoOrg || config.project?.adoOrg || 'Unknown',
+      ado_project: targetProject.adoProject || config.project?.adoProject || 'Unknown',
+      repo_name: targetProject.repoName || config.project?.repoName || 'Unknown',
+      team_root: SQUAD_DIR,
+      date: dateStamp(),
+      plan_content: planContent,
+      plan_summary: planSummary,
+      project_name_lower: (targetProject.name || 'project').toLowerCase()
+    };
+
+    // Ensure plans directory exists
+    if (!fs.existsSync(PLANS_DIR)) fs.mkdirSync(PLANS_DIR, { recursive: true });
+
+    const prompt = renderPlaybook('plan-to-prd', vars);
+    if (!prompt) {
+      console.log('Error: Could not render plan-to-prd playbook.');
+      return;
+    }
+
+    const id = addToDispatch({
+      type: 'plan-to-prd',
+      agent: agentId,
+      agentName: config.agents[agentId]?.name,
+      agentRole: config.agents[agentId]?.role,
+      task: `[${targetProject.name}] Generate PRD from plan: ${planSummary}`,
+      prompt,
+      meta: {
+        source: 'plan',
+        project: { name: targetProject.name, localPath: targetProject.localPath },
+        planSummary
+      }
+    });
+
+    console.log(`Dispatched: ${id} → ${config.agents[agentId]?.name} (${agentId})`);
+    console.log('The agent will analyze your plan and generate docs/prd-gaps.json as a PR.');
+
+    // Immediately dispatch if engine is running
+    const control = getControl();
+    if (control.state === 'running') {
+      const dispatch = getDispatch();
+      const item = dispatch.pending.find(d => d.id === id);
+      if (item) {
+        spawnAgent(item, config);
+        console.log('Agent spawned immediately.');
+      }
+    } else {
+      console.log('Engine is not running — dispatch will happen on next tick after start.');
+    }
+  },
+
   sources() {
     const config = getConfig();
     const projects = getProjects(config);
@@ -2853,10 +3064,11 @@ const commands = {
     console.log('\n=== Work Discovery (dry run) ===\n');
 
     const prdWork = discoverFromPrd(config);
+    const planWork = discoverFromPlans(config);
     const prWork = discoverFromPrs(config);
     const workItemWork = discoverFromWorkItems(config);
 
-    const all = [...prdWork, ...prWork, ...workItemWork];
+    const all = [...prdWork, ...planWork, ...prWork, ...workItemWork];
 
     if (all.length === 0) {
       console.log('No new work discovered from any source.');
@@ -2891,6 +3103,7 @@ if (!cmd) {
   console.log('  dispatch         Force a dispatch cycle');
   console.log('  spawn <a> <p>    Manually spawn agent with prompt');
   console.log('  work <title> [o] Add to work-items.json queue');
+  console.log('  plan <src> [p]   Generate PRD from a plan (file or text)');
   console.log('  complete <id>    Mark dispatch as done');
   console.log('  cleanup           Clean temp files, worktrees, zombies');
   console.log('  mcp-sync         Sync MCP servers from ~/.claude.json');

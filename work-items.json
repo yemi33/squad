@@ -92,10 +92,23 @@
     "type": "test",
     "priority": "medium",
     "description": "",
-    "status": "dispatched",
+    "status": "done",
     "created": "2026-03-12T17:58:07.529Z",
     "createdBy": "dashboard",
     "dispatched_at": "2026-03-13T00:59:20.112Z",
+    "dispatched_to": "dallas",
+    "completedAt": "2026-03-13T07:18:15.859Z"
+  },
+  {
+    "id": "W007",
+    "title": "implement rebecca's plan https://office.visualstudio.com/DefaultCollection/OC/_git/office-bohemia/pullrequest/4959405",
+    "type": "implement",
+    "priority": "medium",
+    "description": "",
+    "status": "dispatched",
+    "created": "2026-03-13T07:38:18.744Z",
+    "createdBy": "dashboard",
+    "dispatched_at": "2026-03-13T07:38:39.160Z",
     "dispatched_to": "dallas"
   }
 ]
