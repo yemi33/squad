@@ -56,27 +56,60 @@ if (!claudeBin) {
 const debugPath = path.join(__dirname, 'spawn-debug.log');
 fs.writeFileSync(debugPath, `spawn-agent.js at ${new Date().toISOString()}\nclaudeBin=${claudeBin || 'not found'}\nprompt=${promptFile}\nsysPrompt=${sysPromptFile}\nextraArgs=${extraArgs.join(' ')}\n`);
 
-const cliArgs = ['-p', '--system-prompt', sysPrompt, ...extraArgs];
+// Pass system prompt via file to avoid ENAMETOOLONG on Windows (32KB arg limit)
+// Write to a temp file and use shell-based workaround
+const sysTmpPath = sysPromptFile + '.tmp';
+fs.writeFileSync(sysTmpPath, sysPrompt);
+const cliArgs = ['-p', '--system-prompt-file', sysTmpPath, ...extraArgs];
 
 if (!claudeBin) {
   fs.appendFileSync(debugPath, 'FATAL: Cannot find claude-code cli.js\n');
   process.exit(1);
 }
 
-const proc = spawn(process.execPath, [claudeBin, ...cliArgs], {
+// Check if --system-prompt-file is supported by trying it; if not, fall back to inline
+// but truncate to stay under Windows arg limit
+let actualArgs = cliArgs;
+try {
+  // Test: does claude support --system-prompt-file?
+  const testResult = require('child_process').spawnSync(process.execPath, [claudeBin, '--help'], { encoding: 'utf8', timeout: 5000 });
+  if (!(testResult.stdout || '').includes('system-prompt-file')) {
+    // Not supported — fall back to inline but safe: use --append-system-prompt with chunking
+    // or just inline if under 30KB
+    fs.unlinkSync(sysTmpPath);
+    if (Buffer.byteLength(sysPrompt) < 30000) {
+      actualArgs = ['-p', '--system-prompt', sysPrompt, ...extraArgs];
+    } else {
+      // Too large for inline — prepend system prompt to the user prompt via stdin
+      actualArgs = ['-p', ...extraArgs];
+      // We'll inject system prompt into stdin along with the prompt below
+    }
+  }
+} catch {
+  // If help check fails, try file approach anyway
+}
+
+const proc = spawn(process.execPath, [claudeBin, ...actualArgs], {
   stdio: ['pipe', 'pipe', 'pipe'],
   env
 });
 
-fs.appendFileSync(debugPath, `PID=${proc.pid || 'none'}\n`);
+fs.appendFileSync(debugPath, `PID=${proc.pid || 'none'}\nargs=${actualArgs.join(' ').slice(0, 500)}\n`);
 
 // Write PID file for parent engine to verify spawn
 const pidFile = promptFile.replace(/prompt-/, 'pid-').replace(/\.md$/, '.pid');
 fs.writeFileSync(pidFile, String(proc.pid || ''));
 
-// Send prompt via stdin
-proc.stdin.write(prompt);
+// Send prompt via stdin — if system prompt couldn't be passed via args, prepend it
+if (!actualArgs.includes('--system-prompt') && !actualArgs.includes('--system-prompt-file')) {
+  proc.stdin.write(`<system>\n${sysPrompt}\n</system>\n\n${prompt}`);
+} else {
+  proc.stdin.write(prompt);
+}
 proc.stdin.end();
+
+// Clean up temp file
+setTimeout(() => { try { fs.unlinkSync(sysTmpPath); } catch {} }, 5000);
 
 // Capture stderr separately for debugging
 let stderrBuf = '';
