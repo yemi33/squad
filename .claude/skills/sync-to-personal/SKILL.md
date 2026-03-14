@@ -89,7 +89,15 @@ touch notes/archive/.gitkeep notes/inbox/.gitkeep
 git add -f notes/archive/.gitkeep notes/inbox/.gitkeep
 ```
 
-### 7. Commit and force push to personal
+### 7. Add GitHub Actions workflow (personal-only)
+
+The publish workflow is gitignored on the org repo but must be included in the personal distribution:
+
+```bash
+git add -f .github/workflows/publish.yml
+```
+
+### 8. Commit and force push to personal
 
 ```bash
 git add .gitignore
@@ -97,14 +105,14 @@ git commit -m "Strip logs, history, and notes for clean distribution"
 git push personal dist-clean:master --force
 ```
 
-### 8. Switch back to master and clean up
+### 9. Switch back to master and clean up
 
 ```bash
 git checkout master
 git branch -D dist-clean
 ```
 
-### 9. Handle auth if push fails
+### 10. Handle auth if push fails
 
 If push fails due to Enterprise Managed User restrictions:
 ```bash
