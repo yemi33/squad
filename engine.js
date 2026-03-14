@@ -1413,14 +1413,23 @@ function updatePrAfterReview(agentId, pr, project) {
     note: agentStatus.task || ''
   };
 
-  // Update author metrics
+  // Update author metrics (deduplicated per PR — don't double-count re-reviews)
   const authorAgentId = (pr.agent || '').toLowerCase();
   if (authorAgentId && config.agents?.[authorAgentId]) {
     const metricsPath = path.join(ENGINE_DIR, 'metrics.json');
     const metrics = safeJson(metricsPath) || {};
     if (!metrics[authorAgentId]) metrics[authorAgentId] = { tasksCompleted:0, tasksErrored:0, prsCreated:0, prsApproved:0, prsRejected:0, reviewsDone:0, lastTask:null, lastCompleted:null };
-    if (squadVerdict === 'approved') metrics[authorAgentId].prsApproved++;
-    else if (squadVerdict === 'changes-requested') metrics[authorAgentId].prsRejected++;
+    if (!metrics[authorAgentId]._reviewedPrs) metrics[authorAgentId]._reviewedPrs = {};
+    const prevVerdict = metrics[authorAgentId]._reviewedPrs[pr.id];
+    if (prevVerdict !== squadVerdict) {
+      // Undo previous count if verdict changed (e.g. approved → changes-requested)
+      if (prevVerdict === 'approved') metrics[authorAgentId].prsApproved = Math.max(0, (metrics[authorAgentId].prsApproved || 0) - 1);
+      else if (prevVerdict === 'changes-requested') metrics[authorAgentId].prsRejected = Math.max(0, (metrics[authorAgentId].prsRejected || 0) - 1);
+      // Apply new verdict
+      if (squadVerdict === 'approved') metrics[authorAgentId].prsApproved++;
+      else if (squadVerdict === 'changes-requested') metrics[authorAgentId].prsRejected++;
+      metrics[authorAgentId]._reviewedPrs[pr.id] = squadVerdict;
+    }
     safeWrite(metricsPath, metrics);
   }
 
