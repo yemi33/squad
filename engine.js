@@ -313,6 +313,32 @@ function getSkillIndex() {
   } catch { return ''; }
 }
 
+function getKnowledgeBaseIndex() {
+  try {
+    const kbDir = path.join(SQUAD_DIR, 'knowledge');
+    if (!fs.existsSync(kbDir)) return '';
+    const categories = ['architecture', 'conventions', 'project-notes', 'build-reports', 'reviews'];
+    let entries = [];
+    for (const cat of categories) {
+      const catDir = path.join(kbDir, cat);
+      const files = safeReadDir(catDir).filter(f => f.endsWith('.md'));
+      for (const f of files) {
+        const content = safeRead(path.join(catDir, f)) || '';
+        const titleMatch = content.match(/^#\s+(.+)/m);
+        const title = titleMatch ? titleMatch[1].trim() : f.replace(/\.md$/, '');
+        entries.push({ cat, file: f, title });
+      }
+    }
+    if (entries.length === 0) return '';
+    let index = '## Knowledge Base Reference\n\n';
+    index += 'Deep-reference docs from past work. Read the file if you need detail.\n\n';
+    for (const e of entries) {
+      index += `- \`knowledge/${e.cat}/${e.file}\` — ${e.title}\n`;
+    }
+    return index + '\n';
+  } catch { return ''; }
+}
+
 function getPrs(project) {
   if (project) {
     const prPath = project.workSources?.pullRequests?.path;
@@ -572,6 +598,12 @@ function buildAgentContext(agentId, config, project) {
   const skillIndex = getSkillIndex();
   if (skillIndex) {
     context += skillIndex + '\n';
+  }
+
+  // Knowledge base index (paths + titles only — agents can Read if needed)
+  const kbIndex = getKnowledgeBaseIndex();
+  if (kbIndex) {
+    context += kbIndex + '\n';
   }
 
   // Team notes (the big one — can be 50KB)
