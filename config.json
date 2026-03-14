@@ -122,6 +122,35 @@
           "lookbackDays": 7
         }
       }
+    },
+    {
+      "name": "1JS",
+      "description": "1JS monorepo — the root repo for Office shared JavaScript/TypeScript packages and build infrastructure.",
+      "localPath": "C:/Users/yemishin/1JS",
+      "repositoryId": "",
+      "adoOrg": "office",
+      "adoProject": "Office",
+      "repoName": "1JS",
+      "mainBranch": "main",
+      "prUrlBase": "https://office.visualstudio.com/DefaultCollection/Office/_git/1JS/pullrequest/",
+      "workSources": {
+        "pullRequests": {
+          "enabled": true,
+          "path": ".squad/pull-requests.json",
+          "cooldownMinutes": 30
+        },
+        "workItems": {
+          "enabled": true,
+          "path": ".squad/work-items.json",
+          "cooldownMinutes": 0
+        },
+        "specs": {
+          "enabled": true,
+          "filePatterns": ["docs/**/*.md"],
+          "statePath": ".squad/spec-tracker.json",
+          "lookbackDays": 7
+        }
+      }
     }
   ],
   "engine": {

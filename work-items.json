@@ -210,10 +210,12 @@
     "type": "explore",
     "priority": "medium",
     "description": "",
-    "status": "dispatched",
+    "status": "failed",
     "created": "2026-03-14T04:53:40.408Z",
     "createdBy": "dashboard",
     "dispatched_at": "2026-03-14T04:54:04.389Z",
-    "dispatched_to": "rebecca"
+    "dispatched_to": "rebecca",
+    "failReason": "Orphaned — no process, silent for 3137s",
+    "failedAt": "2026-03-14T05:47:13.742Z"
   }
 ]
