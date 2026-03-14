@@ -4013,9 +4013,10 @@ async function tickInner() {
   // 2. Consolidate inbox
   consolidateInbox(config);
 
-  // 2.5. Periodic cleanup (every 10 ticks = ~5 minutes)
+  // 2.5. Periodic cleanup + MCP sync (every 10 ticks = ~5 minutes)
   if (tickCount % 10 === 0) {
     runCleanup(config);
+    syncMcpServers();
   }
 
   // 2.6. Poll ADO for full PR status: build, review, merge (every 6 ticks = ~3 minutes)
