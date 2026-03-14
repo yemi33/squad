@@ -2012,7 +2012,7 @@ function updateMetrics(agentId, dispatchItem, result) {
 let _consolidationInFlight = false;
 
 function consolidateInbox(config) {
-  const threshold = config.engine?.inboxConsolidateThreshold || 1;
+  const threshold = config.engine?.inboxConsolidateThreshold || 3;
   const files = getInboxFiles();
   if (files.length < threshold) return;
   if (_consolidationInFlight) return;
@@ -3301,6 +3301,9 @@ function discoverFromWorkItems(config, project) {
       item_name: item.title || item.id,
       item_priority: item.priority || 'medium',
       item_description: item.description || '',
+      item_complexity: item.complexity || item.estimated_complexity || 'medium',
+      task_description: item.title + (item.description ? '\n\n' + item.description : ''),
+      task_id: item.id,
       work_type: workType,
       additional_context: item.prompt ? `## Additional Context\n\n${item.prompt}` : '',
       scope_section: `## Scope: Project — ${project?.name || 'default'}\n\nThis task is scoped to a single project.`,
@@ -3315,8 +3318,10 @@ function discoverFromWorkItems(config, project) {
       ado_org: project?.adoOrg || 'Unknown',
       ado_project: project?.adoProject || 'Unknown',
       repo_name: project?.repoName || 'Unknown',
-      date: dateStamp()
+      date: dateStamp(),
+      notes_content: '',
     };
+    try { vars.notes_content = fs.readFileSync(path.join(SQUAD_DIR, 'notes.md'), 'utf8'); } catch {}
 
     // Inject ask-specific variables for the ask playbook
     if (workType === 'ask') {
@@ -3661,6 +3666,9 @@ function discoverCentralWorkItems(config) {
         item_name: item.title || item.id,
         item_priority: item.priority || 'medium',
         item_description: item.description || '',
+        item_complexity: item.complexity || item.estimated_complexity || 'medium',
+        task_description: item.title + (item.description ? '\n\n' + item.description : ''),
+        task_id: item.id,
         work_type: workType,
         additional_context: item.prompt ? `## Additional Context\n\n${item.prompt}` : '',
         scope_section: buildProjectContext(projects, null, false, agentName, agentRole),
@@ -3672,8 +3680,10 @@ function discoverCentralWorkItems(config) {
         ado_project: firstProject?.adoProject || 'Unknown',
         repo_name: firstProject?.repoName || 'Unknown',
         team_root: SQUAD_DIR,
-        date: dateStamp()
+        date: dateStamp(),
+        notes_content: '',
       };
+      try { vars.notes_content = fs.readFileSync(path.join(SQUAD_DIR, 'notes.md'), 'utf8'); } catch {}
 
       // Inject plan-specific variables for the plan playbook
       if (workType === 'plan') {
