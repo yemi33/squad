@@ -85,6 +85,35 @@
           "lookbackDays": 7
         }
       }
+    },
+    {
+      "name": "augloop-workflows",
+      "description": "AugLoop Workflows — workflow definitions and orchestration for the AugLoop platform.",
+      "localPath": "C:/Users/yemishin/augloop-workflows",
+      "repositoryId": "5fd57e57-e20b-446c-877b-21db5464d04e",
+      "adoOrg": "office",
+      "adoProject": "ISS",
+      "repoName": "augloop-workflows",
+      "mainBranch": "main",
+      "prUrlBase": "https://office.visualstudio.com/DefaultCollection/ISS/_git/augloop-workflows/pullrequest/",
+      "workSources": {
+        "pullRequests": {
+          "enabled": true,
+          "path": ".squad/pull-requests.json",
+          "cooldownMinutes": 30
+        },
+        "workItems": {
+          "enabled": true,
+          "path": ".squad/work-items.json",
+          "cooldownMinutes": 0
+        },
+        "specs": {
+          "enabled": true,
+          "filePatterns": ["docs/**/*.md"],
+          "statePath": ".squad/spec-tracker.json",
+          "lookbackDays": 7
+        }
+      }
     }
   ],
   "engine": {
