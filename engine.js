@@ -1589,11 +1589,9 @@ async function handlePostMerge(pr, project, config, newStatus) {
   // Only run remaining hooks for merged PRs (not abandoned)
   if (newStatus !== 'merged') return;
 
-  // 2. Update PRD item status to 'implemented'
+  // 2. Update PRD item status to 'implemented' (squad-level PRD)
   if (pr.prdItems?.length > 0) {
-    const root = path.resolve(project.localPath);
-    const prdSrc = project.workSources?.prd || {};
-    const prdPath = path.resolve(root, prdSrc.path || 'docs/prd-gaps.json');
+    const prdPath = path.join(SQUAD_DIR, 'prd.json');
     const prd = safeJson(prdPath);
     if (prd?.missing_features) {
       let updated = 0;
@@ -2422,33 +2420,49 @@ function isAlreadyDispatched(key) {
 }
 
 /**
- * Scan PRD (docs/prd-gaps.json) for missing/planned items → queue implement tasks
+ * Scan squad-level PRD (~/.squad/prd.json) for missing/planned items → queue implement tasks.
+ * Items can span multiple projects via the `projects` array field.
  */
-function discoverFromPrd(config, project) {
-  const src = project?.workSources?.prd || config.workSources?.prd;
-  if (!src?.enabled) return [];
-
-  const root = project?.localPath ? path.resolve(project.localPath) : path.resolve(SQUAD_DIR, '..');
-  const prdPath = path.resolve(root, src.path);
+function discoverFromPrd(config) {
+  const prdPath = path.join(SQUAD_DIR, 'prd.json');
   const prd = safeJson(prdPath);
   if (!prd) return [];
 
-  const cooldownMs = (src.cooldownMinutes || 30) * 60 * 1000;
-  const statusFilter = src.itemFilter?.status || ['missing', 'planned'];
+  const cooldownMs = (config.workSources?.prd?.cooldownMinutes || 30) * 60 * 1000;
+  const statusFilter = config.workSources?.prd?.itemFilter?.status || ['missing', 'planned'];
   const items = (prd.missing_features || []).filter(f => statusFilter.includes(f.status));
   const newWork = [];
-  const skipped = { dispatched: 0, cooldown: 0, noAgent: 0 };
+  const skipped = { dispatched: 0, cooldown: 0, noAgent: 0, noProject: 0 };
+  const allProjects = config.projects || [];
 
   for (const item of items) {
-    const key = `prd-${project?.name || 'default'}-${item.id}`;
+    const key = `prd-squad-${item.id}`;
     if (isAlreadyDispatched(key)) { skipped.dispatched++; continue; }
     if (isOnCooldown(key, cooldownMs)) { skipped.cooldown++; continue; }
+
+    // Resolve target projects from item.projects array
+    const targetProjects = (item.projects || [])
+      .map(name => allProjects.find(p => p.name.toLowerCase() === name.toLowerCase()))
+      .filter(Boolean);
+    if (targetProjects.length === 0) { skipped.noProject++; continue; }
 
     const workType = item.estimated_complexity === 'large' ? 'implement:large' : 'implement';
     const agentId = resolveAgent(workType, config);
     if (!agentId) { skipped.noAgent++; continue; }
 
+    // Primary project = first in the list (used for worktree, branch, PR)
+    const primary = targetProjects[0];
+    const root = path.resolve(primary.localPath);
     const branchName = `feature/${item.id.toLowerCase()}-${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`;
+
+    // Build related projects context for multi-project items
+    let relatedProjects = '';
+    if (targetProjects.length > 1) {
+      relatedProjects = targetProjects.map(p =>
+        `- **${p.name}** — ${path.resolve(p.localPath)} (${p.adoOrg}/${p.adoProject}/${p.repoName}, branch: ${p.mainBranch || 'main'})`
+      ).join('\n');
+    }
+
     const vars = {
       agent_id: agentId,
       agent_name: config.agents[agentId]?.name || agentId,
@@ -2460,15 +2474,16 @@ function discoverFromPrd(config, project) {
       item_description: item.description || '',
       branch_name: branchName,
       project_path: root,
-      main_branch: project?.mainBranch || 'main',
+      main_branch: primary.mainBranch || 'main',
       worktree_path: path.resolve(root, config.engine?.worktreeRoot || '../worktrees', branchName),
       commit_message: `feat(${item.id.toLowerCase()}): ${item.name}`,
       team_root: SQUAD_DIR,
-      repo_id: project?.repositoryId || config.project?.repositoryId || '',
-      project_name: project?.name || config.project?.name || 'Unknown Project',
-      ado_org: project?.adoOrg || config.project?.adoOrg || 'Unknown',
-      ado_project: project?.adoProject || config.project?.adoProject || 'Unknown',
-      repo_name: project?.repoName || config.project?.repoName || 'Unknown'
+      repo_id: primary.repositoryId || '',
+      project_name: targetProjects.map(p => p.name).join(', '),
+      ado_org: primary.adoOrg || 'Unknown',
+      ado_project: primary.adoProject || 'Unknown',
+      repo_name: primary.repoName || 'Unknown',
+      related_projects: relatedProjects,
     };
 
     const prompt = renderPlaybook('implement', vars);
@@ -2479,17 +2494,17 @@ function discoverFromPrd(config, project) {
       agent: agentId,
       agentName: config.agents[agentId]?.name,
       agentRole: config.agents[agentId]?.role,
-      task: `[${project?.name || 'project'}] Implement ${item.id}: ${item.name}`,
+      task: `[${vars.project_name}] Implement ${item.id}: ${item.name}`,
       prompt,
-      meta: { dispatchKey: key, source: 'prd', branch: branchName, item, project: { name: project?.name, localPath: project?.localPath } }
+      meta: { dispatchKey: key, source: 'prd', branch: branchName, item, project: { name: primary.name, localPath: primary.localPath } }
     });
 
     setCooldown(key);
   }
 
-  const skipTotal = skipped.dispatched + skipped.cooldown + skipped.noAgent;
+  const skipTotal = skipped.dispatched + skipped.cooldown + skipped.noAgent + skipped.noProject;
   if (skipTotal > 0) {
-    log('debug', `PRD discovery (${project?.name}): skipped ${skipTotal} items (${skipped.dispatched} dispatched, ${skipped.cooldown} cooldown, ${skipped.noAgent} no agent)`);
+    log('debug', `PRD discovery: skipped ${skipTotal} items (${skipped.dispatched} dispatched, ${skipped.cooldown} cooldown, ${skipped.noAgent} no agent, ${skipped.noProject} no project)`);
   }
 
   return newWork;
@@ -3253,15 +3268,15 @@ function discoverWork(config) {
     allReviews.push(...prWork.filter(w => w.type === 'review'));
     allWorkItems.push(...prWork.filter(w => w.type === 'test'));
 
-    // Source 2: PRD gaps → implements
-    allImplements.push(...discoverFromPrd(config, project));
-
     // Side-effect: specs → work items (picked up below)
     materializeSpecsAsWorkItems(config, project);
 
     // Source 3: Work items (includes auto-filed from plans, design docs, build failures)
     allWorkItems.push(...discoverFromWorkItems(config, project));
   }
+
+  // Source 2: Squad-level PRD → implements (multi-project, called once outside project loop)
+  allImplements.push(...discoverFromPrd(config));
 
   // Central work items (project-agnostic — agent decides where to work)
   const centralWork = discoverCentralWorkItems(config);

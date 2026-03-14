@@ -78,6 +78,7 @@
   .prd-item-priority.high { background: rgba(248,81,73,0.15); color: var(--red); }
   .prd-item-priority.medium { background: rgba(210,153,34,0.15); color: var(--yellow); }
   .prd-item-priority.low { background: rgba(139,148,158,0.15); color: var(--muted); }
+  .prd-project-badge { font-size: 9px; padding: 1px 5px; border-radius: 6px; background: rgba(56,139,253,0.12); color: var(--blue); border: 1px solid rgba(56,139,253,0.25); white-space: nowrap; }
 
   .inbox-item { background: var(--surface2); border: 1px solid var(--border); border-left: 3px solid var(--purple); border-radius: 4px; padding: 10px 12px; cursor: pointer; }
   .inbox-item:hover { border-color: var(--blue); border-left-color: var(--blue); }
@@ -681,10 +682,14 @@ function renderPrdProgress(prog) {
       const prLinks = (i.prs || []).map(pr =>
         '<a class="pr-title" href="' + escHtml(pr.url || '#') + '" target="_blank" style="font-size:10px;margin-left:4px" title="' + escHtml(pr.title || '') + '">' + escHtml(pr.id) + '</a>'
       ).join(' ');
+      const projBadges = (i.projects || []).map(p =>
+        '<span class="prd-project-badge">' + escHtml(p) + '</span>'
+      ).join(' ');
       return '<div class="prd-item-row">' +
         '<span>' + statusIcon(i.status) + '</span>' +
         '<span class="prd-item-id">' + escHtml(i.id) + '</span>' +
         '<span class="prd-item-name" title="' + escHtml(i.name) + '">' + escHtml(i.name) + '</span>' +
+        (projBadges ? '<span>' + projBadges + '</span>' : '') +
         (prLinks ? '<span>' + prLinks + '</span>' : '') +
         '<span class="prd-item-priority ' + (i.priority || '') + '">' + escHtml(i.priority || '') + '</span>' +
       '</div>';
@@ -1393,7 +1398,8 @@ function cmdParseInput(raw) {
     agents: [],           // assigned agent IDs
     fanout: false,
     priority: 'medium',
-    project: '',
+    project: '',          // primary project (for work items, plans)
+    projects: [],          // multi-project list (for PRD items)
     title: '',
     description: '',
     type: '',             // work item type (auto-detected)
@@ -1431,12 +1437,15 @@ function cmdParseInput(raw) {
   else if (/!low\b/i.test(text)) { result.priority = 'low'; text = text.replace(/!low\b/i, '').trim(); }
   else if (/!urgent\b/i.test(text)) { result.priority = 'high'; text = text.replace(/!urgent\b/i, '').trim(); }
 
-  // Extract #project
+  // Extract #project(s)
   const projRe = /#(\S+)/g;
   while ((m = projRe.exec(text)) !== null) {
     const pname = m[1];
     const proj = cmdProjects.find(p => p.name.toLowerCase() === pname.toLowerCase());
-    if (proj) result.project = proj.name;
+    if (proj) {
+      result.project = proj.name; // last match for backward compat (work items, plans)
+      if (!result.projects.includes(proj.name)) result.projects.push(proj.name);
+    }
   }
   text = text.replace(/#\S+/g, '').trim();
 
@@ -1490,8 +1499,10 @@ function cmdRenderMeta() {
     }
   }
 
-  // Project chip
-  if (parsed.project) {
+  // Project chip(s)
+  if (parsed.projects.length > 0) {
+    parsed.projects.forEach(p => chips.push('<span class="cmd-chip project-chip">#' + escHtml(p) + '</span>'));
+  } else if (parsed.project) {
     chips.push('<span class="cmd-chip project-chip">#' + escHtml(parsed.project) + '</span>');
   }
 
@@ -1747,12 +1758,14 @@ async function cmdSubmitPrd(parsed) {
       description: parsed.description || parsed.title,
       priority: parsed.priority,
       estimated_complexity: 'medium',
+      projects: parsed.projects || [],
       rationale: '',
     }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to add');
-  showToast('cmd-toast', 'PRD item ' + (data.id || id) + ' added', true);
+  const projLabel = (parsed.projects || []).length > 0 ? ' (' + parsed.projects.join(', ') + ')' : '';
+  showToast('cmd-toast', 'PRD item ' + (data.id || id) + ' added' + projLabel, true);
 }
 </script>
 </body>

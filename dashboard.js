@@ -107,11 +107,8 @@ function getAgents() {
 }
 
 function getPrdInfo() {
-  // Aggregate PRD across all projects
-  const firstProject = PROJECTS[0];
-  const root = path.resolve(firstProject.localPath || path.resolve(SQUAD_DIR, '..'));
-  const prdSrc = firstProject.workSources?.prd || CONFIG.workSources?.prd || {};
-  const prdPath = path.resolve(root, prdSrc.path || 'docs/prd-gaps.json');
+  // Squad-level PRD — single file at ~/.squad/prd.json
+  const prdPath = path.join(SQUAD_DIR, 'prd.json');
   if (!fs.existsSync(prdPath)) return { progress: null, status: null };
 
   try {
@@ -149,6 +146,7 @@ function getPrdInfo() {
       items: items.map(i => ({
         id: i.id, name: i.name || i.title, priority: i.priority,
         complexity: i.estimated_complexity || i.size, status: i.status || 'missing',
+        projects: i.projects || [],
         prs: prdToPr[i.id] || []
       })),
     };
@@ -729,14 +727,11 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
-  // POST /api/prd-items
+  // POST /api/prd-items — squad-level PRD
   if (req.method === 'POST' && req.url === '/api/prd-items') {
     try {
       const body = await readBody(req);
-      const firstProject = PROJECTS[0];
-      const root = path.resolve(firstProject.localPath || path.resolve(SQUAD_DIR, '..'));
-      const prdSrc = firstProject.workSources?.prd || CONFIG.workSources?.prd || {};
-      const prdPath = path.resolve(root, prdSrc.path || 'docs/prd-gaps.json');
+      const prdPath = path.join(SQUAD_DIR, 'prd.json');
       let data = { missing_features: [], existing_features: [], open_questions: [] };
       const existing = safeRead(prdPath);
       if (existing) { try { data = JSON.parse(existing); } catch {} }
@@ -745,6 +740,7 @@ const server = http.createServer(async (req, res) => {
         id: body.id, name: body.name, description: body.description || '',
         priority: body.priority || 'medium', estimated_complexity: body.estimated_complexity || 'medium',
         rationale: body.rationale || '', status: 'missing', affected_areas: [],
+        projects: body.projects || [],
       });
       fs.writeFileSync(prdPath, JSON.stringify(data, null, 2));
       return jsonReply(res, 200, { ok: true, id: body.id });

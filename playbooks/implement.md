@@ -16,6 +16,19 @@ Keep branch names lowercase, use hyphens, max 60 chars.
 Implement PRD item **{{item_id}}: {{item_name}}**
 - Priority: {{item_priority}}
 - Complexity: {{item_complexity}}
+- Description: {{item_description}}
+
+## Projects
+
+Primary repo: **{{repo_name}}** ({{ado_org}}/{{ado_project}}) at `{{project_path}}`
+
+{{related_projects}}
+
+If this feature spans multiple projects, you may need to:
+1. Read code from all listed project paths to understand integration points
+2. Make changes in the primary project (your worktree)
+3. If changes are needed in other projects, create separate worktrees and PRs for each
+4. Note cross-repo dependencies in PR descriptions (e.g., "Requires office-bohemia PR #123")
 
 ## Instructions
 

@@ -11,17 +11,6 @@
       "mainBranch": "main",
       "prUrlBase": "https://office.visualstudio.com/DefaultCollection/ISS/_git/OfficeAgent/pullrequest/",
       "workSources": {
-        "prd": {
-          "enabled": true,
-          "path": "docs/prd-gaps.json",
-          "itemFilter": {
-            "status": [
-              "missing",
-              "planned"
-            ]
-          },
-          "cooldownMinutes": 30
-        },
         "pullRequests": {
           "enabled": true,
           "path": ".squad/pull-requests.json",
