@@ -702,11 +702,8 @@ function spawnAgent(dispatchItem, config) {
     args.push('--allowedTools', claudeConfig.allowedTools);
   }
 
-  // MCP servers — pass config file if it exists
-  const mcpConfigPath = claudeConfig.mcpConfig || path.join(SQUAD_DIR, 'mcp-servers.json');
-  if (fs.existsSync(mcpConfigPath)) {
-    args.push('--mcp-config', mcpConfigPath);
-  }
+  // MCP servers: agents inherit from ~/.claude.json directly as Claude Code processes.
+  // No --mcp-config needed — avoids redundant config and ensures agents always have latest servers.
 
   log('info', `Spawning agent: ${agentId} (${id}) in ${cwd}`);
   log('info', `Task type: ${type} | Branch: ${branchName || 'none'}`);
