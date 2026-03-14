@@ -677,24 +677,18 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
-  // POST /api/notes
+  // POST /api/notes — write to inbox so it flows through normal consolidation
   if (req.method === 'POST' && req.url === '/api/notes') {
     try {
       const body = await readBody(req);
-      const decPath = path.join(SQUAD_DIR, 'notes.md');
-      let content = safeRead(decPath) || '# Squad Notes\n\n## Active Notes\n';
+      const inboxDir = path.join(SQUAD_DIR, 'notes', 'inbox');
+      fs.mkdirSync(inboxDir, { recursive: true });
       const today = new Date().toISOString().slice(0, 10);
-      const entry = `\n### ${today}: ${body.title}\n**By:** ${body.author || os.userInfo().username}\n**What:** ${body.what}\n${body.why ? '**Why:** ' + body.why + '\n' : ''}\n---\n`;
-      // Support both old and new marker formats
-      const marker = '## Active Notes';
-      const idx = content.indexOf(marker);
-      if (idx !== -1) {
-        const insertAt = idx + marker.length;
-        content = content.slice(0, insertAt) + '\n' + entry + content.slice(insertAt);
-      } else {
-        content += '\n' + entry;
-      }
-      fs.writeFileSync(decPath, content);
+      const author = body.author || os.userInfo().username;
+      const slug = (body.title || 'note').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
+      const filename = `${author}-${slug}-${today}.md`;
+      const content = `# ${body.title}\n\n**By:** ${author}\n**Date:** ${today}\n\n${body.what}\n${body.why ? '\n**Why:** ' + body.why + '\n' : ''}`;
+      fs.writeFileSync(path.join(inboxDir, filename), content);
       return jsonReply(res, 200, { ok: true });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
