@@ -564,13 +564,6 @@ function buildSystemPrompt(agentId, config, project) {
     prompt += skillIndex + '\n';
   }
 
-  // Team context (human team, domain knowledge, contacts)
-  const teamContext = safeRead(path.join(SQUAD_DIR, 'team.md'));
-  if (teamContext && teamContext.trim()) {
-    const truncated = teamContext.length > 4096 ? teamContext.slice(0, 4096) + '\n\n...(truncated)' : teamContext;
-    prompt += `## Team Context\n\n${truncated}\n\n`;
-  }
-
   // Team notes
   if (notes) {
     prompt += `## Team Notes\n\n${notes}\n\n`;
