@@ -1189,6 +1189,45 @@ Answer concisely and directly. Reference specific parts of the document. If the 
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
+  // POST /api/inbox/promote-kb — promote an inbox item to the knowledge base
+  if (req.method === 'POST' && req.url === '/api/inbox/promote-kb') {
+    try {
+      const body = await readBody(req);
+      const { name, category } = body;
+      if (!name) return jsonReply(res, 400, { error: 'name required' });
+      const validCategories = ['architecture', 'conventions', 'project-notes', 'build-reports', 'reviews'];
+      if (!category || !validCategories.includes(category)) {
+        return jsonReply(res, 400, { error: 'category required: ' + validCategories.join(', ') });
+      }
+
+      const inboxPath = path.join(SQUAD_DIR, 'notes', 'inbox', name);
+      const content = safeRead(inboxPath);
+      if (!content) return jsonReply(res, 404, { error: 'inbox item not found' });
+
+      // Add frontmatter if not present
+      const today = new Date().toISOString().slice(0, 10);
+      let kbContent = content;
+      if (!content.startsWith('---')) {
+        const titleMatch = content.match(/^#+ (.+)$/m);
+        const title = titleMatch ? titleMatch[1].trim() : name.replace('.md', '');
+        kbContent = `---\ntitle: ${title}\ncategory: ${category}\ndate: ${today}\nsource: inbox/${name}\n---\n\n${content}`;
+      }
+
+      // Write to knowledge base
+      const kbDir = path.join(SQUAD_DIR, 'knowledge', category);
+      if (!fs.existsSync(kbDir)) fs.mkdirSync(kbDir, { recursive: true });
+      const kbFile = path.join(kbDir, name);
+      safeWrite(kbFile, kbContent);
+
+      // Move inbox item to archive
+      const archiveDir = path.join(SQUAD_DIR, 'notes', 'archive');
+      if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+      try { fs.renameSync(inboxPath, path.join(archiveDir, `kb-${category}-${name}`)); } catch {}
+
+      return jsonReply(res, 200, { ok: true, category, file: name });
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
   // POST /api/inbox/open — open inbox file in Windows explorer
   if (req.method === 'POST' && req.url === '/api/inbox/open') {
     try {

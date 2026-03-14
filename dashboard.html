@@ -850,23 +850,45 @@ function renderInbox(inbox) {
         <span>${escHtml(item.name)}</span><span>${item.age}</span>
       </div>
       <div class="inbox-preview" onclick="openModal(${i})" style="cursor:pointer">${escHtml(item.content.slice(0,200))}</div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button class="pr-pager-btn" style="font-size:9px;padding:2px 8px" onclick="event.stopPropagation();persistInboxItem('${escHtml(item.name)}')">Persist as Note</button>
+      <div style="display:flex;gap:6px;margin-top:6px;align-items:center">
+        <button class="pr-pager-btn" style="font-size:9px;padding:2px 8px" onclick="event.stopPropagation();promoteToKB('${escHtml(item.name)}')">Add to Knowledge Base</button>
         <button class="pr-pager-btn" style="font-size:9px;padding:2px 8px" onclick="event.stopPropagation();openInboxInExplorer('${escHtml(item.name)}')">Open in Explorer</button>
       </div>
     </div>
   `).join('');
 }
 
-async function persistInboxItem(name) {
+function promoteToKB(name) {
+  const categories = [
+    { id: 'architecture', label: 'Architecture' },
+    { id: 'conventions', label: 'Conventions' },
+    { id: 'project-notes', label: 'Project Notes' },
+    { id: 'build-reports', label: 'Build Reports' },
+    { id: 'reviews', label: 'Reviews' },
+  ];
+  const picker = '<div style="padding:16px 20px">' +
+    '<p style="font-size:13px;color:var(--text);margin-bottom:12px">Choose a category for <strong>' + escHtml(name) + '</strong>:</p>' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+    categories.map(c =>
+      '<button class="pr-pager-btn" style="font-size:12px;padding:8px 16px;text-align:left" onclick="doPromoteToKB(\'' + escHtml(name) + '\',\'' + c.id + '\')">' + c.label + '</button>'
+    ).join('') +
+    '</div></div>';
+  document.getElementById('modal-title').textContent = 'Add to Knowledge Base';
+  document.getElementById('modal-body').innerHTML = picker;
+  document.getElementById('modal').classList.add('open');
+}
+
+async function doPromoteToKB(name, category) {
   try {
-    const res = await fetch('/api/inbox/persist', {
+    const res = await fetch('/api/inbox/promote-kb', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ name, category })
     });
     const data = await res.json();
     if (res.ok) {
+      closeModal();
       refresh();
+      refreshKnowledgeBase();
     } else {
       alert('Failed: ' + (data.error || 'unknown'));
     }
@@ -1002,7 +1024,9 @@ function openModal(i) {
   const item = inboxData[i];
   if (!item) return;
   document.getElementById('modal-title').textContent = item.name;
-  document.getElementById('modal-body').textContent = item.content;
+  document.getElementById('modal-body').innerHTML =
+    '<div style="margin-bottom:12px"><button class="pr-pager-btn" style="font-size:10px;padding:3px 10px" onclick="promoteToKB(\'' + escHtml(item.name) + '\')">Add to Knowledge Base</button></div>' +
+    '<pre style="white-space:pre-wrap;word-wrap:break-word;margin:0;font-family:Consolas,monospace;font-size:12px;line-height:1.7;color:var(--muted)">' + escHtml(item.content) + '</pre>';
   document.getElementById('modal').classList.add('open');
 }
 function closeModal() {
