@@ -405,7 +405,7 @@ async function scanAndAdd() {
 
 const [cmd, ...rest] = process.argv.slice(2);
 
-function initSquad() {
+async function initSquad() {
   const config = loadConfig();
   if (!config.projects) config.projects = [];
   if (!config.engine) config.engine = { tickInterval: 60000, staleThreshold: 1800000, maxConcurrent: 3, inboxConsolidateThreshold: 5, agentTimeout: 600000, maxTurns: 100 };
@@ -421,13 +421,15 @@ function initSquad() {
   }
   saveConfig(config);
   console.log(`\n  Squad initialized at ${SQUAD_HOME}`);
-  console.log(`  Projects: ${config.projects.length}`);
-  console.log(`\n  Add a project:`);
-  console.log(`    node squad add <project-dir>\n`);
+  console.log(`  Config, agents, and engine defaults created.\n`);
+
+  // Auto-chain into scan
+  console.log('  Now let\'s find your repos...\n');
+  await scanAndAdd();
 }
 
 const commands = {
-  init: () => initSquad(),
+  init: () => initSquad().catch(e => { console.error(e); process.exit(1); }),
   add: () => {
     const dir = rest[0];
     if (!dir) { console.log('Usage: node squad add <project-dir>'); process.exit(1); }
