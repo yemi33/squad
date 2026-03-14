@@ -444,13 +444,14 @@ function getWorkItems() {
 
 function getMcpServers() {
   try {
-    const mcpPath = path.join(SQUAD_DIR, 'mcp-servers.json');
-    const data = JSON.parse(safeRead(mcpPath) || '{}');
-    const servers = data.mcpServers || data;
+    const home = process.env.USERPROFILE || process.env.HOME || '';
+    const claudeJsonPath = path.join(home, '.claude.json');
+    const data = JSON.parse(safeRead(claudeJsonPath) || '{}');
+    const servers = data.mcpServers || {};
     return Object.entries(servers).map(([name, cfg]) => ({
       name,
       command: cfg.command || '',
-      args: (cfg.args || []).slice(-1)[0] || '', // last arg is usually the package name
+      args: (cfg.args || []).slice(-1)[0] || '',
     }));
   } catch { return []; }
 }

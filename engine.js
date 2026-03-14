@@ -212,39 +212,6 @@ function getInboxFiles() {
   try { return fs.readdirSync(INBOX_DIR).filter(f => f.endsWith('.md')); } catch { return []; }
 }
 
-// ─── MCP Server Sync ─────────────────────────────────────────────────────────
-
-const MCP_SERVERS_PATH = path.join(SQUAD_DIR, 'mcp-servers.json');
-
-function syncMcpServers() {
-  // Sync MCP servers from ~/.claude.json into squad's mcp-servers.json
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  const claudeJsonPath = path.join(home, '.claude.json');
-
-  if (!fs.existsSync(claudeJsonPath)) {
-    console.log('  ~/.claude.json not found — skipping MCP sync');
-    return false;
-  }
-
-  try {
-    const claudeJson = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8'));
-    const servers = claudeJson.mcpServers;
-    if (!servers || Object.keys(servers).length === 0) {
-      console.log('  No MCP servers found in ~/.claude.json');
-      return false;
-    }
-
-    safeWrite(MCP_SERVERS_PATH, { mcpServers: servers });
-    const names = Object.keys(servers);
-    console.log(`  MCP servers synced (${names.length}): ${names.join(', ')}`);
-    log('info', `Synced ${names.length} MCP servers from ~/.claude.json: ${names.join(', ')}`);
-    return true;
-  } catch (e) {
-    console.log(`  MCP sync failed: ${e.message}`);
-    return false;
-  }
-}
-
 // ─── Skills ──────────────────────────────────────────────────────────────────
 
 const SKILLS_DIR = path.join(SQUAD_DIR, 'skills');
@@ -4013,7 +3980,6 @@ async function tickInner() {
   // 2.5. Periodic cleanup + MCP sync (every 10 ticks = ~5 minutes)
   if (tickCount % 10 === 0) {
     runCleanup(config);
-    syncMcpServers();
   }
 
   // 2.6. Poll ADO for full PR status: build, review, merge (every 6 ticks = ~3 minutes)
@@ -4095,9 +4061,6 @@ const commands = {
 
     const config = getConfig();
     const interval = config.engine?.tickInterval || 60000;
-
-    // Sync MCP servers from Claude Code
-    syncMcpServers();
 
     // Validate project paths
     const projects = getProjects(config);
@@ -4573,7 +4536,7 @@ const commands = {
   },
 
   'mcp-sync'() {
-    syncMcpServers();
+    console.log('MCP servers are read directly from ~/.claude.json — no sync needed.');
   },
 
   discover() {

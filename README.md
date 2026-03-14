@@ -128,7 +128,6 @@ You can also run scripts directly: `node ~/.squad/engine.js start`, `node ~/.squ
                     │  engine.js        ← tick 60s  │
                     │  dashboard.js     ← :7331     │
                     │  config.json      ← projects  │
-                    │  mcp-servers.json ← dashboard  │
                     │  agents/          ← 5 agents  │
                     │  playbooks/       ← templates │
                     │  prd.json         ← squad PRD │
@@ -446,7 +445,6 @@ squad start
 
 **Machine-specific (reconfigure per machine):**
 - `config.json` — contains absolute paths to project directories. Re-link via `squad add <dir>`.
-- `mcp-servers.json` — cached copy of `~/.claude.json` MCP servers for dashboard display.
 
 To move to a new machine: `npm install -g @yemi33/squad && squad init --force`, then re-run `squad add` for each project.
 
@@ -471,7 +469,6 @@ To move to a new machine: `npm install -g @yemi33/squad && squad init --force`, 
   prd.json               <- Squad-level PRD (multi-project items)
   config.template.json   <- Template for new installs
   package.json           <- npm package definition
-  mcp-servers.json       <- MCP servers cache for dashboard (synced from ~/.claude.json)
   routing.md             <- Dispatch rules table (editable)
   team.md                <- Team roster
   notes.md               <- Team rules + consolidated learnings (runtime)
