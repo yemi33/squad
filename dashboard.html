@@ -58,6 +58,11 @@
   .modal-qa-loading .dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
   .modal-qa-loading .dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
   @keyframes dotPulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+  .modal-qa-selection-pill { display: flex; align-items: center; gap: 6px; padding: 4px 8px; margin-bottom: 6px; background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.25); border-radius: 4px; font-size: 11px; }
+  .modal-qa-selection-pill .pill-label { color: var(--blue); font-weight: 600; white-space: nowrap; }
+  .modal-qa-selection-pill .pill-text { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
+  .modal-qa-selection-pill .pill-clear { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0 2px; line-height: 1; }
+  .modal-qa-selection-pill .pill-clear:hover { color: var(--red); }
   .modal-qa-input-wrap { display: flex; gap: 6px; }
   .modal-qa-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; font-size: 12px; color: var(--text); font-family: inherit; }
   .modal-qa-input:focus { border-color: var(--blue); outline: none; }
@@ -601,6 +606,11 @@
     <div class="modal-body" id="modal-body"></div>
     <div class="modal-qa" id="modal-qa">
       <div class="modal-qa-thread" id="modal-qa-thread"></div>
+      <div class="modal-qa-selection-pill" id="modal-qa-pill" style="display:none">
+        <span class="pill-label">Selection:</span>
+        <span class="pill-text" id="modal-qa-pill-text"></span>
+        <button class="pill-clear" onclick="clearQaSelection()" title="Clear selection">&times;</button>
+      </div>
       <div class="modal-qa-input-wrap">
         <input type="text" class="modal-qa-input" id="modal-qa-input" placeholder="Ask about this document (or select text first)..." onkeydown="if(event.key==='Enter')modalAskSubmit()">
         <button class="modal-qa-btn" id="modal-qa-btn" onclick="modalAskSubmit()">Ask</button>
@@ -1036,6 +1046,7 @@ function closeModal() {
   document.getElementById('modal-qa-thread').innerHTML = '';
   document.getElementById('modal-qa-input').value = '';
   document.getElementById('modal-qa-input').placeholder = 'Ask about this document (or select text first)...';
+  document.getElementById('modal-qa-pill').style.display = 'none';
   document.getElementById('ask-selection-btn').style.display = 'none';
 }
 
@@ -2131,10 +2142,25 @@ function modalAskAboutSelection() {
     modal.classList.add('open');
   }
 
+  // Show the selection pill
+  const pill = document.getElementById('modal-qa-pill');
+  const pillText = document.getElementById('modal-qa-pill-text');
+  const sel = _modalDocContext.selection || '';
+  if (sel) {
+    pillText.textContent = sel.slice(0, 80) + (sel.length > 80 ? '...' : '');
+    pill.style.display = 'flex';
+  }
+
   const input = document.getElementById('modal-qa-input');
   input.value = '';
-  input.placeholder = 'Ask about: "' + _modalDocContext.selection.slice(0, 60) + ((_modalDocContext.selection.length > 60) ? '...' : '') + '"';
+  input.placeholder = 'What do you want to know about this?';
   input.focus();
+}
+
+function clearQaSelection() {
+  _modalDocContext.selection = '';
+  document.getElementById('modal-qa-pill').style.display = 'none';
+  document.getElementById('modal-qa-input').placeholder = 'Ask about this document (or select text first)...';
 }
 
 async function modalAskSubmit() {
@@ -2190,6 +2216,8 @@ async function modalAskSubmit() {
   }
 
   _modalDocContext.selection = ''; // Clear selection after asking
+  document.getElementById('modal-qa-pill').style.display = 'none';
+  document.getElementById('modal-qa-input').placeholder = 'Ask another question...';
   btn.disabled = false;
   thread.scrollTop = thread.scrollHeight;
   input.focus();
