@@ -1612,38 +1612,39 @@ async function pollPrHumanComments(config) {
         const threadsData = await adoFetch(threadsUrl, token);
         const threads = threadsData.value || [];
 
-        // Collect human comments newer than our last-processed timestamp
+        // First pass: count all unique human commenters across the entire PR
+        const allHumanAuthors = new Set();
+        for (const thread of threads) {
+          for (const comment of (thread.comments || [])) {
+            if (!comment.content || comment.commentType === 'system') continue;
+            if (/\bSquad\s*\(/i.test(comment.content)) continue;
+            allHumanAuthors.add(comment.author?.uniqueName || comment.author?.displayName || '');
+          }
+        }
+        const soloReviewer = allHumanAuthors.size <= 1;
+
+        // Second pass: collect new human comments after cutoff
         const cutoff = pr.humanFeedback?.lastProcessedCommentDate || pr.created || '1970-01-01';
-        const allHumanComments = [];
+        const newHumanComments = [];
 
         for (const thread of threads) {
           for (const comment of (thread.comments || [])) {
-            if (!comment.content) continue;
-            if (comment.commentType === 'system') continue;
-            // Skip agent-posted comments (signature pattern from playbooks)
+            if (!comment.content || comment.commentType === 'system') continue;
             if (/\bSquad\s*\(/i.test(comment.content)) continue;
-            // Only new comments
-            if (comment.publishedDate && comment.publishedDate > cutoff) {
-              allHumanComments.push({
-                threadId: thread.id,
-                commentId: comment.id,
-                author: comment.author?.displayName || 'Human',
-                authorId: comment.author?.uniqueName || '',
-                content: comment.content,
-                date: comment.publishedDate,
-                hasSquadTag: /@squad\b/i.test(comment.content)
-              });
-            }
+            if (!(comment.publishedDate && comment.publishedDate > cutoff)) continue;
+
+            // Solo reviewer: all comments are actionable. Multiple humans: require @squad.
+            if (!soloReviewer && !/@squad\b/i.test(comment.content)) continue;
+
+            newHumanComments.push({
+              threadId: thread.id,
+              commentId: comment.id,
+              author: comment.author?.displayName || 'Human',
+              content: comment.content,
+              date: comment.publishedDate
+            });
           }
         }
-
-        // If only one unique human is commenting, all their comments are actionable.
-        // If multiple humans, require @squad to avoid triggering on casual discussion.
-        const uniqueHumans = new Set(allHumanComments.map(c => c.authorId || c.author));
-        const soloReviewer = uniqueHumans.size <= 1;
-        const newHumanComments = soloReviewer
-          ? allHumanComments
-          : allHumanComments.filter(c => c.hasSquadTag);
 
         if (newHumanComments.length === 0) continue;
 
