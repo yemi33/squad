@@ -468,10 +468,12 @@
     <div class="cmd-hints">
       <span><code>@agent</code> assign</span>
       <span><code>@everyone</code> fan-out</span>
+      <span><code>#project</code> target</span>
       <span><code>!high</code> / <code>!low</code> priority</span>
-      <span><code>/note</code> team note</span>
+      <span><code>/plan</code> feature plan</span>
       <span><code>/prd</code> PRD item</span>
-      <span><code>#project</code> target project</span>
+      <span><code>/note</code> team note</span>
+      <span>or just type a task</span>
       <button class="cmd-history-btn" onclick="cmdShowHistory()">Past Commands</button>
     </div>
     <div class="cmd-toast" id="cmd-toast"></div>
@@ -2042,7 +2044,7 @@ function renderPlans(plans) {
     if (needsAction) {
       actions = '<div class="plan-card-actions">' +
         '<button class="plan-btn approve" onclick="planApprove(\'' + escHtml(p.file) + '\')">Approve</button>' +
-        '<button class="plan-btn revise" onclick="planShowRevise(\'' + escHtml(p.file) + '\')">Revise</button>' +
+        '<button class="plan-btn" style="color:var(--blue);border-color:var(--blue)" onclick="planDiscuss(\'' + escHtml(p.file) + '\')">Discuss &amp; Revise</button>' +
         '<button class="plan-btn reject" onclick="planReject(\'' + escHtml(p.file) + '\')">Reject</button>' +
         '<button class="plan-btn" onclick="planView(\'' + escHtml(p.file) + '\')">View Full Plan</button>' +
       '</div>' +
@@ -2116,6 +2118,32 @@ async function planSubmitRevise(file) {
     planHideRevise(file);
     refreshPlans();
   } catch (e) { showToast('cmd-toast', 'Error: ' + e.message, false); }
+}
+
+async function planDiscuss(file) {
+  try {
+    const res = await fetch('/api/plans/discuss', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    // Show the launch command in a modal
+    const content = `To discuss and revise this plan interactively, run this command in a terminal:\n\n` +
+      `━━━ Bash / Git Bash ━━━\n${data.command}\n\n` +
+      `━━━ PowerShell ━━━\n${data.psCommand}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `This launches an interactive Claude session with the plan pre-loaded.\n` +
+      `Chat naturally to review and refine. When you're satisfied, say "approve" and the session will write the approved plan back to disk.\n\n` +
+      `The engine will pick it up on the next tick and start dispatching work.`;
+
+    document.getElementById('modal-title').textContent = 'Discuss Plan: ' + file;
+    document.getElementById('modal-body').textContent = content;
+    document.getElementById('modal').classList.add('open');
+  } catch (e) {
+    showToast('cmd-toast', 'Error: ' + e.message, false);
+  }
 }
 
 async function planView(file) {

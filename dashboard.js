@@ -979,6 +979,92 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
+  // POST /api/plans/discuss — generate a plan discussion session script
+  if (req.method === 'POST' && req.url === '/api/plans/discuss') {
+    try {
+      const body = await readBody(req);
+      if (!body.file) return jsonReply(res, 400, { error: 'file required' });
+      const planPath = path.join(SQUAD_DIR, 'plans', body.file);
+      const planContent = safeRead(planPath);
+      if (!planContent) return jsonReply(res, 404, { error: 'plan not found' });
+
+      const plan = JSON.parse(planContent);
+      const projectName = plan.project || 'Unknown';
+
+      // Build the session launch script
+      const sessionName = 'plan-review-' + body.file.replace(/\.json$/, '');
+      const sysPrompt = `You are a Plan Advisor helping a human review and refine a feature plan before it gets dispatched to an agent squad.
+
+## Your Role
+- Help the user understand, question, and refine the plan
+- Accept feedback and update the plan accordingly
+- When the user is satisfied, write the approved plan back to disk
+
+## The Plan File
+Path: ${planPath}
+Project: ${projectName}
+
+## How This Works
+1. The user will discuss the plan with you — answer questions, suggest changes
+2. When they want changes, update the plan items (add/remove/reorder/modify)
+3. When they say "approve", "go", "ship it", "looks good", or similar:
+   - Read the current plan file
+   - Update status to "approved" and set approvedAt and approvedBy
+   - Write it back to ${planPath}
+   - Confirm: "Plan approved and saved. The engine will pick it up on the next tick."
+4. If they say "reject" or "cancel":
+   - Update status to "rejected"
+   - Write it back
+   - Confirm: "Plan rejected."
+
+## Important
+- Always read the plan file fresh before writing (another process may have modified it)
+- Preserve all existing fields when writing back
+- Use the Write tool to save changes
+- You have full file access — you can also read the project codebase for context`;
+
+      const initialPrompt = `Here's the plan awaiting your review:
+
+**${plan.plan_summary || body.file}**
+Project: ${projectName}
+Strategy: ${plan.branch_strategy || 'parallel'}
+Branch: ${plan.feature_branch || 'per-item'}
+Items: ${(plan.missing_features || []).length}
+
+${(plan.missing_features || []).map((f, i) =>
+  `${i + 1}. **${f.id}: ${f.name}** (${f.estimated_complexity}, ${f.priority})${f.depends_on?.length ? ' → depends on: ' + f.depends_on.join(', ') : ''}
+   ${f.description || ''}`
+).join('\n\n')}
+
+${plan.open_questions?.length ? '\n**Open Questions:**\n' + plan.open_questions.map(q => '- ' + q).join('\n') : ''}
+
+What would you like to discuss or change? When you're happy, say "approve" and I'll finalize it.`;
+
+      // Write session files
+      const sessionDir = path.join(SQUAD_DIR, 'engine');
+      const sysFile = path.join(sessionDir, `plan-discuss-sys-${Date.now()}.md`);
+      const promptFile = path.join(sessionDir, `plan-discuss-prompt-${Date.now()}.md`);
+      safeWrite(sysFile, sysPrompt);
+      safeWrite(promptFile, initialPrompt);
+
+      // Generate the launch command
+      const cmd = `claude --system-prompt "$(cat '${sysFile.replace(/\\/g, '/')}')" --name "${sessionName}" --add-dir "${SQUAD_DIR.replace(/\\/g, '/')}" < "${promptFile.replace(/\\/g, '/')}"`;
+
+      // Also generate a PowerShell-friendly version
+      const psCmd = `Get-Content "${promptFile}" | claude --system-prompt (Get-Content "${sysFile}" -Raw) --name "${sessionName}" --add-dir "${SQUAD_DIR}"`;
+
+      return jsonReply(res, 200, {
+        ok: true,
+        sessionName,
+        command: cmd,
+        psCommand: psCmd,
+        sysFile,
+        promptFile,
+        planFile: body.file,
+      });
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
   // POST /api/inbox/persist — promote an inbox item to team notes
   if (req.method === 'POST' && req.url === '/api/inbox/persist') {
     try {
