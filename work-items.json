@@ -177,5 +177,18 @@
     "dispatched_at": "2026-03-14T02:36:49.693Z",
     "dispatched_to": "dallas",
     "completedAt": "2026-03-14T02:37:09.235Z"
+  },
+  {
+    "id": "W013",
+    "title": "relevant prs from sachin - https://dev.azure.com/office/ISS/_git/OfficeAgent/pullrequest/4961660, https://dev.azure.com/office/ISS/_git/augloop-workflows/pullrequest/4961631 - summarize what's going on - and how augloop and officeagent connect - my job will be to work on the ux that connect to the augloop - analyze",
+    "type": "explore",
+    "priority": "medium",
+    "description": "",
+    "status": "done",
+    "created": "2026-03-14T03:33:48.062Z",
+    "createdBy": "dashboard",
+    "dispatched_at": "2026-03-14T03:34:17.268Z",
+    "dispatched_to": "ripley",
+    "completedAt": "2026-03-14T03:34:33.214Z"
   }
 ]
