@@ -2077,28 +2077,63 @@ async function cmdSubmitPrd(parsed) {
 
 let _modalDocContext = { title: '', content: '', selection: '' };
 
-// Track text selection in modal body for the floating "Ask about this" button
+// Track text selection anywhere in content areas for the floating "Ask about this" button
 document.addEventListener('mouseup', function(e) {
-  const btn = document.getElementById('ask-selection-btn');
-  const modalBody = document.getElementById('modal-body');
-  const sel = window.getSelection();
-  const text = sel?.toString()?.trim();
+  // Small delay to let the selection finalize
+  setTimeout(() => {
+    const btn = document.getElementById('ask-selection-btn');
+    if (!btn) return;
+    const sel = window.getSelection();
+    const text = sel?.toString()?.trim();
 
-  if (text && text.length > 5 && modalBody?.contains(sel?.anchorNode)) {
-    _modalDocContext.selection = text;
-    btn.style.display = 'block';
-    btn.style.left = e.pageX + 'px';
-    btn.style.top = (e.pageY - 35) + 'px';
-  } else {
-    btn.style.display = 'none';
-  }
+    if (!text || text.length < 3) {
+      btn.style.display = 'none';
+      return;
+    }
+
+    // Check if selection is in any content area: modal body, detail panel, notes, kb
+    const anchor = sel?.anchorNode;
+    if (!anchor) { btn.style.display = 'none'; return; }
+
+    const modalBody = document.getElementById('modal-body');
+    const detailContent = document.getElementById('detail-content');
+    const isInModal = modalBody?.contains(anchor);
+    const isInDetail = detailContent?.contains(anchor);
+
+    if (isInModal || isInDetail) {
+      _modalDocContext.selection = text;
+      // If we don't have document context yet (e.g. detail panel), capture it
+      if (!_modalDocContext.content && isInDetail) {
+        _modalDocContext.content = detailContent.textContent || '';
+        _modalDocContext.title = document.getElementById('detail-agent-name')?.textContent || 'Agent Detail';
+      }
+      btn.style.display = 'block';
+      // Position near the cursor but within viewport
+      const x = Math.min(e.clientX, window.innerWidth - 140);
+      const y = Math.max(e.clientY - 35, 10);
+      btn.style.left = x + 'px';
+      btn.style.top = y + 'px';
+      btn.style.position = 'fixed';
+    } else {
+      btn.style.display = 'none';
+    }
+  }, 10);
 });
 
 function modalAskAboutSelection() {
   document.getElementById('ask-selection-btn').style.display = 'none';
+
+  // If the modal isn't open but we have a selection (from detail panel), open modal for Q&A
+  const modal = document.getElementById('modal');
+  if (!modal.classList.contains('open')) {
+    document.getElementById('modal-title').textContent = 'Q&A: ' + (_modalDocContext.title || 'Document');
+    document.getElementById('modal-body').textContent = _modalDocContext.content.slice(0, 3000) + (_modalDocContext.content.length > 3000 ? '\n\n...(truncated for display)' : '');
+    modal.classList.add('open');
+  }
+
   const input = document.getElementById('modal-qa-input');
   input.value = '';
-  input.placeholder = 'Ask about: "' + _modalDocContext.selection.slice(0, 60) + '..."';
+  input.placeholder = 'Ask about: "' + _modalDocContext.selection.slice(0, 60) + ((_modalDocContext.selection.length > 60) ? '...' : '') + '"';
   input.focus();
 }
 
