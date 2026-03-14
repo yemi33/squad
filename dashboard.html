@@ -47,6 +47,19 @@
   .status-badge.working { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid var(--yellow); animation: pulse 1.5s infinite; }
   .status-badge.done { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }
   .agent-action { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .kb-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+  .kb-tab { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); font-size: 11px; cursor: pointer; padding: 3px 10px; border-radius: 4px; transition: all 0.2s; }
+  .kb-tab:hover { color: var(--text); border-color: var(--text); }
+  .kb-tab.active { color: var(--blue); border-color: var(--blue); background: rgba(88,166,255,0.08); }
+  .kb-tab .badge { background: var(--border); color: var(--text); font-size: 9px; padding: 0 5px; border-radius: 8px; margin-left: 4px; }
+  .kb-list { max-height: 400px; overflow-y: auto; }
+  .kb-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+  .kb-item:hover { background: var(--surface2); }
+  .kb-item:last-child { border-bottom: none; }
+  .kb-item-body { flex: 1; min-width: 0; }
+  .kb-item-title { font-size: 12px; color: var(--text); font-weight: 500; }
+  .kb-item-meta { font-size: 10px; color: var(--muted); margin-top: 2px; display: flex; gap: 8px; }
+  .kb-item-preview { font-size: 10px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   .agent-result { font-size: 10px; color: var(--text); background: var(--surface2); padding: 6px 8px; border-radius: 4px; margin-top: 6px; white-space: pre-wrap; word-break: break-word; max-height: 80px; overflow-y: auto; line-height: 1.4; border-left: 2px solid var(--blue); }
   .agent-card { min-width: 0; }
   .agent-emoji { font-size: 20px; margin-right: 4px; }
@@ -461,6 +474,12 @@
   <section>
     <h2>Team Notes</h2>
     <div id="notes-list">Loading...</div>
+  </section>
+
+  <section>
+    <h2>Knowledge Base <span class="count" id="kb-count">0</span></h2>
+    <div class="kb-tabs" id="kb-tabs"></div>
+    <div class="kb-list" id="kb-list"><p class="empty">No knowledge entries yet. Notes are classified here after consolidation.</p></div>
   </section>
 
   <section>
@@ -1134,6 +1153,9 @@ async function refresh() {
     renderMetrics(data.metrics || {});
     renderWorkItems(data.workItems || []);
     renderSkills(data.skills || []);
+    // Refresh KB less frequently (every 3rd cycle = ~12s)
+    if (!window._kbRefreshCount) window._kbRefreshCount = 0;
+    if (window._kbRefreshCount++ % 3 === 0) refreshKnowledgeBase();
   } catch(e) { console.error('refresh error', e); }
 }
 
@@ -1846,6 +1868,109 @@ async function cmdSubmitPrd(parsed) {
   const projLabel = (parsed.projects || []).length > 0 ? ' (' + parsed.projects.join(', ') + ')' : '';
   showToast('cmd-toast', 'PRD item ' + (data.id || id) + ' added' + projLabel, true);
 }
+// ─── Knowledge Base ──────────────────────────────────────────────────────────
+let _kbData = {};
+let _kbActiveTab = 'all';
+
+const KB_CAT_LABELS = {
+  architecture: 'Architecture',
+  conventions: 'Conventions',
+  'project-notes': 'Project Notes',
+  'build-reports': 'Build Reports',
+  reviews: 'Reviews',
+};
+const KB_CAT_ICONS = {
+  architecture: '\u{1F3D7}',
+  conventions: '\u{1F4CB}',
+  'project-notes': '\u{1F4DD}',
+  'build-reports': '\u{2699}',
+  reviews: '\u{1F50D}',
+};
+
+async function refreshKnowledgeBase() {
+  try {
+    _kbData = await fetch('/api/knowledge').then(r => r.json());
+    renderKnowledgeBase();
+  } catch {}
+}
+
+function renderKnowledgeBase() {
+  const tabsEl = document.getElementById('kb-tabs');
+  const listEl = document.getElementById('kb-list');
+  const countEl = document.getElementById('kb-count');
+
+  // Count total
+  let total = 0;
+  for (const items of Object.values(_kbData)) total += items.length;
+  countEl.textContent = total;
+
+  if (total === 0) {
+    tabsEl.innerHTML = '';
+    listEl.innerHTML = '<p class="empty">No knowledge entries yet. Notes are classified here after consolidation.</p>';
+    return;
+  }
+
+  // Render tabs
+  let tabsHtml = '<button class="kb-tab ' + (_kbActiveTab === 'all' ? 'active' : '') + '" onclick="kbSetTab(\'all\')">All <span class="badge">' + total + '</span></button>';
+  for (const [cat, items] of Object.entries(_kbData)) {
+    if (items.length === 0) continue;
+    const label = KB_CAT_LABELS[cat] || cat;
+    tabsHtml += '<button class="kb-tab ' + (_kbActiveTab === cat ? 'active' : '') + '" onclick="kbSetTab(\'' + cat + '\')">' + label + ' <span class="badge">' + items.length + '</span></button>';
+  }
+  tabsEl.innerHTML = tabsHtml;
+
+  // Collect items for active tab
+  let items = [];
+  if (_kbActiveTab === 'all') {
+    for (const [cat, catItems] of Object.entries(_kbData)) {
+      for (const item of catItems) items.push({ ...item, category: cat });
+    }
+    items.sort((a, b) => b.date.localeCompare(a.date));
+  } else {
+    items = (_kbData[_kbActiveTab] || []).map(i => ({ ...i, category: _kbActiveTab }));
+  }
+
+  if (items.length === 0) {
+    listEl.innerHTML = '<p class="empty">No entries in this category.</p>';
+    return;
+  }
+
+  listEl.innerHTML = items.slice(0, 50).map(item => {
+    const icon = KB_CAT_ICONS[item.category] || '\u{1F4C4}';
+    const label = KB_CAT_LABELS[item.category] || item.category;
+    return '<div class="kb-item" onclick="kbOpenItem(\'' + escHtml(item.category) + '\', \'' + escHtml(item.file) + '\')">' +
+      '<div class="kb-item-body">' +
+        '<div class="kb-item-title">' + icon + ' ' + escHtml(item.title) + '</div>' +
+        '<div class="kb-item-meta">' +
+          '<span>' + label + '</span>' +
+          (item.agent ? '<span>' + item.agent + '</span>' : '') +
+          '<span>' + (item.date || '') + '</span>' +
+          '<span>' + Math.round(item.size / 1024) + 'KB</span>' +
+        '</div>' +
+        (item.preview ? '<div class="kb-item-preview">' + escHtml(item.preview) + '</div>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function kbSetTab(tab) {
+  _kbActiveTab = tab;
+  renderKnowledgeBase();
+}
+
+async function kbOpenItem(category, file) {
+  try {
+    const content = await fetch('/api/knowledge/' + category + '/' + encodeURIComponent(file)).then(r => r.text());
+    // Strip frontmatter for display
+    const display = content.replace(/^---[\s\S]*?---\n*/m, '');
+    document.getElementById('modal-title').textContent = file;
+    document.getElementById('modal-body').textContent = display;
+    document.getElementById('modal').classList.add('open');
+  } catch (e) {
+    console.error('Failed to load KB item:', e);
+  }
+}
+
 // ─── Command History ──────────────────────────────────────────────────────────
 const CMD_HISTORY_KEY = 'squad-cmd-history';
 const CMD_HISTORY_MAX = 50;

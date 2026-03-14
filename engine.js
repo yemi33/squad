@@ -38,6 +38,7 @@ const CONTROL_PATH = path.join(ENGINE_DIR, 'control.json');
 const DISPATCH_PATH = path.join(ENGINE_DIR, 'dispatch.json');
 const LOG_PATH = path.join(ENGINE_DIR, 'log.json');
 const INBOX_DIR = path.join(SQUAD_DIR, 'notes', 'inbox');
+const KNOWLEDGE_DIR = path.join(SQUAD_DIR, 'knowledge');
 const ARCHIVE_DIR = path.join(SQUAD_DIR, 'notes', 'archive');
 const PLANS_DIR = path.join(SQUAD_DIR, 'plans');
 const IDENTITY_DIR = path.join(SQUAD_DIR, 'identity');
@@ -2194,6 +2195,7 @@ Use today's date: ${dateStamp()}`;
       }
 
       safeWrite(NOTES_PATH, newContent);
+      classifyToKnowledgeBase(items);
       archiveInboxFiles(files);
       log('info', `LLM consolidation complete: ${files.length} notes processed by Haiku`);
     } else {
@@ -2313,8 +2315,76 @@ function consolidateWithRegex(items, files) {
     if (sections.length > 10) { newContent = sections[0] + '\n---\n\n### ' + sections.slice(-8).join('\n---\n\n### '); }
   }
   safeWrite(NOTES_PATH, newContent);
+  classifyToKnowledgeBase(items);
   archiveInboxFiles(files);
   log('info', `Regex fallback: consolidated ${files.length} notes → ${deduped.length} insights into notes.md`);
+}
+
+// ─── Knowledge Base Classification ───────────────────────────────────────────
+// Classifies each inbox note into a knowledge/ subdirectory based on content.
+// Full original content is preserved (not summarized) for deep reference.
+function classifyToKnowledgeBase(items) {
+  if (!fs.existsSync(KNOWLEDGE_DIR)) fs.mkdirSync(KNOWLEDGE_DIR, { recursive: true });
+
+  const categoryDirs = {
+    architecture: path.join(KNOWLEDGE_DIR, 'architecture'),
+    conventions: path.join(KNOWLEDGE_DIR, 'conventions'),
+    'project-notes': path.join(KNOWLEDGE_DIR, 'project-notes'),
+    'build-reports': path.join(KNOWLEDGE_DIR, 'build-reports'),
+    reviews: path.join(KNOWLEDGE_DIR, 'reviews'),
+  };
+  for (const dir of Object.values(categoryDirs)) {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  }
+
+  let classified = 0;
+  for (const item of items) {
+    const content = item.content || '';
+    const name = (item.name || '').toLowerCase();
+    const contentLower = content.toLowerCase();
+
+    // Classify by filename patterns + content keywords
+    let category = 'project-notes'; // default
+    if (name.includes('review') || name.includes('pr-') || name.includes('pr4') || name.includes('feedback')) {
+      category = 'reviews';
+    } else if (name.includes('build') || name.includes('bt-') || contentLower.includes('build pass') || contentLower.includes('build fail') || contentLower.includes('lint')) {
+      category = 'build-reports';
+    } else if (contentLower.includes('architecture') || contentLower.includes('design doc') || contentLower.includes('system design') || contentLower.includes('data flow') || contentLower.includes('how it works')) {
+      category = 'architecture';
+    } else if (contentLower.includes('convention') || contentLower.includes('pattern') || contentLower.includes('always use') || contentLower.includes('never use') || contentLower.includes('rule:') || contentLower.includes('best practice')) {
+      category = 'conventions';
+    }
+
+    // Write to knowledge base with clean filename
+    const agentMatch = item.name.match(/^(\w+)-/);
+    const agent = agentMatch ? agentMatch[1] : 'unknown';
+    const titleMatch = content.match(/^#\s+(.+)/m);
+    const titleSlug = titleMatch
+      ? titleMatch[1].toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50)
+      : item.name.replace(/\.md$/, '');
+    const kbFilename = `${dateStamp()}-${agent}-${titleSlug}.md`;
+    const kbPath = path.join(categoryDirs[category], kbFilename);
+
+    // Add frontmatter with metadata
+    const frontmatter = `---
+source: ${item.name}
+agent: ${agent}
+category: ${category}
+date: ${dateStamp()}
+---
+
+`;
+    try {
+      safeWrite(kbPath, frontmatter + content);
+      classified++;
+    } catch (e) {
+      log('warn', `Failed to classify ${item.name} to knowledge base: ${e.message}`);
+    }
+  }
+
+  if (classified > 0) {
+    log('info', `Knowledge base: classified ${classified} note(s) into knowledge/`);
+  }
 }
 
 function archiveInboxFiles(files) {

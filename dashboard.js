@@ -811,6 +811,53 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // GET /api/knowledge — list all knowledge base entries grouped by category
+  if (req.method === 'GET' && req.url === '/api/knowledge') {
+    const kbDir = path.join(SQUAD_DIR, 'knowledge');
+    const categories = ['architecture', 'conventions', 'project-notes', 'build-reports', 'reviews'];
+    const result = {};
+    for (const cat of categories) {
+      const catDir = path.join(kbDir, cat);
+      const files = safeReadDir(catDir).filter(f => f.endsWith('.md')).sort().reverse();
+      result[cat] = files.map(f => {
+        const content = safeRead(path.join(catDir, f)) || '';
+        // Extract title from first heading
+        const titleMatch = content.match(/^#\s+(.+)/m);
+        const title = titleMatch ? titleMatch[1] : f.replace(/\.md$/, '');
+        // Extract agent and date from frontmatter
+        const agentMatch = content.match(/^agent:\s*(.+)/m);
+        const dateMatch = content.match(/^date:\s*(.+)/m);
+        return {
+          file: f,
+          category: cat,
+          title,
+          agent: agentMatch ? agentMatch[1].trim() : '',
+          date: dateMatch ? dateMatch[1].trim() : '',
+          size: content.length,
+          preview: content.replace(/^---[\s\S]*?---\n*/m, '').split('\n').filter(l => l.trim() && !l.startsWith('#')).slice(0, 3).join(' ').slice(0, 200),
+        };
+      });
+    }
+    return jsonReply(res, 200, result);
+  }
+
+  // GET /api/knowledge/:category/:file — read a specific knowledge base entry
+  const kbMatch = req.url.match(/^\/api\/knowledge\/([^/]+)\/([^?]+)/);
+  if (kbMatch && req.method === 'GET') {
+    const cat = kbMatch[1];
+    const file = decodeURIComponent(kbMatch[2]);
+    // Prevent path traversal
+    if (file.includes('..') || file.includes('/') || file.includes('\\')) {
+      return jsonReply(res, 400, { error: 'invalid file name' });
+    }
+    const content = safeRead(path.join(SQUAD_DIR, 'knowledge', cat, file));
+    if (content === null) return jsonReply(res, 404, { error: 'not found' });
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.end(content);
+    return;
+  }
+
   // POST /api/inbox/persist — promote an inbox item to team notes
   if (req.method === 'POST' && req.url === '/api/inbox/persist') {
     try {
