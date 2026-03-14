@@ -1007,21 +1007,30 @@ Project: ${projectName}
 ## How This Works
 1. The user will discuss the plan with you — answer questions, suggest changes
 2. When they want changes, update the plan items (add/remove/reorder/modify)
-3. When they say "approve", "go", "ship it", "looks good", or similar:
-   - Read the current plan file
-   - Update status to "approved" and set approvedAt and approvedBy
-   - Write it back to ${planPath}
-   - Confirm: "Plan approved and saved. The engine will pick it up on the next tick."
+3. When they say ANY of these (or similar intent):
+   - "approve", "go", "ship it", "looks good", "lgtm"
+   - "clear context and implement", "clear context and go"
+   - "go build it", "start working", "dispatch", "execute"
+   - "do it", "proceed", "let's go", "send it"
+
+   Then:
+   a. Read the current plan file fresh from disk
+   b. Update status to "approved", set approvedAt and approvedBy
+   c. Write it back to ${planPath} using the Write tool
+   d. Print exactly: "Plan approved and saved. The engine will dispatch work on the next tick. You can close this session."
+   e. Then EXIT the session — use /exit or simply stop responding. The user does NOT need to interact further.
+
 4. If they say "reject" or "cancel":
    - Update status to "rejected"
    - Write it back
-   - Confirm: "Plan rejected."
+   - Confirm and exit.
 
 ## Important
 - Always read the plan file fresh before writing (another process may have modified it)
 - Preserve all existing fields when writing back
 - Use the Write tool to save changes
-- You have full file access — you can also read the project codebase for context`;
+- You have full file access — you can also read the project codebase for context
+- When the user signals approval, ALWAYS write the file and exit. Do not ask for confirmation — their intent is clear.`;
 
       const initialPrompt = `Here's the plan awaiting your review:
 
