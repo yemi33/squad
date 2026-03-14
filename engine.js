@@ -896,6 +896,7 @@ function completeDispatch(id, result = 'success', reason = '') {
 }
 
 // ─── Dependency Gate ─────────────────────────────────────────────────────────
+// Returns: true (deps met), false (deps pending), 'failed' (dep failed — propagate)
 function areDependenciesMet(item, config) {
   const deps = item.depends_on;
   if (!deps || deps.length === 0) return true;
@@ -911,7 +912,12 @@ function areDependenciesMet(item, config) {
   const workItems = safeJson(wiPath) || [];
   for (const depId of deps) {
     const depItem = workItems.find(w => w.sourcePlan === sourcePlan && w.planItemId === depId);
-    if (!depItem || depItem.status !== 'done') return false;
+    if (!depItem) {
+      log('warn', `Dependency ${depId} not found for ${item.id} (plan: ${sourcePlan}) — treating as unmet`);
+      return false;
+    }
+    if (depItem.status === 'failed') return 'failed'; // Propagate failure
+    if (depItem.status !== 'done') return false;
   }
   return true;
 }
@@ -948,6 +954,14 @@ function checkPlanCompletion(meta, config) {
   const planItems = workItems.filter(w => w.sourcePlan === planFile && w.planItemId !== 'PR');
   if (planItems.length === 0) return;
   if (!planItems.every(w => w.status === 'done')) return;
+
+  // Dedup guard: check if PR item already exists for this plan
+  const existingPrItem = workItems.find(w => w.sourcePlan === planFile && w.planItemId === 'PR');
+  if (existingPrItem) {
+    log('debug', `Plan ${planFile} already has PR item ${existingPrItem.id} — skipping`);
+    if (plan.status !== 'completed') { plan.status = 'completed'; plan.completedAt = ts(); safeWrite(path.join(PLANS_DIR, planFile), plan); }
+    return;
+  }
   log('info', `All ${planItems.length} items in plan ${planFile} completed — creating PR work item`);
   const maxNum = workItems.reduce((max, i) => {
     const m = (i.id || '').match(/(\d+)$/);
@@ -993,20 +1007,27 @@ function chainPlanToPrd(dispatchItem, meta, config) {
     return;
   }
 
-  // Find the plan file — look for recently created .md files in plans/
-  const planFiles = fs.readdirSync(planDir)
-    .filter(f => f.endsWith('.md'))
-    .map(f => ({ name: f, mtime: fs.statSync(path.join(planDir, f)).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime);
-
-  // Use the most recently modified plan file (the one the plan agent just wrote)
-  const planFile = planFiles[0];
-  if (!planFile) {
-    log('warn', `Plan chaining: no .md plan files found in plans/ after task ${dispatchItem.id}`);
-    return;
+  // Use the plan filename from dispatch meta (set during plan task creation)
+  // Falls back to mtime-based detection if meta doesn't have it
+  let planFileName = meta?.planFileName || meta?.item?._planFileName;
+  if (planFileName && fs.existsSync(path.join(planDir, planFileName))) {
+    // Exact match from meta — no guessing
+  } else {
+    // Fallback: find most recently modified .md file
+    const planFiles = fs.readdirSync(planDir)
+      .filter(f => f.endsWith('.md'))
+      .map(f => ({ name: f, mtime: fs.statSync(path.join(planDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    planFileName = planFiles[0]?.name;
+    if (!planFileName) {
+      log('warn', `Plan chaining: no .md plan files found in plans/ after task ${dispatchItem.id}`);
+      return;
+    }
+    log('info', `Plan chaining: using mtime fallback — found ${planFileName}`);
   }
 
-  const planPath = path.join(planDir, planFile.name);
+  const planFile = { name: planFileName };
+  const planPath = path.join(planDir, planFileName);
   let planContent;
   try { planContent = fs.readFileSync(planPath, 'utf8'); } catch (e) {
     log('error', `Plan chaining: failed to read plan file ${planFile.name}: ${e.message}`);
@@ -1165,6 +1186,10 @@ function updateWorkItemStatus(meta, status, reason) {
       const anySuccess = results.some(r => r.status === 'done');
       const allDone = target.fanOutAgents ? results.length >= target.fanOutAgents.length : false;
 
+      // Timeout: if dispatched > 6 hours ago and not all agents reported, treat partial results as final
+      const dispatchAge = target.dispatched_at ? Date.now() - new Date(target.dispatched_at).getTime() : 0;
+      const timedOut = !allDone && dispatchAge > 6 * 60 * 60 * 1000 && results.length > 0;
+
       if (anySuccess) {
         target.status = 'done';
         delete target.failReason;
@@ -1172,9 +1197,11 @@ function updateWorkItemStatus(meta, status, reason) {
         target.completedAgents = Object.entries(target.agentResults)
           .filter(([, r]) => r.status === 'done')
           .map(([a]) => a);
-      } else if (allDone) {
+      } else if (allDone || timedOut) {
         target.status = 'failed';
-        target.failReason = 'All fan-out agents failed';
+        target.failReason = timedOut
+          ? `Fan-out timed out: ${results.length}/${(target.fanOutAgents || []).length} agents reported (all failed)`
+          : 'All fan-out agents failed';
         target.failedAt = ts();
       }
     } else {
@@ -2628,6 +2655,26 @@ function runCleanup(config, verbose = false) {
           } catch {}
         }
 
+        // Skip worktrees for active shared-branch plans
+        if (shouldClean) {
+          try {
+            const planDir = path.join(SQUAD_DIR, 'plans');
+            if (fs.existsSync(planDir)) {
+              for (const pf of fs.readdirSync(planDir).filter(f => f.endsWith('.json'))) {
+                const plan = safeJson(path.join(planDir, pf));
+                if (plan?.branch_strategy === 'shared-branch' && plan?.feature_branch && plan?.status !== 'completed') {
+                  const planBranch = sanitizeBranch(plan.feature_branch);
+                  if (dir === planBranch || dir.includes(planBranch) || planBranch.includes(dir)) {
+                    shouldClean = false;
+                    if (verbose) console.log(`  Skipping worktree ${dir}: active shared-branch plan`);
+                    break;
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+
         if (shouldClean) {
           try {
             execSync(`git worktree remove "${wtPath}" --force`, { cwd: root, stdio: 'pipe' });
@@ -2663,8 +2710,23 @@ function runCleanup(config, verbose = false) {
   // 5. Clean spawn-debug.log
   try { fs.unlinkSync(path.join(ENGINE_DIR, 'spawn-debug.log')); } catch {}
 
-  if (cleaned.tempFiles + cleaned.liveOutputs + cleaned.worktrees + cleaned.zombies > 0) {
-    log('info', `Cleanup: ${cleaned.tempFiles} temp files, ${cleaned.liveOutputs} live outputs, ${cleaned.worktrees} worktrees, ${cleaned.zombies} zombies`);
+  // 6. Prune old output archive files (keep last 30 per agent)
+  for (const agentId of Object.keys(config.agents || {})) {
+    const agentDir = path.join(SQUAD_DIR, 'agents', agentId);
+    if (!fs.existsSync(agentDir)) continue;
+    try {
+      const outputFiles = fs.readdirSync(agentDir)
+        .filter(f => f.startsWith('output-') && f.endsWith('.log') && f !== 'output.log')
+        .map(f => ({ name: f, mtime: fs.statSync(path.join(agentDir, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+      for (const old of outputFiles.slice(30)) {
+        try { fs.unlinkSync(path.join(agentDir, old.name)); cleaned.files++; } catch {}
+      }
+    } catch {}
+  }
+
+  if (cleaned.tempFiles + cleaned.liveOutputs + cleaned.worktrees + cleaned.zombies + (cleaned.files || 0) > 0) {
+    log('info', `Cleanup: ${cleaned.tempFiles} temp files, ${cleaned.liveOutputs} live outputs, ${cleaned.worktrees} worktrees, ${cleaned.zombies} zombies, ${cleaned.files || 0} old output archives`);
   }
 
   return cleaned;
@@ -2693,6 +2755,11 @@ function saveCooldowns() {
   if (_cooldownWritePending) return;
   _cooldownWritePending = true;
   setTimeout(() => {
+    // Prune expired entries (>24h) before saving
+    const now = Date.now();
+    for (const [k, v] of dispatchCooldowns) {
+      if (now - v.timestamp > 24 * 60 * 60 * 1000) dispatchCooldowns.delete(k);
+    }
     const obj = Object.fromEntries(dispatchCooldowns);
     safeWrite(COOLDOWN_PATH, obj);
     _cooldownWritePending = false;
@@ -3187,8 +3254,17 @@ function discoverFromWorkItems(config, project) {
   for (const item of items) {
     if (item.status !== 'queued' && item.status !== 'pending') continue;
 
-    // Dependency gate: skip items whose depends_on are not yet met
-    if (item.depends_on && item.depends_on.length > 0 && !areDependenciesMet(item, config)) continue;
+    // Dependency gate: skip items whose depends_on are not yet met; propagate failure
+    if (item.depends_on && item.depends_on.length > 0) {
+      const depStatus = areDependenciesMet(item, config);
+      if (depStatus === 'failed') {
+        item.status = 'failed';
+        item.failReason = 'Dependency failed — cannot proceed';
+        log('warn', `Marking ${item.id} as failed: dependency failed (plan: ${item.sourcePlan})`);
+        continue;
+      }
+      if (!depStatus) continue;
+    }
 
     const key = `work-${project?.name || 'default'}-${item.id}`;
     if (isAlreadyDispatched(key) || isOnCooldown(key, cooldownMs)) { skipped.gated++; continue; }
@@ -3593,6 +3669,8 @@ function discoverCentralWorkItems(config) {
         vars.task_description = item.title;
         vars.notes_content = '';
         try { vars.notes_content = fs.readFileSync(path.join(SQUAD_DIR, 'notes.md'), 'utf8'); } catch {}
+        // Track expected plan filename in meta for chainPlanToPrd
+        item._planFileName = planFileName;
       }
 
       // Inject ask-specific variables for the ask playbook
@@ -3615,7 +3693,7 @@ function discoverCentralWorkItems(config) {
         agentRole,
         task: item.title || item.description?.slice(0, 80) || item.id,
         prompt,
-        meta: { dispatchKey: key, source: 'central-work-item', item }
+        meta: { dispatchKey: key, source: 'central-work-item', item, planFileName: item._planFileName || null }
       });
 
       item.status = 'dispatched';

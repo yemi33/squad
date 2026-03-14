@@ -38,6 +38,30 @@ function safeReadDir(dir) {
   try { return fs.readdirSync(dir); } catch { return []; }
 }
 
+// Atomic write with Windows EPERM retry (matches engine.js safeWrite)
+function safeWrite(p, data) {
+  const dir = path.dirname(p);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  const tmp = p + '.tmp.' + process.pid;
+  try {
+    fs.writeFileSync(tmp, content);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try { fs.renameSync(tmp, p); return; } catch (e) {
+        if (e.code === 'EPERM' && attempt < 4) {
+          const delay = 50 * (attempt + 1);
+          const start = Date.now(); while (Date.now() - start < delay) {}
+          continue;
+        }
+      }
+    }
+    try { fs.unlinkSync(tmp); } catch {}
+    safeWrite(p, content);
+  } catch {
+    try { fs.unlinkSync(tmp); } catch {}
+  }
+}
+
 function timeSince(ms) {
   const s = Math.floor((Date.now() - ms) / 1000);
   if (s < 60) return `${s}s ago`;
@@ -480,7 +504,7 @@ const server = http.createServer(async (req, res) => {
       delete item.failReason;
       delete item.failedAt;
       delete item.fanOutAgents;
-      fs.writeFileSync(wiPath, JSON.stringify(items, null, 2));
+      safeWrite(wiPath, items);
 
       // Clear completed dispatch entries so the engine doesn't dedup this item
       const dispatchPath = path.join(SQUAD_DIR, 'engine', 'dispatch.json');
@@ -494,7 +518,7 @@ const server = http.createServer(async (req, res) => {
           // Also clear fan-out entries
           dispatch.completed = dispatch.completed.filter(d => !d.meta?.parentKey || d.meta.parentKey !== dispatchKey);
           if (dispatch.completed.length !== before) {
-            fs.writeFileSync(dispatchPath, JSON.stringify(dispatch, null, 2));
+            safeWrite(dispatchPath, dispatch);
           }
         }
       } catch {}
@@ -543,13 +567,13 @@ const server = http.createServer(async (req, res) => {
           status.status = 'idle';
           delete status.currentTask;
           delete status.dispatched;
-          fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
+          safeWrite(statusPath, status);
         } catch {}
       }
 
       // Remove item from work-items file
       items.splice(idx, 1);
-      fs.writeFileSync(wiPath, JSON.stringify(items, null, 2));
+      safeWrite(wiPath, items);
 
       // Clear dispatch entries (pending, active, completed + fan-out)
       const dispatchPath = path.join(SQUAD_DIR, 'engine', 'dispatch.json');
@@ -569,7 +593,7 @@ const server = http.createServer(async (req, res) => {
           }
         }
         if (changed) {
-          fs.writeFileSync(dispatchPath, JSON.stringify(dispatch, null, 2));
+          safeWrite(dispatchPath, dispatch);
         }
       } catch {}
 
@@ -610,8 +634,8 @@ const server = http.createServer(async (req, res) => {
       const existing = safeRead(archivePath);
       if (existing) { try { archive = JSON.parse(existing); } catch {} }
       archive.push(item);
-      fs.writeFileSync(archivePath, JSON.stringify(archive, null, 2));
-      fs.writeFileSync(wiPath, JSON.stringify(items, null, 2));
+      safeWrite(archivePath, archive);
+      safeWrite(wiPath, items);
 
       return jsonReply(res, 200, { ok: true, id });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
@@ -641,6 +665,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/api/work-items') {
     try {
       const body = await readBody(req);
+      if (!body.title || !body.title.trim()) return jsonReply(res, 400, { error: 'title is required' });
       let wiPath;
       if (body.project) {
         // Write to project-specific queue
@@ -671,7 +696,7 @@ const server = http.createServer(async (req, res) => {
       if (body.agent) item.agent = body.agent;
       if (body.agents) item.agents = body.agents;
       items.push(item);
-      fs.writeFileSync(wiPath, JSON.stringify(items, null, 2));
+      safeWrite(wiPath, items);
       return jsonReply(res, 200, { ok: true, id });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
@@ -680,6 +705,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/api/notes') {
     try {
       const body = await readBody(req);
+      if (!body.title || !body.title.trim()) return jsonReply(res, 400, { error: 'title is required' });
       const inboxDir = path.join(SQUAD_DIR, 'notes', 'inbox');
       fs.mkdirSync(inboxDir, { recursive: true });
       const today = new Date().toISOString().slice(0, 10);
@@ -687,7 +713,7 @@ const server = http.createServer(async (req, res) => {
       const slug = (body.title || 'note').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
       const filename = `${author}-${slug}-${today}.md`;
       const content = `# ${body.title}\n\n**By:** ${author}\n**Date:** ${today}\n\n${body.what}\n${body.why ? '\n**Why:** ' + body.why + '\n' : ''}`;
-      fs.writeFileSync(path.join(inboxDir, filename), content);
+      safeWrite(path.join(inboxDir, filename), content);
       return jsonReply(res, 200, { ok: true });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
@@ -696,6 +722,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/api/plan') {
     try {
       const body = await readBody(req);
+      if (!body.title || !body.title.trim()) return jsonReply(res, 400, { error: 'title is required' });
       // Write as a work item with type 'plan' — engine handles the chaining
       const wiPath = path.join(SQUAD_DIR, 'work-items.json');
       let items = [];
@@ -716,7 +743,7 @@ const server = http.createServer(async (req, res) => {
       if (body.project) item.project = body.project;
       if (body.agent) item.agent = body.agent;
       items.push(item);
-      fs.writeFileSync(wiPath, JSON.stringify(items, null, 2));
+      safeWrite(wiPath, items);
       return jsonReply(res, 200, { ok: true, id, agent: body.agent || '' });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
@@ -725,6 +752,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/api/prd-items') {
     try {
       const body = await readBody(req);
+      if (!body.name || !body.name.trim()) return jsonReply(res, 400, { error: 'name is required' });
       const prdPath = path.join(SQUAD_DIR, 'prd.json');
       let data = { missing_features: [], existing_features: [], open_questions: [] };
       const existing = safeRead(prdPath);
@@ -736,7 +764,7 @@ const server = http.createServer(async (req, res) => {
         rationale: body.rationale || '', status: 'missing', affected_areas: [],
         projects: body.projects || [],
       });
-      fs.writeFileSync(prdPath, JSON.stringify(data, null, 2));
+      safeWrite(prdPath, data);
       return jsonReply(res, 200, { ok: true, id: body.id });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
@@ -810,7 +838,7 @@ const server = http.createServer(async (req, res) => {
       } else {
         notes += '\n' + entry;
       }
-      fs.writeFileSync(notesPath, notes);
+      safeWrite(notesPath, notes);
 
       // Move to archive
       const archiveDir = path.join(SQUAD_DIR, 'notes', 'archive');
