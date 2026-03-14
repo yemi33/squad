@@ -739,8 +739,9 @@ function spawnAgent(dispatchItem, config) {
     safeWrite(archivePath, outputContent);
     safeWrite(latestPath, outputContent); // overwrite latest for dashboard compat
 
-    // Extract agent's final result text from stream-json output
+    // Extract agent's final result text + token usage from stream-json output
     let resultSummary = '';
+    let taskUsage = null;
     try {
       const lines = stdout.split('\n');
       for (let i = lines.length - 1; i >= 0; i--) {
@@ -748,8 +749,19 @@ function spawnAgent(dispatchItem, config) {
         if (!line || !line.startsWith('{')) continue;
         try {
           const obj = JSON.parse(line);
-          if (obj.type === 'result' && obj.result) {
-            resultSummary = obj.result.slice(0, 500);
+          if (obj.type === 'result') {
+            if (obj.result) resultSummary = obj.result.slice(0, 500);
+            if (obj.total_cost_usd || obj.usage) {
+              taskUsage = {
+                costUsd: obj.total_cost_usd || 0,
+                inputTokens: obj.usage?.input_tokens || 0,
+                outputTokens: obj.usage?.output_tokens || 0,
+                cacheRead: obj.usage?.cache_read_input_tokens || obj.usage?.cacheReadInputTokens || 0,
+                cacheCreation: obj.usage?.cache_creation_input_tokens || obj.usage?.cacheCreationInputTokens || 0,
+                durationMs: obj.duration_ms || 0,
+                numTurns: obj.num_turns || 0,
+              };
+            }
             break;
           }
         } catch {}
@@ -808,7 +820,7 @@ function spawnAgent(dispatchItem, config) {
     updateAgentHistory(agentId, dispatchItem, code === 0 ? 'success' : 'error');
 
     // Update quality metrics
-    updateMetrics(agentId, dispatchItem, code === 0 ? 'success' : 'error');
+    updateMetrics(agentId, dispatchItem, code === 0 ? 'success' : 'error', taskUsage);
 
     // Cleanup temp files
     try { fs.unlinkSync(sysPromptPath); } catch {}
@@ -1993,7 +2005,7 @@ function createReviewFeedbackForAuthor(reviewerAgentId, pr, config) {
   log('info', `Created review feedback for ${authorAgentId} from ${reviewerAgentId} on ${pr.id}`);
 }
 
-function updateMetrics(agentId, dispatchItem, result) {
+function updateMetrics(agentId, dispatchItem, result, taskUsage) {
   const metricsPath = path.join(ENGINE_DIR, 'metrics.json');
   const metrics = safeJson(metricsPath) || {};
 
@@ -2006,7 +2018,11 @@ function updateMetrics(agentId, dispatchItem, result) {
       prsRejected: 0,
       reviewsDone: 0,
       lastTask: null,
-      lastCompleted: null
+      lastCompleted: null,
+      totalCostUsd: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCacheRead: 0,
     };
   }
 
@@ -2020,6 +2036,35 @@ function updateMetrics(agentId, dispatchItem, result) {
     if (dispatchItem.type === 'review') m.reviewsDone++;
   } else {
     m.tasksErrored++;
+  }
+
+  // Track token usage per agent
+  if (taskUsage) {
+    m.totalCostUsd = (m.totalCostUsd || 0) + (taskUsage.costUsd || 0);
+    m.totalInputTokens = (m.totalInputTokens || 0) + (taskUsage.inputTokens || 0);
+    m.totalOutputTokens = (m.totalOutputTokens || 0) + (taskUsage.outputTokens || 0);
+    m.totalCacheRead = (m.totalCacheRead || 0) + (taskUsage.cacheRead || 0);
+  }
+
+  // Track daily usage (all agents combined)
+  const today = dateStamp();
+  if (!metrics._daily) metrics._daily = {};
+  if (!metrics._daily[today]) metrics._daily[today] = { costUsd: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, tasks: 0 };
+  const daily = metrics._daily[today];
+  daily.tasks++;
+  if (taskUsage) {
+    daily.costUsd += taskUsage.costUsd || 0;
+    daily.inputTokens += taskUsage.inputTokens || 0;
+    daily.outputTokens += taskUsage.outputTokens || 0;
+    daily.cacheRead += taskUsage.cacheRead || 0;
+  }
+
+  // Prune daily entries older than 30 days
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  for (const day of Object.keys(metrics._daily)) {
+    if (day < cutoffStr) delete metrics._daily[day];
   }
 
   safeWrite(metricsPath, metrics);
