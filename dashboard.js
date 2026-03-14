@@ -442,6 +442,19 @@ function getWorkItems() {
   return allItems;
 }
 
+function getMcpServers() {
+  try {
+    const mcpPath = path.join(SQUAD_DIR, 'mcp-servers.json');
+    const data = JSON.parse(safeRead(mcpPath) || '{}');
+    const servers = data.mcpServers || data;
+    return Object.entries(servers).map(([name, cfg]) => ({
+      name,
+      command: cfg.command || '',
+      args: (cfg.args || []).slice(-1)[0] || '', // last arg is usually the package name
+    }));
+  } catch { return []; }
+}
+
 function getStatus() {
   const prdInfo = getPrdInfo();
   return {
@@ -458,6 +471,7 @@ function getStatus() {
     metrics: getMetrics(),
     workItems: getWorkItems(),
     skills: getSkills(),
+    mcpServers: getMcpServers(),
     projects: PROJECTS.map(p => ({ name: p.name, path: p.localPath, description: p.description || '' })),
     timestamp: new Date().toISOString(),
   };

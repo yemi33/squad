@@ -565,6 +565,11 @@
   </section>
 
   <section>
+    <h2>MCP Servers <span class="count" id="mcp-count">0</span></h2>
+    <div id="mcp-list"><p class="empty">No MCP servers synced.</p></div>
+  </section>
+
+  <section>
     <h2>Dispatch Queue</h2>
     <div class="dispatch-stats" id="dispatch-stats"></div>
     <div id="dispatch-active"></div>
@@ -1302,6 +1307,7 @@ async function refresh() {
     renderMetrics(data.metrics || {});
     renderWorkItems(data.workItems || []);
     renderSkills(data.skills || []);
+    renderMcpServers(data.mcpServers || []);
     // Refresh KB and plans less frequently (every 3rd cycle = ~12s)
     if (!window._kbRefreshCount) window._kbRefreshCount = 0;
     if (window._kbRefreshCount++ % 3 === 0) { refreshKnowledgeBase(); refreshPlans(); }
@@ -1328,6 +1334,24 @@ function renderProjects(projects) {
     '</span>'
   ).join('');
 
+}
+
+// -- MCP Servers --
+function renderMcpServers(servers) {
+  const el = document.getElementById('mcp-list');
+  const countEl = document.getElementById('mcp-count');
+  countEl.textContent = servers.length;
+  if (!servers.length) {
+    el.innerHTML = '<p class="empty">No MCP servers synced. They auto-sync from ~/.claude.json on engine start.</p>';
+    return;
+  }
+  el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+    servers.map(s =>
+      '<div style="font-size:11px;padding:5px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text)" title="' + escHtml(s.args || s.command) + '">' +
+        escHtml(s.name) +
+      '</div>'
+    ).join('') +
+  '</div>';
 }
 
 // -- Squad Skills --
