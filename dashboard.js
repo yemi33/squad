@@ -849,6 +849,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // POST /api/notes-save — save edited notes.md content
+  if (req.method === 'POST' && req.url === '/api/notes-save') {
+    try {
+      const body = await readBody(req);
+      if (!body.content && body.content !== '') return jsonReply(res, 400, { error: 'content required' });
+      const file = body.file || 'notes.md';
+      // Only allow saving notes.md (prevent arbitrary file writes)
+      if (file !== 'notes.md') return jsonReply(res, 400, { error: 'only notes.md can be edited' });
+      safeWrite(path.join(SQUAD_DIR, file), body.content);
+      return jsonReply(res, 200, { ok: true });
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
   // GET /api/knowledge — list all knowledge base entries grouped by category
   if (req.method === 'GET' && req.url === '/api/knowledge') {
     const kbDir = path.join(SQUAD_DIR, 'knowledge');
