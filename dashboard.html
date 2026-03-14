@@ -1684,7 +1684,7 @@ function cmdParseInput(raw) {
       result.branchStrategy = 'shared-branch';
       text = text.replace(/--shared\b/i, '').trim();
     } else {
-      result.branchStrategy = 'shared-branch'; // default
+      result.branchStrategy = 'parallel'; // default — items without depends_on get independent branches
     }
   } else if (/^\/prd\b/i.test(text)) {
     result.intent = 'prd';
@@ -1748,7 +1748,7 @@ function cmdRenderMeta() {
 
   // Intent chip
   if (parsed.intent === 'plan') {
-    const strategy = parsed.branchStrategy || 'shared-branch';
+    const strategy = parsed.branchStrategy || 'parallel';
     const stratLabel = strategy === 'parallel' ? 'parallel branches' : 'shared branch';
     chips.push('<span class="cmd-chip" style="background:var(--purple,#a855f7);color:#fff">Plan → PRD → Dispatch (' + stratLabel + ')</span>');
   } else {
@@ -2049,7 +2049,7 @@ async function cmdSubmitPlan(parsed) {
     title: parsed.title,
     description: parsed.description || '',
     priority: parsed.priority,
-    branch_strategy: parsed.branchStrategy || 'shared-branch',
+    branch_strategy: parsed.branchStrategy || 'parallel',
   };
   if (parsed.project) body.project = parsed.project;
   if (parsed.agents.length === 1) body.agent = parsed.agents[0];
