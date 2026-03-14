@@ -38,6 +38,7 @@ Write your findings to `{{team_root}}/notes/inbox/{{agent_id}}-explore-{{task_id
 - **Dependencies**: what depends on what
 - **Gaps**: anything missing, broken, or unclear
 - **Recommendations**: suggestions for the team
+- **Source References**: for EVERY finding, include the source — file paths, line numbers, PR URLs, API endpoints, config keys. Format: `(source: path/to/file.ts:42)` or `(source: PR-12345)`. This is critical — other agents and humans need to verify your findings.
 
 ### 5. Create Deliverable (if the task asks for one)
 If the task asks you to write a design doc, architecture doc, or any durable artifact:

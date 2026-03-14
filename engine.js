@@ -438,7 +438,8 @@ function renderPlaybook(type, vars) {
   content += `- What you learned about the codebase\n`;
   content += `- Patterns you discovered or established\n`;
   content += `- Gotchas or warnings for future agents\n`;
-  content += `- Conventions to follow\n\n`;
+  content += `- Conventions to follow\n`;
+  content += `- **SOURCE REFERENCES for every finding** — file paths with line numbers, PR URLs, API endpoints, config keys. Format: \`(source: path/to/file.ts:42)\` or \`(source: PR-12345)\`. Without references, findings cannot be verified.\n\n`;
   content += `### Skill Extraction (IMPORTANT)\n\n`;
   content += `If during this task you discovered a **repeatable workflow** — a multi-step procedure, workaround, build process, or pattern that other agents should follow in similar situations — output it as a fenced skill block. The engine will automatically extract it.\n\n`;
   content += `Format your skill as a fenced code block with the \`skill\` language tag:\n\n`;

@@ -1095,7 +1095,12 @@ ${body.question}
 
 ## Instructions
 
-Answer concisely and directly. Reference specific parts of the document. If the answer isn't in the document, say so. Use markdown formatting.`;
+Answer concisely and directly. Follow these rules:
+1. **Cite sources**: When the document includes file paths, line numbers, PR URLs, or code references — include them in your answer. Format: \`(source: path/to/file.ts:42)\`
+2. **Quote the document**: Reference the exact text that supports your answer.
+3. **Flag missing sources**: If the document makes a claim without a source reference (no file path, no PR link, no line number), say: "Note: this claim has no source reference in the document — verify independently."
+4. **Be honest**: If the document doesn't contain the answer, say so clearly. Don't speculate beyond what's written.
+5. Use markdown formatting.`;
 
       const sysPrompt = 'You are a concise technical assistant. Answer based on the document provided. No preamble.';
 
