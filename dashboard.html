@@ -639,6 +639,7 @@
       <div class="modal-qa-input-wrap">
         <input type="text" class="modal-qa-input" id="modal-qa-input" placeholder="Ask about this document (or select text first)..." onkeydown="if(event.key==='Enter')modalAskSubmit()">
         <button class="modal-qa-btn" id="modal-qa-btn" onclick="modalAskSubmit()">Ask</button>
+        <button class="modal-qa-btn" id="modal-steer-btn" style="background:var(--green);display:none" onclick="modalSteerSubmit()">Edit</button>
       </div>
     </div>
   </div>
@@ -967,7 +968,9 @@ function openNotesModal() {
   document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
   _modalDocContext = { title: 'Team Notes', content, selection: '' };
   _modalEditable = 'notes.md';
+  _modalFilePath = 'notes.md';
   document.getElementById('modal-edit-btn').style.display = '';
+  document.getElementById('modal-steer-btn').style.display = '';
   document.getElementById('modal').classList.add('open');
 }
 
@@ -1140,8 +1143,10 @@ function closeModal() {
   document.getElementById('modal-qa-input').placeholder = 'Ask about this document (or select text first)...';
   document.getElementById('modal-qa-pill').style.display = 'none';
   document.getElementById('ask-selection-btn').style.display = 'none';
-  // Clear edit state
+  // Clear edit/steer state
   _modalEditable = null;
+  _modalFilePath = null;
+  document.getElementById('modal-steer-btn').style.display = 'none';
   const body = document.getElementById('modal-body');
   body.contentEditable = 'false';
   body.style.border = '';
@@ -2230,6 +2235,7 @@ async function cmdSubmitPrd(parsed) {
 // ─── Modal Q&A (Ask about document) ──────────────────────────────────────────
 
 let _modalDocContext = { title: '', content: '', selection: '' };
+let _modalFilePath = null; // file path for steering (null = read-only Q&A only)
 
 // Track text selection anywhere in content areas for the floating "Ask about this" button
 document.addEventListener('mouseup', function(e) {
@@ -2380,6 +2386,75 @@ async function modalAskSubmit() {
 
 // Override closeModal to clear Q&A state
 const _origCloseModal = typeof closeModal === 'function' ? closeModal : null;
+
+async function modalSteerSubmit() {
+  const input = document.getElementById('modal-qa-input');
+  const instruction = input.value.trim();
+  if (!instruction) return;
+  if (!_modalFilePath) {
+    showToast('cmd-toast', 'This document is read-only (no file path)', false);
+    return;
+  }
+
+  const thread = document.getElementById('modal-qa-thread');
+  const btn = document.getElementById('modal-steer-btn');
+
+  // Show instruction
+  let qHtml = '<div class="modal-qa-q" style="color:var(--green)">Edit: ' + escHtml(instruction);
+  if (_modalDocContext.selection) {
+    qHtml += '<span class="selection-ref">On: "' + escHtml(_modalDocContext.selection.slice(0, 100)) + '"</span>';
+  }
+  qHtml += '</div>';
+  thread.innerHTML += qHtml;
+
+  // Show loading
+  const loadingId = 'steer-loading-' + Date.now();
+  thread.innerHTML += '<div class="modal-qa-loading" id="' + loadingId + '"><div class="dot-pulse"><span></span><span></span><span></span></div> Editing...</div>';
+  thread.scrollTop = thread.scrollHeight;
+
+  input.value = '';
+  btn.disabled = true;
+  document.getElementById('modal-qa-btn').disabled = true;
+
+  try {
+    const res = await fetch('/api/steer-document', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instruction,
+        filePath: _modalFilePath,
+        selection: _modalDocContext.selection || '',
+      }),
+    });
+    const data = await res.json();
+    const loadingEl = document.getElementById(loadingId);
+    if (loadingEl) loadingEl.remove();
+
+    if (data.ok) {
+      thread.innerHTML += '<div class="modal-qa-a" style="border-left-color:var(--green)">' + escHtml(data.answer) + (data.updated ? '\n\n✓ Document saved.' : '') + '</div>';
+
+      // Refresh the modal body with updated content
+      if (data.updated && data.content) {
+        const display = data.content.replace(/^---[\s\S]*?---\n*/m, '');
+        document.getElementById('modal-body').textContent = display;
+        _modalDocContext.content = display;
+      }
+    } else {
+      thread.innerHTML += '<div class="modal-qa-a" style="color:var(--red)">Error: ' + escHtml(data.error || 'Failed') + '</div>';
+    }
+  } catch (e) {
+    const loadingEl = document.getElementById(loadingId);
+    if (loadingEl) loadingEl.remove();
+    thread.innerHTML += '<div class="modal-qa-a" style="color:var(--red)">Error: ' + escHtml(e.message) + '</div>';
+  }
+
+  _modalDocContext.selection = '';
+  document.getElementById('modal-qa-pill').style.display = 'none';
+  btn.disabled = false;
+  document.getElementById('modal-qa-btn').disabled = false;
+  thread.scrollTop = thread.scrollHeight;
+  input.focus();
+}
 
 // ─── Plans (Approval Gate) ────────────────────────────────────────────────────
 
@@ -2550,6 +2625,8 @@ async function planView(file) {
     document.getElementById('modal-body').style.fontFamily = 'Consolas, monospace';
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
     _modalDocContext = { title, content: text, selection: '' };
+    _modalFilePath = 'plans/' + file;
+    document.getElementById('modal-steer-btn').style.display = '';
     document.getElementById('modal').classList.add('open');
   } catch (e) { console.error(e); }
 }
@@ -2647,10 +2724,12 @@ function kbSetTab(tab) {
 async function kbOpenItem(category, file) {
   try {
     const content = await fetch('/api/knowledge/' + category + '/' + encodeURIComponent(file)).then(r => r.text());
-    // Strip frontmatter for display
     const display = content.replace(/^---[\s\S]*?---\n*/m, '');
     document.getElementById('modal-title').textContent = file;
     document.getElementById('modal-body').textContent = display;
+    _modalDocContext = { title: file, content: display, selection: '' };
+    _modalFilePath = 'knowledge/' + category + '/' + file;
+    document.getElementById('modal-steer-btn').style.display = '';
     document.getElementById('modal').classList.add('open');
   } catch (e) {
     console.error('Failed to load KB item:', e);

@@ -1146,6 +1146,123 @@ What would you like to discuss or change? When you're happy, say "approve" and I
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
+  // POST /api/steer-document — modify a document via natural language instruction (Haiku)
+  if (req.method === 'POST' && req.url === '/api/steer-document') {
+    try {
+      const body = await readBody(req);
+      if (!body.instruction) return jsonReply(res, 400, { error: 'instruction required' });
+      if (!body.filePath) return jsonReply(res, 400, { error: 'filePath required' });
+
+      // Read current document from disk (authoritative source)
+      const fullPath = path.resolve(SQUAD_DIR, body.filePath);
+      // Security: must be under SQUAD_DIR
+      if (!fullPath.startsWith(path.resolve(SQUAD_DIR))) return jsonReply(res, 400, { error: 'path must be under squad directory' });
+      const currentContent = safeRead(fullPath);
+      if (currentContent === null) return jsonReply(res, 404, { error: 'file not found' });
+
+      const isJson = body.filePath.endsWith('.json');
+      const prompt = `You are editing a document based on a user instruction.
+
+## Current Document
+File: ${body.filePath}
+${isJson ? 'Format: JSON (you MUST output valid JSON)' : 'Format: Markdown'}
+
+\`\`\`
+${currentContent.slice(0, 20000)}
+\`\`\`
+
+${body.selection ? '## Context: User highlighted this section\n> ' + body.selection.slice(0, 1000) + '\n' : ''}
+
+## Instruction
+
+${body.instruction}
+
+## Output Format
+
+Respond with EXACTLY two sections separated by the delimiter \`---DOCUMENT---\`:
+
+1. First: A brief explanation of what you changed (1-3 sentences)
+2. Then the delimiter on its own line: \`---DOCUMENT---\`
+3. Then the COMPLETE updated document content (not a diff — the full file)
+
+Example:
+Removed item P003 and reordered remaining items.
+---DOCUMENT---
+{full updated file content here}
+
+${isJson ? 'CRITICAL: The document section must be valid JSON. Do not add markdown code fences around it.' : ''}`;
+
+      const sysPrompt = 'You are a precise document editor. Follow the output format exactly. No code fences around the document output.';
+
+      const id = Date.now();
+      const promptPath = path.join(SQUAD_DIR, 'engine', 'steer-prompt-' + id + '.md');
+      const sysPath = path.join(SQUAD_DIR, 'engine', 'steer-sys-' + id + '.md');
+      safeWrite(promptPath, prompt);
+      safeWrite(sysPath, sysPrompt);
+
+      const spawnScript = path.join(SQUAD_DIR, 'engine', 'spawn-agent.js');
+      const childEnv = { ...process.env };
+      for (const key of Object.keys(childEnv)) {
+        if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) delete childEnv[key];
+      }
+
+      const { spawn: cpSpawn } = require('child_process');
+      const proc = cpSpawn(process.execPath, [
+        spawnScript, promptPath, sysPath,
+        '--output-format', 'text', '--max-turns', '1', '--model', 'haiku',
+        '--permission-mode', 'bypassPermissions', '--verbose',
+      ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv });
+
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', d => { stdout += d.toString(); });
+      proc.stderr.on('data', d => { stderr += d.toString(); });
+
+      const timeout = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} }, 90000);
+
+      proc.on('close', (code) => {
+        clearTimeout(timeout);
+        try { fs.unlinkSync(promptPath); } catch {}
+        try { fs.unlinkSync(sysPath); } catch {}
+
+        if (code === 0 && stdout.trim()) {
+          const output = stdout.trim();
+          const delimIdx = output.indexOf('---DOCUMENT---');
+          if (delimIdx < 0) {
+            return jsonReply(res, 200, { ok: true, answer: output, updated: false, reason: 'No document delimiter found — treated as Q&A response' });
+          }
+
+          const explanation = output.slice(0, delimIdx).trim();
+          let newContent = output.slice(delimIdx + '---DOCUMENT---'.length).trim();
+
+          // Strip code fences if model added them
+          newContent = newContent.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim();
+
+          // Validate JSON if applicable
+          if (isJson) {
+            try { JSON.parse(newContent); } catch (e) {
+              return jsonReply(res, 200, { ok: true, answer: explanation + '\n\n(Warning: JSON validation failed — document not saved: ' + e.message + ')', updated: false });
+            }
+          }
+
+          // Write back
+          safeWrite(fullPath, newContent);
+          return jsonReply(res, 200, { ok: true, answer: explanation, updated: true, content: newContent });
+        } else {
+          return jsonReply(res, 500, { error: 'Steer failed (code=' + code + ')', stderr: stderr.slice(0, 200) });
+        }
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        try { fs.unlinkSync(promptPath); } catch {}
+        try { fs.unlinkSync(sysPath); } catch {}
+        return jsonReply(res, 500, { error: err.message });
+      });
+      return;
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
   // POST /api/ask-about — ask a question about a document with context, answered by Haiku
   if (req.method === 'POST' && req.url === '/api/ask-about') {
     try {
