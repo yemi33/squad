@@ -381,6 +381,106 @@ function resolveAgent(workType, config, authorAgent = null) {
   return idle[0] || null;
 }
 
+// ─── Task Context Resolution ────────────────────────────────────────────────
+// Resolves implicit references in task descriptions (e.g., "ripley's plan",
+// "dallas's PR") to actual artifacts and injects their content.
+
+function resolveTaskContext(item, config) {
+  const title = (item.title || '').toLowerCase();
+  const desc = (item.description || '').toLowerCase();
+  const text = title + ' ' + desc;
+  const agentNames = Object.entries(config.agents || {}).map(([id, a]) => ({
+    id,
+    name: (a.name || id).toLowerCase(),
+  }));
+  const resolved = { additionalContext: '', referencedFiles: [] };
+
+  // Match agent references: "ripley's plan", "dallas's pr", "lambert's output", etc.
+  for (const agent of agentNames) {
+    const patterns = [
+      new RegExp(`${agent.name}(?:'s|s)?\\s+plan`, 'i'),
+      new RegExp(`${agent.id}(?:'s|s)?\\s+plan`, 'i'),
+      new RegExp(`plan\\s+(?:created|made|written|generated)\\s+by\\s+${agent.name}`, 'i'),
+      new RegExp(`plan\\s+(?:created|made|written|generated)\\s+by\\s+${agent.id}`, 'i'),
+    ];
+    const matchesPlan = patterns.some(p => p.test(text));
+    if (matchesPlan) {
+      // Find plans created by this agent (check work items for plan tasks dispatched to this agent)
+      try {
+        const plans = fs.readdirSync(path.join(SQUAD_DIR, 'plans')).filter(f => f.endsWith('.md') || f.endsWith('.json'));
+        // Check work-items to find which plan file this agent created
+        const workItems = safeJson(path.join(SQUAD_DIR, 'work-items.json')) || [];
+        const agentPlanItems = workItems.filter(w =>
+          w.type === 'plan' && w.dispatched_to === agent.id && w.status === 'done' && w._planFileName
+        ).sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''));
+
+        if (agentPlanItems.length > 0) {
+          const planFile = agentPlanItems[0]._planFileName;
+          const planPath = path.join(SQUAD_DIR, 'plans', planFile);
+          try {
+            const content = fs.readFileSync(planPath, 'utf8');
+            resolved.additionalContext += `\n\n## Referenced Plan: ${planFile} (created by ${agent.name})\n\n${content}`;
+            resolved.referencedFiles.push(planPath);
+            log('info', `Context resolution: found plan "${planFile}" by ${agent.name} for work item ${item.id}`);
+          } catch {}
+        } else if (plans.length > 0) {
+          // Fallback: try to find a plan file with the agent's name or ID in it
+          const match = plans.find(f => f.toLowerCase().includes(agent.id) || f.toLowerCase().includes(agent.name));
+          if (match) {
+            const planPath = path.join(SQUAD_DIR, 'plans', match);
+            try {
+              const content = fs.readFileSync(planPath, 'utf8');
+              resolved.additionalContext += `\n\n## Referenced Plan: ${match}\n\n${content}`;
+              resolved.referencedFiles.push(planPath);
+              log('info', `Context resolution: found plan "${match}" (name match) for work item ${item.id}`);
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    // Match agent output/notes references
+    const outputPatterns = [
+      new RegExp(`${agent.name}(?:'s|s)?\\s+(?:output|findings|notes|results)`, 'i'),
+      new RegExp(`(?:output|findings|notes|results)\\s+(?:from|by)\\s+${agent.name}`, 'i'),
+    ];
+    if (outputPatterns.some(p => p.test(text))) {
+      // Find the agent's latest inbox notes
+      try {
+        const inboxDir = path.join(SQUAD_DIR, 'notes', 'inbox');
+        const files = fs.readdirSync(inboxDir)
+          .filter(f => f.startsWith(agent.id + '-'))
+          .sort().reverse();
+        if (files.length > 0) {
+          const content = fs.readFileSync(path.join(inboxDir, files[0]), 'utf8');
+          resolved.additionalContext += `\n\n## Referenced Notes by ${agent.name}: ${files[0]}\n\n${content.slice(0, 5000)}`;
+          resolved.referencedFiles.push(path.join(inboxDir, files[0]));
+          log('info', `Context resolution: found notes "${files[0]}" by ${agent.name} for work item ${item.id}`);
+        }
+      } catch {}
+    }
+  }
+
+  // If no specific reference was resolved but the text mentions "the plan" or "latest plan",
+  // find the most recent plan
+  if (!resolved.additionalContext && /\b(the|latest|last|recent)\s+plan\b/i.test(text)) {
+    try {
+      const plans = fs.readdirSync(path.join(SQUAD_DIR, 'plans'))
+        .filter(f => f.endsWith('.md') || f.endsWith('.json'))
+        .sort().reverse();
+      if (plans.length > 0) {
+        const planPath = path.join(SQUAD_DIR, 'plans', plans[0]);
+        const content = fs.readFileSync(planPath, 'utf8');
+        resolved.additionalContext += `\n\n## Referenced Plan (latest): ${plans[0]}\n\n${content}`;
+        resolved.referencedFiles.push(planPath);
+        log('info', `Context resolution: using latest plan "${plans[0]}" for work item ${item.id}`);
+      }
+    } catch {}
+  }
+
+  return resolved;
+}
+
 // ─── Playbook Renderer ──────────────────────────────────────────────────────
 
 function renderPlaybook(type, vars) {
@@ -3423,10 +3523,22 @@ function discoverFromWorkItems(config, project) {
       try { vars.notes_content = fs.readFileSync(path.join(SQUAD_DIR, 'notes.md'), 'utf8'); } catch {}
     }
 
+    // Resolve implicit context references (e.g., "ripley's plan", "the latest plan")
+    const resolvedCtx = resolveTaskContext(item, config);
+    if (resolvedCtx.additionalContext) {
+      vars.additional_context = (vars.additional_context || '') + resolvedCtx.additionalContext;
+      vars.task_description = vars.task_description + resolvedCtx.additionalContext;
+    }
+
     // Select playbook: shared-branch items use implement-shared, others use type-specific or work-item
+    // Note: 'review' playbook is PR-specific — if this is a work item review (no PR), use work-item instead
     let playbookName;
     if (item.branchStrategy === 'shared-branch' && (workType === 'implement' || workType === 'implement:large')) {
       playbookName = 'implement-shared';
+    } else if (workType === 'review' && !item._pr && !item.pr_id) {
+      // Review without a PR — use work-item playbook (review.md expects PR variables)
+      playbookName = 'work-item';
+      log('info', `Work item ${item.id} is type "review" but has no PR — using work-item playbook`);
     } else {
       const typeSpecificPlaybooks = ['explore', 'review', 'test', 'plan-to-prd', 'plan', 'ask'];
       playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
@@ -3714,8 +3826,19 @@ function discoverCentralWorkItems(config) {
           try { vars.notes_content = fs.readFileSync(path.join(SQUAD_DIR, 'notes.md'), 'utf8'); } catch {}
         }
 
-        const typeSpecificPlaybooks = ['explore', 'review', 'test', 'plan-to-prd', 'plan', 'ask'];
-        const playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
+        // Resolve implicit context references
+        const resolvedCtx = resolveTaskContext(item, config);
+        if (resolvedCtx.additionalContext) {
+          vars.additional_context = (vars.additional_context || '') + resolvedCtx.additionalContext;
+        }
+
+        let playbookName;
+        if (workType === 'review' && !item._pr && !item.pr_id) {
+          playbookName = 'work-item';
+        } else {
+          const typeSpecificPlaybooks = ['explore', 'review', 'test', 'plan-to-prd', 'plan', 'ask'];
+          playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
+        }
         const prompt = renderPlaybook(playbookName, vars) || renderPlaybook('work-item', vars);
         if (!prompt) continue;
 
@@ -3800,8 +3923,20 @@ function discoverCentralWorkItems(config) {
         try { vars.notes_content = fs.readFileSync(path.join(SQUAD_DIR, 'notes.md'), 'utf8'); } catch {}
       }
 
-      const typeSpecificPlaybooks = ['explore', 'review', 'test', 'plan-to-prd', 'plan', 'ask'];
-      const playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
+      // Resolve implicit context references
+      const resolvedCtx = resolveTaskContext(item, config);
+      if (resolvedCtx.additionalContext) {
+        vars.additional_context = (vars.additional_context || '') + resolvedCtx.additionalContext;
+        vars.task_description = vars.task_description + resolvedCtx.additionalContext;
+      }
+
+      let playbookName;
+      if (workType === 'review' && !item._pr && !item.pr_id) {
+        playbookName = 'work-item';
+      } else {
+        const typeSpecificPlaybooks = ['explore', 'review', 'test', 'plan-to-prd', 'plan', 'ask'];
+        playbookName = typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
+      }
       const prompt = renderPlaybook(playbookName, vars) || renderPlaybook('work-item', vars);
       if (!prompt) continue;
 
