@@ -714,7 +714,10 @@
     </div>
     <div class="modal-body" id="modal-body"></div>
     <div class="modal-qa" id="modal-qa">
-      <div class="modal-qa-thread" id="modal-qa-thread"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;min-height:0">
+        <div class="modal-qa-thread" id="modal-qa-thread" style="flex:1"></div>
+        <button id="qa-clear-btn" style="display:none;background:none;border:none;color:var(--muted);font-size:10px;cursor:pointer;padding:2px 6px;white-space:nowrap;align-self:flex-start" onclick="clearQaConversation()" title="Clear conversation">Clear chat</button>
+      </div>
       <div class="modal-qa-selection-pill" id="modal-qa-pill" style="display:none">
         <span class="pill-label">Selection:</span>
         <span class="pill-text" id="modal-qa-pill-text"></span>
@@ -2409,14 +2412,38 @@ function clearQaSelection() {
   document.getElementById('modal-qa-input').placeholder = 'Ask about this document (or select text first)...';
 }
 
+function _initQaSession() {
+  var key = _modalFilePath || _modalDocContext.title || '';
+  if (!key || _qaSessionKey === key) return;
+  _qaSessionKey = key;
+  var prior = _qaSessions.get(key);
+  if (prior) {
+    _qaHistory = prior.history;
+    document.getElementById('modal-qa-thread').innerHTML = prior.threadHtml;
+    if (prior.docContext) _modalDocContext = Object.assign({}, prior.docContext, { selection: _modalDocContext.selection });
+    if (prior.filePath) _modalFilePath = prior.filePath;
+    document.getElementById('qa-clear-btn').style.display = 'block';
+  } else {
+    _qaHistory = [];
+  }
+}
+
+function clearQaConversation() {
+  _qaHistory = [];
+  _qaQueue = [];
+  _qaProcessing = false;
+  document.getElementById('modal-qa-thread').innerHTML = '';
+  document.getElementById('qa-clear-btn').style.display = 'none';
+  if (_qaSessionKey) _qaSessions.delete(_qaSessionKey);
+}
+
 function modalSend() {
-  const input = document.getElementById('modal-qa-input');
-  const message = input.value.trim();
+  var input = document.getElementById('modal-qa-input');
+  var message = input.value.trim();
   if (!message) return;
 
-  // Capture content from modal body if not already set
   if (!_modalDocContext.content) {
-    const body = document.getElementById('modal-body');
+    var body = document.getElementById('modal-body');
     if (body) {
       _modalDocContext.content = body.textContent || body.innerText || '';
       _modalDocContext.title = document.getElementById('modal-title')?.textContent || '';
@@ -2427,7 +2454,10 @@ function modalSend() {
     return;
   }
 
-  const thread = document.getElementById('modal-qa-thread');
+  _initQaSession();
+  document.getElementById('qa-clear-btn').style.display = 'block';
+
+  var thread = document.getElementById('modal-qa-thread');
   const selection = _modalDocContext.selection || '';
 
   // Show message in thread immediately
@@ -2508,17 +2538,26 @@ async function _processQaMessage(message, selection) {
   _qaProcessing = false;
   thread.scrollTop = thread.scrollHeight;
 
+  // Save session (persists even if modal was closed during processing)
+  if (_qaSessionKey) {
+    _qaSessions.set(_qaSessionKey, {
+      history: _qaHistory,
+      threadHtml: thread.innerHTML,
+      docContext: { ..._modalDocContext },
+      filePath: _modalFilePath,
+    });
+  }
+
   // Process next queued message
   if (_qaQueue.length > 0) {
     const next = _qaQueue.shift();
-    // Remove the "Queued" indicator
     const queuedEls = thread.querySelectorAll('.modal-qa-loading');
     for (const el of queuedEls) {
       if (el.textContent.includes('Queued')) { el.remove(); break; }
     }
     _processQaMessage(next.message, next.selection);
   } else {
-    document.getElementById('modal-qa-input').focus();
+    document.getElementById('modal-qa-input')?.focus();
   }
 }
 
