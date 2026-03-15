@@ -488,12 +488,21 @@ function getTriageContext() {
     `- ${i.id}: "${i.title.slice(0, 60)}" [${i.type}] ${i.status}${i.dispatched_to ? ' → ' + i.dispatched_to : ''}`
   ).join('\n');
 
-  // Plans
+  // Plans (with summary, author, project, status)
   const plansDir = path.join(SQUAD_DIR, 'plans');
   let plans = '';
   try {
-    plans = safeReadDir(plansDir).filter(f => f.endsWith('.md') || f.endsWith('.json'))
-      .map(f => `- ${f}`).join('\n');
+    plans = safeReadDir(plansDir).filter(f => f.endsWith('.json'))
+      .map(f => {
+        try {
+          const plan = JSON.parse(safeRead(path.join(plansDir, f)) || '{}');
+          const author = plan.generatedBy || plan.generated_by || '';
+          const summary = (plan.plan_summary || '').slice(0, 80);
+          const status = plan.status || 'unknown';
+          const project = plan.project || '';
+          return `- ${f} | ${status} | by ${author} | project: ${project} | "${summary}"`;
+        } catch { return `- ${f}`; }
+      }).join('\n');
   } catch {}
 
   // Active dispatch
