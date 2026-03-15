@@ -344,17 +344,47 @@
     "completedAt": "2026-03-15T16:48:35.591Z"
   },
   {
-    "id": "W028",
-    "title": "Create PRD from Ripley's plan",
+    "id": "W029",
+    "title": "Create PRD from ripley's plan",
     "type": "plan-to-prd",
     "priority": "medium",
-    "description": "Convert Ripley's plan into PRD items and executable tasks",
-    "status": "failed",
-    "created": "2026-03-15T17:05:19.403Z",
+    "description": "Convert ripley's plan into PRD items and executable tasks",
+    "status": "done",
+    "created": "2026-03-15T19:21:09.106Z",
     "createdBy": "dashboard",
-    "dispatched_at": "2026-03-15T17:05:43.049Z",
+    "dispatched_at": "2026-03-15T19:21:29.019Z",
     "dispatched_to": "lambert",
-    "failReason": "Orphaned — no process, silent for 1488s",
-    "failedAt": "2026-03-15T17:31:57.293Z"
+    "completedAt": "2026-03-15T19:28:45.133Z"
+  },
+  {
+    "id": "W030",
+    "title": "Convert plan to PRD: Claude Cowork UX in Bebop",
+    "type": "plan-to-prd",
+    "priority": "high",
+    "description": "Plan file: plans/plan-w025-2026-03-15.md",
+    "status": "failed",
+    "created": "2026-03-15T20:35:41.539Z",
+    "createdBy": "manual",
+    "project": "OfficeAgent",
+    "planFile": "plan-w025-2026-03-15.md",
+    "dispatched_at": "2026-03-15T20:35:42.833Z",
+    "dispatched_to": "lambert",
+    "failReason": "Orphaned — no process, silent for 1864s",
+    "failedAt": "2026-03-15T21:10:57.753Z"
+  },
+  {
+    "id": "W031",
+    "title": "Convert plan to PRD: plan-w025-2026-03-15.md",
+    "type": "plan-to-prd",
+    "priority": "high",
+    "description": "Plan file: plans/plan-w025-2026-03-15.md\nRecovery: orphaned plan with no PRD",
+    "status": "done",
+    "created": "2026-03-15T20:40:30.761Z",
+    "createdBy": "engine:recovery",
+    "project": "",
+    "planFile": "plan-w025-2026-03-15.md",
+    "dispatched_at": "2026-03-15T20:40:30.819Z",
+    "dispatched_to": "rebecca",
+    "completedAt": "2026-03-15T20:50:28.740Z"
   }
 ]

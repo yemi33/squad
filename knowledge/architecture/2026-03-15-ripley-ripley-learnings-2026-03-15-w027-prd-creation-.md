@@ -1,3 +1,10 @@
+---
+source: ripley-2026-03-15.md
+agent: ripley
+category: architecture
+date: 2026-03-15
+---
+
 # Ripley Learnings — 2026-03-15 (W027 PRD Creation)
 
 ## Task

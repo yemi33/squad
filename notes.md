@@ -244,3 +244,96 @@ _Processed 3 notes, 8 insights extracted, 5 duplicates removed._
   → see `knowledge/architecture/2026-03-15-ripley-ripley-learnings-2026-03-15.md`
 
 _Processed 3 notes, 17 insights extracted, 1 duplicate removed._
+
+---
+
+### 2026-03-15: W025/W027 PRD Conversion — Architecture & Protocol Findings
+**By:** Engine (LLM-consolidated)
+
+#### Patterns & Conventions
+- **Branch naming convention**: user/yemishin/cowork-<short-name> per team standard. (Ripley)
+  → see `knowledge/architecture/2026-03-15-ripley-ripley-learnings-2026-03-15-w027-prd-creation-.md`
+
+- **PR title format**: feat(cowork): <description> per type prefix convention. (Ripley)
+  → see `knowledge/architecture/2026-03-15-ripley-ripley-learnings-2026-03-15-w027-prd-creation-.md`
+
+- **OfficeAgent flight gating**: Features use OAGENT_FLIGHTS=<key>:true env var. (Ripley)
+  → see `knowledge/architecture/2026-03-15-ripley-ripley-learnings-2026-03-15-w027-prd-creation-.md`
+
+- **No barrel files in Bebop**: Every import must use concrete paths, not index files; enforce on all implementation tasks. (Lambert, Ripley)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **PowerShell mandatory for OfficeAgent builds**: All yarn/oagent/gulp commands must run in PowerShell; Bash/sh will fail. (Lambert, Ripley)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **OfficeAgent logging rules**: No user data in logInfo/logWarn/logError; only logDebug allows user data; enforce on all Phase 1 tasks. (Lambert, Ripley)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+#### Architecture Notes
+- **Chain-of-thought is file-only**: CoT manager uses FileHandler + QueueManager + MessageProcessor; all output to disk; zero WebSocket capability. (Lambert, Rebecca)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **Message protocol lacks real-time CoT**: MessageType enum has 91–165+ entries but no streaming types; WorkspaceChainOfThought and PptAgentCot are batch/final-state only. (Lambert, Rebecca)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **ask_user_question exists as tool, not protocol**: Referenced in ppt-agent docs but not formalized in message-protocol type enum; bidirectional ask-user-answer infrastructure missing. (Lambert)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **WebSocket handler pattern established**: 14 existing handlers in modules/api/src/websocket/handlers/; new handlers (CoT streaming, ask-user) should follow established patterns. (Lambert, Ripley)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **Dual WebSocket routing**: WebSocketRouter routes by message.type; JsonRpcRouter handles JSON-RPC 2.0 separately; both in modules/core/src/websocket/; needed for bidirectional ask-user flows. (Lambert, Rebecca)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **Routes split external/internal**: modules/api/src/routes-external.ts (HTTP endpoints) and routes-internal.ts (internal API + WebSocket registration); new AugLoop transport registers on internal routes. (Lambert, Ripley)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **Orchestrator has rich substructure**: Contains adapters/, hooks/, providers/, utils/ subdirectories plus factory.ts, cot-adapter.ts, env-builder.ts, harness-builder.ts. (Lambert, Ripley)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **CoT state machine with heuristics**: Three states (enabled/disabled/undecided); disabled when clarification questions being processed; controlled by ChainOfThoughtFlights feature gates. (Rebecca)
+  → see `knowledge/build-reports/2026-03-15-rebecca-rebecca-learnings-2026-03-15.md`
+
+- **Clarification Questions are one-way**: Grounding content parser receives them from messageAnnotations but no bidirectional protocol; user answers not formally captured. (Rebecca)
+  → see `knowledge/build-reports/2026-03-15-rebecca-rebecca-learnings-2026-03-15.md`
+
+- **AugLoop availability differs by repo**: Available in office-bohemia (@fluidx/augloop v20.28.1) but not in Bebop; test client in OfficeAgent provides reference for new implementations. (Rebecca)
+  → see `knowledge/build-reports/2026-03-15-rebecca-rebecca-learnings-2026-03-15.md`
+
+- **Bebop lacks formal feature gating**: No ECS, flight manager, or feature flag SDK; currently uses env vars, query params, and Jotai atoms; cowork feature gate requires scratch implementation. (Rebecca)
+  → see `knowledge/build-reports/2026-03-15-rebecca-rebecca-learnings-2026-03-15.md`
+
+#### Build & Test Results
+- **Yarn version mismatch**: office-bohemia uses 4.12, OfficeAgent uses 4.10.3; different TypeScript versions; cannot share cross-repo build artifacts. (Rebecca, Ripley)
+  → see `knowledge/build-reports/2026-03-15-rebecca-rebecca-learnings-2026-03-15.md`
+
+- **office-bohemia main branch is master**: Important for branch creation and PR targeting (not main). (Rebecca)
+  → see `knowledge/build-reports/2026-03-15-rebecca-rebecca-learnings-2026-03-15.md`
+
+- **Dallas's lint PR has 13 errors**: W007 introduces 11 new lint errors, 2 pre-existing; if P005/P006 build on those patterns, lint must be clean first. (Rebecca)
+  → see `knowledge/build-reports/2026-03-15-rebecca-rebecca-learnings-2026-03-15.md`
+
+#### Bugs & Gotchas
+- **Clarification protocol incomplete**: Questions are one-way only; no message types for user responses; full infrastructure needed for interactive flows. (Rebecca)
+  → see `knowledge/build-reports/2026-03-15-rebecca-rebecca-learnings-2026-03-15.md`
+
+- **PR overlap risk**: Active PRs (W007, W009) adding initial cowork scaffolding may conflict with planned scaffold task; coordination needed. (Rebecca)
+  → see `knowledge/build-reports/2026-03-15-rebecca-rebecca-learnings-2026-03-15.md`
+
+#### Action Items
+- **Parallel branch strategy required**: Cross-repo work (OfficeAgent + office-bohemia) must use parallel independent branches due to different build systems. (Lambert)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **Use mirrored types for cross-repo work**: OfficeAgent message types must be mirrored in office-bohemia to avoid cross-repo build artifact dependencies. (Lambert, Ripley)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+- **Feature gating as priority task**: Feature gate task should ship early (low dependencies) to ensure proper route protection before functional code lands. (Ripley)
+  → see `knowledge/architecture/2026-03-15-ripley-ripley-learnings-2026-03-15-w027-prd-creation-.md`
+
+- **Wave 1 supports 6 parallel tasks**: 3 OfficeAgent items (transport, CoT streaming, scaffold) + 3 office-bohemia items can proceed simultaneously. (Ripley)
+  → see `knowledge/architecture/2026-03-15-ripley-ripley-learnings-2026-03-15-w027-prd-creation-.md`
+
+- **Verify AugLoop dev endpoint before starting**: localhost:11040 requires local AugLoop service; check availability before transport implementation begins. (Lambert)
+  → see `knowledge/build-reports/2026-03-15-lambert-lambert-learnings-2026-03-15-w025-prd-conversion-.md`
+
+_Processed 3 notes, 27 insights extracted, 6 duplicates removed._
