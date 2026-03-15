@@ -27,3 +27,5 @@ No dependencies — uses only Node.js built-ins.
 - `playbooks/*.md` — Task templates with `{{variables}}`
 - `agents/*/charter.md` — Agent role definitions
 - `routing.md` — Dispatch routing rules
+- `plans/` — Approved plans (`plans/{project}-{date}.json`), materialized as work items by engine
+- `knowledge/` — Knowledge base (categories: architecture, conventions, project-notes, build-reports, reviews)

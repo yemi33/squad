@@ -87,7 +87,7 @@ Run `squad status` and tell me what my squad is doing
 ### What happens on first run
 
 1. The engine starts ticking every 60 seconds
-2. It scans each linked project for work: PRs needing review, PRD gaps, queued work items
+2. It scans each linked project for work: PRs needing review, plan items, queued work items
 3. If it finds work and an agent is idle, it spawns a Claude Code session with the right playbook
 4. You can watch progress on the dashboard or via `squad status`
 
@@ -130,7 +130,8 @@ You can also run scripts directly: `node ~/.squad/engine.js start`, `node ~/.squ
                     │  config.json      ← projects  │
                     │  agents/          ← 5 agents  │
                     │  playbooks/       ← templates │
-                    │  prd.json         ← squad PRD │
+                    │  plans/           ← approved plans│
+                    │  knowledge/       ← KB store  │
                     │  skills/          ← workflows │
                     │  notes/       ← knowledge  │
                     └──────┬────────────────────────┘
@@ -149,9 +150,16 @@ You can also run scripts directly: `node ~/.squad/engine.js start`, `node ~/.squ
 
 ## What It Does
 
-- **Auto-discovers work** from squad-level PRD (multi-project), pull requests, and work queues across all linked projects
+- **Auto-discovers work** from plans (`plans/*.json`), pull requests, and work queues across all linked projects
+- **Plan pipeline** — `/plan` spawns a plan agent, chains to plan-to-prd, produces `plans/{project}-{date}.json` with `status: "awaiting-approval"`. Supports shared-branch and parallel strategies.
+- **Human approval gate** — plans require approval before materializing as work items. Dashboard provides Approve / Discuss & Revise / Reject. Discussion launches an interactive Claude Code session.
 - **Dispatches AI agents** (Claude CLI) with full project context, git worktrees, and MCP server access
 - **Routes intelligently** — fixes first, then reviews, then implementation, matched to agent strengths
+- **LLM-powered consolidation** — Haiku summarizes notes (threshold: 3 files). Regex fallback. Source references required.
+- **Knowledge base** — `knowledge/` with categories: architecture, conventions, project-notes, build-reports, reviews. Full notes preserved. Dashboard browsable with inline Q&A.
+- **Token tracking** — per-agent and per-day usage. Dashboard Token Usage panel.
+- **Engine watchdog** — dashboard auto-restarts dead engine.
+- **Agent re-attachment** — on restart, finds surviving agent processes via PID files.
 - **Learns from itself** — agents write findings, engine consolidates into institutional knowledge
 - **Tracks quality** — approval rates, error rates, and task metrics per agent
 - **Shares workflows** — agents create reusable skills (Claude Code-compatible) that all other agents can follow
@@ -167,16 +175,19 @@ You can also run scripts directly: `node ~/.squad/engine.js start`, `node ~/.squ
 The web dashboard at `http://localhost:7331` provides:
 
 - **Projects bar** — all linked projects with descriptions (hover for full text)
-- **Command Center** — add work items, notes, plans, and PRD items (multi-project via `#project` tags)
-- **Squad Members** — agent cards with status, click for charter/history/output detail panel
+- **Command Center** — add work items, notes, plans (multi-project via `#project` tags). "make a plan for..." auto-detection, "remember" keyword, `--parallel`/`--shared` flags, arrow key history, Past Commands modal.
+- **Squad Members** — agent cards with status and result summary, click for charter/history/output detail panel
   - **Live Output tab** — real-time streaming output for working agents (auto-refreshes every 3s)
 - **Work Items** — paginated table with status, source, type, priority, assigned agent, linked PRs, fan-out badges, and retry button for failed items
-- **PRD** — gap analysis stats + progress bar with item-level breakdown and linked PRs per item
+- **Plans** — plan approval UI with Approve / Discuss & Revise / Reject
+- **Knowledge Base** — browsable by category with inline Q&A (Haiku-powered)
+- **Token Usage** — per-agent and per-day token tracking
 - **Pull Requests** — paginated PR tracker sorted by date, with review/build/merge status
 - **Skills** — agent-created reusable workflows (squad-wide + project-specific), click to view full content
-- **Notes Inbox + Team Notes** — learnings and team rules
+- **Notes Inbox + Team Notes** — learnings and team rules, editable from dashboard modal
 - **Dispatch Queue + Engine Log** — active/pending work and audit trail
 - **Agent Metrics** — tasks completed, errors, PRs created/approved/rejected, approval rates
+- **Document modals** — inline Q&A with Haiku on any document modal
 
 ## Project Config
 
@@ -288,7 +299,7 @@ The engine discovers work from 5 sources, in priority order:
 |----------|--------|---------------|
 | 1 | PRs with changes-requested | `fix` |
 | 2 | PRs pending review | `review` |
-| 3 | Squad PRD items (missing/planned, multi-project) | `implement` |
+| 3 | Plan items (`plans/*.json`, approved) | `implement` |
 | 4 | Per-project work items | item's `type` |
 | 5 | Central work items | item's `type` |
 
@@ -310,8 +321,8 @@ No bash or shell involved — Node spawns Node directly. Prompts with special ch
 
 ### What Each Agent Gets
 
-- **System prompt** — identity, charter, history, project context, critical rules, skill index, team notes
-- **Task prompt** — rendered playbook with `{{variables}}` filled from config
+- **System prompt** — lean (~2-4KB) identity + rules only
+- **Task prompt** — rendered playbook with `{{variables}}` filled from config, plus bulk context (charter, history, project context, skill index, team notes)
 - **Working directory** — project root (agent creates worktrees as needed)
 - **MCP servers** — inherited from `~/.claude.json` (no extra config needed)
 - **Full tool access** — all built-in tools plus all MCP tools
@@ -356,6 +367,9 @@ Routing rules in `routing.md`. Charters in `agents/{name}/charter.md`. Both are 
 | `test.md` | Run tests and report results |
 | `build-and-test.md` | Build project and run test suite |
 | `plan-to-prd.md` | Convert a plan into PRD gap items |
+| `plan.md` | Generate a plan from user request |
+| `implement-shared.md` | Implement on a shared branch (multiple agents) |
+| `ask.md` | Answer a question about the codebase |
 
 All playbooks use `{{template_variables}}` filled from project config. The `work-item.md` playbook uses `{{scope_section}}` to inject project-specific or multi-project context. Playbooks are fully customizable — edit them to match your workflow.
 
@@ -385,10 +399,13 @@ Manual cleanup: `squad cleanup`
 
 ## Self-Improvement Loop
 
-Five mechanisms that make the squad get better over time:
+Six mechanisms that make the squad get better over time:
 
 ### 1. Learnings Inbox → notes.md
-Agents write findings to `notes/inbox/`. Engine consolidates at 5+ files into `notes.md` — categorized (reviews, feedback, learnings, other) with one-line summaries. Auto-prunes at 50KB. Injected into every future playbook.
+Agents write findings to `notes/inbox/`. Engine consolidates at 3+ files using Haiku LLM summarization (regex fallback) into `notes.md` — categorized with source references. Auto-prunes at 50KB. Injected into every future playbook.
+
+### 6. Knowledge Base
+`knowledge/` stores full notes by category: architecture, conventions, project-notes, build-reports, reviews. Browsable in dashboard with inline Q&A (Haiku-powered).
 
 ### 2. Per-Agent History
 `agents/{name}/history.md` tracks last 20 tasks with timestamps, results, projects, and branches. Injected into the agent's system prompt so it remembers past work.
@@ -412,11 +429,11 @@ Engine behavior is controlled via `config.json`. Key settings:
 {
   "engine": {
     "tickInterval": 60000,
-    "maxConcurrent": 3,
+    "maxConcurrent": 5,
     "agentTimeout": 600000,
     "staleThreshold": 1800000,
     "maxTurns": 100,
-    "inboxConsolidateThreshold": 5
+    "inboxConsolidateThreshold": 3
   }
 }
 ```
@@ -424,11 +441,11 @@ Engine behavior is controlled via `config.json`. Key settings:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `tickInterval` | 60000 (1min) | Milliseconds between engine ticks |
-| `maxConcurrent` | 3 | Max agents running simultaneously |
+| `maxConcurrent` | 5 | Max agents running simultaneously |
 | `agentTimeout` | 600000 (10min) | Kill agents silent longer than this |
 | `staleThreshold` | 1800000 (30min) | Kill stale dispatch entries |
 | `maxTurns` | 100 | Max Claude CLI turns per agent session |
-| `inboxConsolidateThreshold` | 5 | Inbox files needed before consolidation |
+| `inboxConsolidateThreshold` | 3 | Inbox files needed before consolidation |
 
 ## Node.js Upgrade Caution
 
@@ -466,8 +483,9 @@ To move to a new machine: `npm install -g @yemi33/squad && squad init --force`, 
   dashboard.js           <- Web dashboard server
   dashboard.html         <- Dashboard UI (single-file)
   config.json            <- projects[], agents, engine, claude settings
-  prd.json               <- Squad-level PRD (multi-project items)
   config.template.json   <- Template for new installs
+  plans/                 <- Approved plans (plans/{project}-{date}.json)
+  knowledge/             <- KB: architecture, conventions, project-notes, build-reports, reviews
   package.json           <- npm package definition
   routing.md             <- Dispatch rules table (editable)
   team.md                <- Team roster
@@ -482,6 +500,9 @@ To move to a new machine: `npm install -g @yemi33/squad && squad init --force`, 
     test.md              <- Run tests
     build-and-test.md    <- Build project and run test suite
     plan-to-prd.md       <- Convert plan to PRD gap items
+    plan.md              <- Generate a plan from user request
+    implement-shared.md  <- Implement on a shared branch
+    ask.md               <- Answer a question about the codebase
   skills/
     README.md            <- Skill format guide
     <name>.md            <- Agent-created reusable workflows
