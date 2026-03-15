@@ -485,6 +485,34 @@ function getStatus() {
   };
 }
 
+// -- Triage context for Haiku LLM --
+
+function getTriageContext() {
+  const agents = getAgents().map(a => `- ${a.name} (${a.id}): ${a.status}${a.currentTask ? ' — ' + a.currentTask.slice(0, 60) : ''}`).join('\n');
+  const projects = PROJECTS.map(p => `- ${p.name}: ${(p.description || '').slice(0, 60)}`).join('\n');
+
+  // Recent work items (last 10, non-archived)
+  const wi = getWorkItems().slice(-10).map(i =>
+    `- ${i.id}: "${i.title.slice(0, 60)}" [${i.type}] ${i.status}${i.dispatched_to ? ' → ' + i.dispatched_to : ''}`
+  ).join('\n');
+
+  // Plans
+  const plansDir = path.join(SQUAD_DIR, 'plans');
+  let plans = '';
+  try {
+    plans = safeReadDir(plansDir).filter(f => f.endsWith('.md') || f.endsWith('.json'))
+      .map(f => `- ${f}`).join('\n');
+  } catch {}
+
+  // Active dispatch
+  const dq = getDispatchQueue();
+  const active = (dq.active || []).map(d =>
+    `- ${d.agentName || d.agent}: ${(d.task || '').slice(0, 50)}`
+  ).join('\n');
+
+  return { agents, projects, workItems: wi, plans, activeDispatch: active };
+}
+
 // -- POST helpers --
 
 function readBody(req) {
@@ -820,6 +848,135 @@ const server = http.createServer(async (req, res) => {
       safeWrite(path.join(plansDir, planFile), plan);
       return jsonReply(res, 200, { ok: true, id, file: planFile });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
+  // POST /api/triage — Haiku LLM command triage for natural language input
+  if (req.method === 'POST' && req.url === '/api/triage') {
+    try {
+      const body = await readBody(req);
+      if (!body.message) return jsonReply(res, 400, { error: 'message required' });
+
+      const ctx = getTriageContext();
+      const sysPrompt = `You are a triage assistant for a software engineering squad called "Squad."
+Given a user command, determine the intent and return structured JSON.
+
+## Squad Context
+
+### Agents
+${ctx.agents}
+
+### Projects
+${ctx.projects}
+
+### Recent Work Items
+${ctx.workItems}
+
+### Plans on Disk
+${ctx.plans}
+
+### Currently Active
+${ctx.activeDispatch}
+
+## Available Intents
+
+- "work-item": A task for an agent. Types: ask, explore, fix, review, test, implement
+- "note": A decision, reminder, or knowledge to save (keywords: remember, note, don't forget)
+- "plan": Create a multi-step implementation plan (keywords: plan, design, architect)
+- "prd": Add a feature/backlog item to the PRD
+
+## Rules
+
+1. Explicit prefixes override everything: /plan → plan, /note or /decide → note, /prd → prd
+2. @mentions map to agent IDs. @everyone or @all → fanout=true
+3. #tags map to project names from the project list above
+4. !high or !urgent → priority "high"; !low → "low"; default "medium"
+5. For work items, pick the best type:
+   - ask: user wants an explanation or answer (explain, why, what does, how)
+   - explore: user wants research, analysis, investigation, or document review
+   - fix: bugs, errors, broken things
+   - review: PR/code review specifically (not document review)
+   - test: build, run, verify, test
+   - implement: build something new, create, add feature
+6. When the user references an agent's work ("ripley's plan", "what dallas found"),
+   resolve it to a specific artifact from the work items or plans list above.
+   Include the resolved file path or work item ID in the description.
+7. If the user references "the plan" or "latest plan" without specifying an agent,
+   use the most recent plan from the plans list.
+8. Default branchStrategy for plans: "parallel"
+9. Be concise in title and description — the title should be action-oriented,
+   the description should include any resolved references or context.
+
+## Output Format
+
+Respond with ONLY a JSON object, no markdown fences, no explanation:
+{
+  "intent": "work-item|note|plan|prd",
+  "title": "concise action title",
+  "description": "additional context, resolved references",
+  "type": "ask|explore|fix|review|test|implement",
+  "priority": "low|medium|high",
+  "agents": ["agent-id"] or [],
+  "fanout": false,
+  "project": "project-name or empty string",
+  "projects": [],
+  "branchStrategy": "parallel"
+}`;
+
+      const userPrompt = `Classify this command and return ONLY a JSON object. No explanation, no markdown fences, no conversation.
+
+User command: ${body.message}`;
+      const id = Date.now();
+      const promptPath = path.join(SQUAD_DIR, 'engine', 'triage-prompt-' + id + '.md');
+      const sysPath = path.join(SQUAD_DIR, 'engine', 'triage-sys-' + id + '.md');
+      safeWrite(promptPath, userPrompt);
+      safeWrite(sysPath, sysPrompt);
+
+      const spawnScript = path.join(SQUAD_DIR, 'engine', 'spawn-agent.js');
+      const childEnv = { ...process.env };
+      for (const key of Object.keys(childEnv)) {
+        if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) delete childEnv[key];
+      }
+
+      const { spawn: cpSpawn } = require('child_process');
+      const proc = cpSpawn(process.execPath, [
+        spawnScript, promptPath, sysPath,
+        '--output-format', 'text', '--max-turns', '1', '--model', 'haiku',
+        '--permission-mode', 'bypassPermissions',
+      ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv });
+
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', d => { stdout += d.toString(); });
+      proc.stderr.on('data', d => { stderr += d.toString(); });
+
+      const timeout = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} }, 30000);
+
+      proc.on('close', (code) => {
+        clearTimeout(timeout);
+        try { fs.unlinkSync(promptPath); } catch {}
+        try { fs.unlinkSync(sysPath); } catch {}
+
+        if (code === 0 && stdout.trim()) {
+          let output = stdout.trim();
+          // Strip markdown fences if Haiku wraps the JSON
+          output = output.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+          try {
+            return jsonReply(res, 200, JSON.parse(output));
+          } catch {
+            return jsonReply(res, 500, { error: 'Invalid triage response', raw: output.slice(0, 500) });
+          }
+        }
+        return jsonReply(res, 500, { error: 'Triage failed', code, stderr: stderr.slice(0, 300) });
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        try { fs.unlinkSync(promptPath); } catch {}
+        try { fs.unlinkSync(sysPath); } catch {}
+        return jsonReply(res, 500, { error: 'Triage spawn error: ' + err.message });
+      });
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+    return;
   }
 
   // GET /api/agent/:id/live — tail live output for a working agent

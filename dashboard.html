@@ -2213,14 +2213,34 @@ function cmdKeyDown(e) {
   }
 }
 
+// Triage via Haiku LLM, fallback to regex parser
+async function cmdTriageAndSubmit(raw) {
+  try {
+    const resp = await fetch('/api/triage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: raw }),
+      signal: AbortSignal.timeout(35000),
+    });
+    if (resp.ok) {
+      const parsed = await resp.json();
+      if (parsed.intent && parsed.title) return parsed;
+    }
+  } catch (e) {
+    console.warn('Triage failed, using regex fallback:', e.message);
+  }
+  return cmdParseInput(raw);
+}
+
 // Unified submit
 async function cmdSubmit() {
   const input = document.getElementById('cmd-input');
   const raw = input.value.trim();
   if (!raw) return showToast('cmd-toast', 'Type something first', false);
 
-  const parsed = cmdParseInput(raw);
   const btn = document.getElementById('cmd-send-btn');
+  btn.textContent = '...';
+  const parsed = await cmdTriageAndSubmit(raw);
   btn.disabled = true;
 
   try {
@@ -2245,6 +2265,7 @@ async function cmdSubmit() {
     showToast('cmd-toast', 'Error: ' + e.message, false);
   } finally {
     btn.disabled = false;
+    btn.innerHTML = 'Send <kbd>Ctrl+Enter</kbd>';
   }
 }
 
