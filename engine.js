@@ -820,9 +820,10 @@ function spawnAgent(dispatchItem, config) {
     // Update quality metrics
     updateMetrics(agentId, dispatchItem, code === 0 ? 'success' : 'error', taskUsage, prsCreatedCount);
 
-    // Cleanup temp files
+    // Cleanup temp files (including PID file now that dispatch is complete)
     try { fs.unlinkSync(sysPromptPath); } catch {}
     try { fs.unlinkSync(promptPath); } catch {}
+    try { fs.unlinkSync(promptPath.replace(/prompt-/, 'pid-').replace(/\.md$/, '.pid')); } catch {}
 
     log('info', `Agent ${agentId} completed. Output saved to ${outputPath}`);
   });
@@ -857,6 +858,7 @@ function spawnAgent(dispatchItem, config) {
   }
 
   // Verify spawn after 5 seconds via PID file written by spawn-agent.js
+  // PID file is kept (not deleted) so engine can re-attach on restart
   setTimeout(() => {
     const pidFile = promptPath.replace(/prompt-/, 'pid-').replace(/\.md$/, '.pid');
     try {
@@ -864,12 +866,10 @@ function spawnAgent(dispatchItem, config) {
       if (pidStr) {
         log('info', `Agent ${agentId} verified via PID file: ${pidStr}`);
       }
-      try { fs.unlinkSync(pidFile); } catch {}
+      // Don't delete — keep for re-attachment on engine restart
     } catch {
-      // No PID file — check if live output exists (spawn-agent.js may have written it)
       if (!fs.existsSync(liveOutputPath) || fs.statSync(liveOutputPath).size <= 200) {
         log('error', `Agent ${agentId} (${id}) — no PID file and no output after 5s. Spawn likely failed.`);
-        // Don't mark as error yet — heartbeat will catch it at 5min
       }
     }
   }, 5000);
@@ -4090,15 +4090,72 @@ const commands = {
     // Load persistent state
     loadCooldowns();
 
-    // Grace period for agents that survived a restart
+    // Re-attach to surviving agent processes from previous session
     const dispatch = getDispatch();
     const activeOnStart = (dispatch.active || []);
     if (activeOnStart.length > 0) {
-      const gracePeriod = config.engine?.restartGracePeriod || 1200000; // 20min default
-      engineRestartGraceUntil = Date.now() + gracePeriod;
-      console.log(`  ${activeOnStart.length} active dispatch(es) from previous session — ${gracePeriod / 60000}min grace period before orphan detection`);
+      let reattached = 0;
       for (const item of activeOnStart) {
-        console.log(`    - ${item.agentName || item.agent}: ${(item.task || '').slice(0, 70)}`);
+        // Try to find the agent's PID: check status.json, or scan for live-output.log activity
+        const agentId = item.agent;
+        let agentPid = null;
+
+        // Method 1: Check PID file (if it wasn't cleaned up)
+        const pidFile = path.join(ENGINE_DIR, `pid-${item.id}.pid`);
+        try {
+          const pidStr = fs.readFileSync(pidFile, 'utf8').trim();
+          if (pidStr) agentPid = parseInt(pidStr);
+        } catch {}
+
+        // Method 2: Check agent status.json for dispatch_id match
+        if (!agentPid) {
+          const status = getAgentStatus(agentId);
+          if (status.dispatch_id === item.id) {
+            // Agent was working on this dispatch — check if any process is producing output
+            const liveLog = path.join(AGENTS_DIR, agentId, 'live-output.log');
+            try {
+              const stat = fs.statSync(liveLog);
+              const ageMs = Date.now() - stat.mtimeMs;
+              if (ageMs < 300000) { // live-output modified in last 5 min — agent likely alive
+                agentPid = -1; // sentinel: alive but unknown PID
+              }
+            } catch {}
+          }
+        }
+
+        // Verify PID is actually alive
+        if (agentPid && agentPid > 0) {
+          try {
+            if (process.platform === 'win32') {
+              const out = execSync(`tasklist /FI "PID eq ${agentPid}" /NH`, { encoding: 'utf8', timeout: 3000 });
+              if (!out.includes(String(agentPid))) agentPid = null;
+            } else {
+              process.kill(agentPid, 0);
+            }
+          } catch { agentPid = null; }
+        }
+
+        if (agentPid) {
+          // Re-attach: add sentinel to activeProcesses so orphan detector knows it's alive
+          activeProcesses.set(item.id, { proc: { pid: agentPid > 0 ? agentPid : null }, agentId, startedAt: item.created_at, reattached: true });
+          reattached++;
+          log('info', `Re-attached to ${agentId} (${item.id}) — PID ${agentPid > 0 ? agentPid : 'unknown (active output)'}`);
+        }
+      }
+
+      // Grace period only for dispatches we couldn't re-attach to
+      const unattached = activeOnStart.length - reattached;
+      if (unattached > 0) {
+        const gracePeriod = config.engine?.restartGracePeriod || 1200000; // 20min default
+        engineRestartGraceUntil = Date.now() + gracePeriod;
+        console.log(`  ${unattached} unattached dispatch(es) — ${gracePeriod / 60000}min grace period`);
+      }
+      if (reattached > 0) {
+        console.log(`  Re-attached to ${reattached} surviving agent(s)`);
+      }
+      for (const item of activeOnStart) {
+        const attached = activeProcesses.has(item.id);
+        console.log(`    ${attached ? '✓' : '?'} ${item.agentName || item.agent}: ${(item.task || '').slice(0, 70)}`);
       }
     }
 
