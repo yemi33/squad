@@ -3861,6 +3861,23 @@ function discoverCentralWorkItems(config) {
         item._planFileName = planFileName;
       }
 
+      // Inject plan-to-prd variables — read the plan file content for the playbook
+      if (workType === 'plan-to-prd' && item.planFile) {
+        if (!fs.existsSync(PLANS_DIR)) fs.mkdirSync(PLANS_DIR, { recursive: true });
+        const planPath = path.join(PLANS_DIR, item.planFile);
+        try {
+          vars.plan_content = fs.readFileSync(planPath, 'utf8');
+        } catch (e) {
+          log('warn', `plan-to-prd: could not read plan file ${item.planFile} for ${item.id}: ${e.message}`);
+          vars.plan_content = item.description || '';
+        }
+        vars.plan_summary = (item.title || item.planFile).substring(0, 80);
+        vars.project_name_lower = (firstProject?.name || 'project').toLowerCase();
+        vars.branch_strategy_hint = item.branchStrategy
+          ? `The user requested **${item.branchStrategy}** strategy. Use this unless the analysis strongly suggests otherwise.`
+          : 'Choose the best strategy based on your analysis of item dependencies.';
+      }
+
       // Inject ask-specific variables for the ask playbook
       if (workType === 'ask') {
         vars.question = item.title + (item.description ? '\n\n' + item.description : '');
@@ -3897,7 +3914,7 @@ function discoverCentralWorkItems(config) {
         agentRole,
         task: item.title || item.description?.slice(0, 80) || item.id,
         prompt,
-        meta: { dispatchKey: key, source: 'central-work-item', item, planFileName: item._planFileName || null }
+        meta: { dispatchKey: key, source: 'central-work-item', item, planFileName: item.planFile || item._planFileName || null }
       });
 
       item.status = 'dispatched';
