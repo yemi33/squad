@@ -24,6 +24,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, execSync } = require('child_process');
+const shared = require('./engine/shared');
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -87,26 +88,7 @@ function validateConfig(config) {
   }
 }
 
-function getProjects(config) {
-  if (config.projects && Array.isArray(config.projects)) {
-    return config.projects;
-  }
-  // Legacy single-project: derive localPath from .squad parent
-  const proj = config.project || {};
-  if (!proj.localPath) proj.localPath = path.resolve(SQUAD_DIR, '..');
-  if (!proj.workSources) proj.workSources = config.workSources || {};
-  return [proj];
-}
-
-function projectRoot(project) {
-  return path.resolve(project.localPath);
-}
-
-function projectWorkItemsPath(project) {
-  const wiSrc = project.workSources?.workItems;
-  if (wiSrc?.path) return path.resolve(projectRoot(project), wiSrc.path);
-  return path.join(projectRoot(project), '.squad', 'work-items.json');
-}
+const { getProjects, projectRoot, projectWorkItemsPath, projectPrPath, nextWorkItemId, getAdoOrgBase, sanitizeBranch, parseSkillFrontmatter, safeReadDir } = shared;
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -114,43 +96,9 @@ function ts() { return new Date().toISOString(); }
 function logTs() { return new Date().toLocaleTimeString(); }
 function dateStamp() { return new Date().toISOString().slice(0, 10); }
 
-function safeJson(p) {
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
-}
-
-function safeRead(p) {
-  try { return fs.readFileSync(p, 'utf8'); } catch { return ''; }
-}
-
-function safeWrite(p, data) {
-  const dir = path.dirname(p);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  const tmp = p + '.tmp.' + process.pid;
-  try {
-    fs.writeFileSync(tmp, content);
-    // Atomic rename — retry on Windows EPERM (file locking)
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        fs.renameSync(tmp, p);
-        return;
-      } catch (e) {
-        if (e.code === 'EPERM' && attempt < 4) {
-          const delay = 50 * (attempt + 1); // 50, 100, 150, 200ms
-          const start = Date.now(); while (Date.now() - start < delay) {}
-          continue;
-        }
-        // Final attempt failed — fall through to direct write
-      }
-    }
-    // All rename attempts failed — direct write as fallback (not atomic but won't lose data)
-    try { fs.unlinkSync(tmp); } catch {}
-    fs.writeFileSync(p, content);
-  } catch {
-    // Even direct write failed — clean up tmp silently
-    try { fs.unlinkSync(tmp); } catch {}
-  }
-}
+const safeJson = shared.safeJson;
+const safeRead = (p) => shared.safeRead(p) || '';  // engine.js historically returns '' not null
+const safeWrite = shared.safeWrite;
 
 function log(level, msg, meta = {}) {
   const entry = { timestamp: ts(), level, message: msg, ...meta };
@@ -236,23 +184,7 @@ function collectSkillFiles() {
   return skillFiles;
 }
 
-function parseSkillFrontmatter(content, filename) {
-  let name = filename.replace('.md', '');
-  let trigger = '', description = '', project = 'any', author = '', created = '', allowedTools = '';
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-  if (fmMatch) {
-    const fm = fmMatch[1];
-    const m = (key) => { const r = fm.match(new RegExp(`^${key}:\\s*(.+)$`, 'm')); return r ? r[1].trim() : ''; };
-    name = m('name') || name;
-    trigger = m('trigger');
-    description = m('description');
-    project = m('project') || 'any';
-    author = m('author');
-    created = m('created');
-    allowedTools = m('allowed-tools');
-  }
-  return { name, trigger, description, project, author, created, allowedTools };
-}
+// parseSkillFrontmatter imported from shared.js
 
 function getSkillIndex() {
   try {
@@ -682,9 +614,7 @@ function buildAgentContext(agentId, config, project) {
   return context;
 }
 
-function sanitizeBranch(name) {
-  return String(name).replace(/[^a-zA-Z0-9._\-\/]/g, '-').slice(0, 200);
-}
+// sanitizeBranch imported from shared.js
 
 // ─── Agent Spawner ──────────────────────────────────────────────────────────
 
@@ -926,7 +856,7 @@ function spawnAgent(dispatchItem, config) {
     try { fs.unlinkSync(promptPath); } catch {}
     try { fs.unlinkSync(promptPath.replace(/prompt-/, 'pid-').replace(/\.md$/, '.pid')); } catch {}
 
-    log('info', `Agent ${agentId} completed. Output saved to ${outputPath}`);
+    log('info', `Agent ${agentId} completed. Output saved to ${archivePath}`);
   });
 
   proc.on('error', (err) => {
@@ -1108,11 +1038,7 @@ function checkPlanCompletion(meta, config) {
     return;
   }
   log('info', `All ${planItems.length} items in plan ${planFile} completed — creating PR work item`);
-  const maxNum = workItems.reduce((max, i) => {
-    const m = (i.id || '').match(/(\d+)$/);
-    return m ? Math.max(max, parseInt(m[1])) : max;
-  }, 0);
-  const id = 'PL-W' + String(maxNum + 1).padStart(3, '0');
+  const id = nextWorkItemId(workItems, 'PL-W');
   const featureBranch = plan.feature_branch;
   const mainBranch = project.mainBranch || 'main';
   const itemSummary = planItems.map(w => '- ' + w.planItemId + ': ' + w.title.replace('Implement: ', '')).join('\n');
@@ -1217,12 +1143,8 @@ function chainPlanToPrd(dispatchItem, meta, config) {
   const wiPath = path.join(SQUAD_DIR, 'work-items.json');
   let items = [];
   try { items = JSON.parse(fs.readFileSync(wiPath, 'utf8')); } catch {}
-  const maxNum = items.reduce((max, i) => {
-    const m = (i.id || '').match(/(\d+)$/);
-    return m ? Math.max(max, parseInt(m[1])) : max;
-  }, 0);
   items.push({
-    id: 'W' + String(maxNum + 1).padStart(3, '0'),
+    id: nextWorkItemId(items, 'W'),
     title: `Convert plan to PRD: ${meta?.item?.title || planFile.name}`,
     type: 'plan-to-prd',
     priority: meta?.item?.priority || 'high',
@@ -1406,9 +1328,7 @@ function syncPrsFromOutput(output, agentId, meta, config) {
   if (!targetProject) targetProject = projects[0];
   if (!targetProject) return;
 
-  const root = path.resolve(targetProject.localPath);
-  const prSrc = targetProject.workSources?.pullRequests || {};
-  const prPath = path.resolve(root, prSrc.path || '.squad/pull-requests.json');
+  const prPath = projectPrPath(targetProject);
   const prs = safeJson(prPath) || [];
 
   const agentName = config.agents?.[agentId]?.name || agentId;
@@ -1492,9 +1412,7 @@ function updatePrAfterReview(agentId, pr, project) {
     safeWrite(metricsPath, metrics);
   }
 
-  const root = project?.localPath ? path.resolve(project.localPath) : path.resolve(SQUAD_DIR, '..');
-  const prPath = project?.workSources?.pullRequests?.path || '.squad/pull-requests.json';
-  safeWrite(path.resolve(root, prPath), prs);
+  safeWrite(project ? projectPrPath(project) : path.join(path.resolve(SQUAD_DIR, '..'), '.squad', 'pull-requests.json'), prs);
   log('info', `Updated ${pr.id} → squad review: ${squadVerdict} by ${reviewerName}`);
 
   // Create feedback for the PR author so they learn from the review
@@ -1515,9 +1433,7 @@ function updatePrAfterFix(pr, project) {
     fixedAt: ts()
   };
 
-  const root = project?.localPath ? path.resolve(project.localPath) : path.resolve(SQUAD_DIR, '..');
-  const prPath = project?.workSources?.pullRequests?.path || '.squad/pull-requests.json';
-  safeWrite(path.resolve(root, prPath), prs);
+  safeWrite(project ? projectPrPath(project) : path.join(path.resolve(SQUAD_DIR, '..'), '.squad', 'pull-requests.json'), prs);
   log('info', `Updated ${pr.id} → squad review: waiting (fix pushed)`);
 }
 
@@ -1597,16 +1513,7 @@ async function pollPrStatus(config) {
       if (!prNum) continue;
 
       try {
-        let orgBase;
-        if (project.prUrlBase) {
-          const m = project.prUrlBase.match(/^(https?:\/\/[^/]+(?:\/DefaultCollection)?)/);
-          if (m) orgBase = m[1];
-        }
-        if (!orgBase) {
-          orgBase = project.adoOrg.includes('.')
-            ? `https://${project.adoOrg}`
-            : `https://dev.azure.com/${project.adoOrg}`;
-        }
+        const orgBase = getAdoOrgBase(project);
 
         const repoBase = `${orgBase}/${project.adoProject}/_apis/git/repositories/${project.repositoryId}/pullrequests/${prNum}`;
 
@@ -1701,9 +1608,7 @@ async function pollPrStatus(config) {
     }
 
     if (projectUpdated > 0) {
-      const root = path.resolve(project.localPath);
-      const prSrc = project.workSources?.pullRequests || {};
-      const prPath = path.resolve(root, prSrc.path || '.squad/pull-requests.json');
+      const prPath = projectPrPath(project);
       safeWrite(prPath, prs);
       totalUpdated += projectUpdated;
     }
@@ -1737,16 +1642,7 @@ async function pollPrHumanComments(config) {
       if (!prNum) continue;
 
       try {
-        let orgBase;
-        if (project.prUrlBase) {
-          const m = project.prUrlBase.match(/^(https?:\/\/[^/]+(?:\/DefaultCollection)?)/);
-          if (m) orgBase = m[1];
-        }
-        if (!orgBase) {
-          orgBase = project.adoOrg.includes('.')
-            ? `https://${project.adoOrg}`
-            : `https://dev.azure.com/${project.adoOrg}`;
-        }
+        const orgBase = getAdoOrgBase(project);
 
         const threadsUrl = `${orgBase}/${project.adoProject}/_apis/git/repositories/${project.repositoryId}/pullrequests/${prNum}/threads?api-version=7.1`;
         const threadsData = await adoFetch(threadsUrl, token);
@@ -1809,9 +1705,7 @@ async function pollPrHumanComments(config) {
     }
 
     if (projectUpdated > 0) {
-      const root = path.resolve(project.localPath);
-      const prSrc = project.workSources?.pullRequests || {};
-      const prPath = path.resolve(root, prSrc.path || '.squad/pull-requests.json');
+      const prPath = projectPrPath(project);
       safeWrite(prPath, prs);
       totalUpdated += projectUpdated;
     }
@@ -2893,8 +2787,7 @@ function runCleanup(config, verbose = false) {
     if (!fs.existsSync(worktreeRoot)) continue;
 
     // Get PRs for this project
-    const prSrc = project.workSources?.pullRequests || {};
-    const prs = safeJson(path.resolve(root, prSrc.path || '.squad/pull-requests.json')) || [];
+    const prs = safeJson(projectPrPath(project)) || [];
     const mergedBranches = new Set();
     for (const pr of prs) {
       if (pr.status === 'merged' || pr.status === 'abandoned' || pr.status === 'completed') {
@@ -3179,11 +3072,7 @@ function materializePlansAsWorkItems(config) {
       // Skip if already materialized
       if (existingItems.some(w => w.sourcePlan === file && w.sourcePlanItem === item.id)) continue;
 
-      const maxNum = existingItems.reduce((max, i) => {
-        const m = (i.id || '').match(/(\d+)$/);
-        return m ? Math.max(max, parseInt(m[1])) : max;
-      }, 0);
-      const id = 'PL-W' + String(maxNum + 1).padStart(3, '0');
+      const id = nextWorkItemId(existingItems, 'PL-W');
 
       const complexity = item.estimated_complexity || 'medium';
       const criteria = (item.acceptance_criteria || []).map(c => `- ${c}`).join('\n');
@@ -3483,10 +3372,7 @@ function discoverFromPrs(config, project) {
 
   // Batch-write PR state changes (buildTested flags) once after the loop
   if (newWork.some(w => w.meta?.source === 'pr-build-test')) {
-    const prRoot = path.resolve(project.localPath);
-    const prSrc = project.workSources?.pullRequests || {};
-    const prPath = path.resolve(prRoot, prSrc.path || '.squad/pull-requests.json');
-    safeWrite(prPath, prs);
+    safeWrite(projectPrPath(project), prs);
   }
 
   return newWork;
@@ -3730,11 +3616,7 @@ function materializeSpecsAsWorkItems(config, project) {
       if (!info) continue;
 
       const spItems = existingItems.filter(i => i.id?.startsWith('SP'));
-      const maxNum = spItems.reduce((max, i) => {
-        const n = parseInt(i.id.replace('SP', ''), 10);
-        return isNaN(n) ? max : Math.max(max, n);
-      }, 0);
-      const newId = `SP${String(maxNum + 1).padStart(3, '0')}`;
+      const newId = nextWorkItemId(spItems, 'SP');
 
       existingItems.push({
         id: newId,
@@ -4339,12 +4221,8 @@ const commands = {
             const mdExists = expectedMd ? fs.existsSync(path.join(planDir, expectedMd)) : mdFiles.length > 0;
             if (mdExists && jsonFiles.length === 0) {
               const planFile = expectedMd || mdFiles[mdFiles.length - 1];
-              const maxNum = centralItems.reduce((max, i) => {
-                const m = (i.id || '').match(/(\d+)$/);
-                return m ? Math.max(max, parseInt(m[1])) : max;
-              }, 0);
               centralItems.push({
-                id: 'W' + String(maxNum + 1).padStart(3, '0'),
+                id: nextWorkItemId(centralItems, 'W'),
                 title: 'Convert plan to PRD: ' + (planItem.title || planFile),
                 type: 'plan-to-prd',
                 priority: 'high',
@@ -4383,12 +4261,8 @@ const commands = {
                   w.type === 'plan-to-prd' && w.status === 'done' && w.planFile === md
                 );
                 if (!alreadyDone) {
-                  const maxNum = centralItems.reduce((max, i) => {
-                    const m = (i.id || '').match(/(\d+)$/);
-                    return m ? Math.max(max, parseInt(m[1])) : max;
-                  }, 0);
                   centralItems.push({
-                    id: 'W' + String(maxNum + 1).padStart(3, '0'),
+                    id: nextWorkItemId(centralItems, 'W'),
                     title: 'Convert plan to PRD: ' + md,
                     type: 'plan-to-prd',
                     priority: 'high',
@@ -4871,7 +4745,7 @@ const commands = {
     const prWork = discoverFromPrs(config);
     const workItemWork = discoverFromWorkItems(config);
 
-    const all = [...prdWork, ...prWork, ...workItemWork];
+    const all = [...prWork, ...workItemWork];
 
     if (all.length === 0) {
       console.log('No new work discovered from any source.');

@@ -9,59 +9,20 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const llm = require('./engine/llm');
+const shared = require('./engine/shared');
 const os = require('os');
+
+const { safeRead, safeReadDir, safeWrite, getProjects: _getProjects, parseSkillFrontmatter } = shared;
 
 const PORT = parseInt(process.env.PORT || process.argv[2]) || 7331;
 const SQUAD_DIR = __dirname;
 const CONFIG = JSON.parse(fs.readFileSync(path.join(SQUAD_DIR, 'config.json'), 'utf8'));
 
-// Multi-project support
-function getProjects() {
-  if (CONFIG.projects && Array.isArray(CONFIG.projects)) return CONFIG.projects;
-  const proj = CONFIG.project || {};
-  if (!proj.localPath) proj.localPath = path.resolve(SQUAD_DIR, '..');
-  if (!proj.workSources) proj.workSources = CONFIG.workSources || {};
-  return [proj];
-}
-const PROJECTS = getProjects();
+const PROJECTS = _getProjects(CONFIG);
 const projectNames = PROJECTS.map(p => p.name || 'Project').join(' + ');
 
 const HTML_RAW = fs.readFileSync(path.join(SQUAD_DIR, 'dashboard.html'), 'utf8');
 const HTML = HTML_RAW.replace('Squad Mission Control', `Squad Mission Control — ${projectNames}`);
-
-// -- Helpers --
-
-function safeRead(filePath) {
-  try { return fs.readFileSync(filePath, 'utf8'); } catch { return null; }
-}
-
-function safeReadDir(dir) {
-  try { return fs.readdirSync(dir); } catch { return []; }
-}
-
-// Atomic write with Windows EPERM retry (matches engine.js safeWrite)
-function safeWrite(p, data) {
-  const dir = path.dirname(p);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  const tmp = p + '.tmp.' + process.pid;
-  try {
-    fs.writeFileSync(tmp, content);
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try { fs.renameSync(tmp, p); return; } catch (e) {
-        if (e.code === 'EPERM' && attempt < 4) {
-          const delay = 50 * (attempt + 1);
-          const start = Date.now(); while (Date.now() - start < delay) {}
-          continue;
-        }
-      }
-    }
-    try { fs.unlinkSync(tmp); } catch {}
-    safeWrite(p, content);
-  } catch {
-    try { fs.unlinkSync(tmp); } catch {}
-  }
-}
 
 function timeSince(ms) {
   const s = Math.floor((Date.now() - ms) / 1000);
@@ -341,21 +302,10 @@ function getSkills() {
       const files = fs.readdirSync(dir).filter(f => f.endsWith('.md') && f !== 'README.md');
       for (const f of files) {
         const content = safeRead(path.join(dir, f)) || '';
-        let name = f.replace('.md', '');
-        let description = '', trigger = '', author = '', created = '', project = 'any', allowedTools = '';
-        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-        if (fmMatch) {
-          const fm = fmMatch[1];
-          const m = (key) => { const r = fm.match(new RegExp(`^${key}:\\s*(.+)$`, 'm')); return r ? r[1].trim() : ''; };
-          name = m('name') || name;
-          description = m('description');
-          trigger = m('trigger');
-          author = m('author');
-          created = m('created');
-          project = m('project') || (scope === 'project' ? projectName : 'any');
-          allowedTools = m('allowed-tools');
-        }
-        all.push({ name, description, trigger, author, created, project, allowedTools, file: f, source, scope });
+        const meta = parseSkillFrontmatter(content, f);
+        // Override project for project-scoped skills
+        if (scope === 'project' && meta.project === 'any') meta.project = projectName;
+        all.push({ ...meta, file: f, source, scope });
       }
     } catch {}
   }
@@ -1793,35 +1743,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
     return;
   }
 
-  // GET /api/health — lightweight health check
-  if (req.method === 'GET' && req.url === '/api/health') {
-    try {
-      const engine = getEngineState();
-      const agents = getAgents().map(a => ({ id: a.id, status: a.status }));
-      const projects = PROJECTS.map(p => {
-        let reachable = false;
-        try { reachable = fs.existsSync(p.localPath); } catch {}
-        return { name: p.name || 'Project', reachable };
-      });
-
-      const allIdle = agents.every(a => a.status === 'idle' || a.status === 'done');
-      const engineStopped = engine.state === 'stopped';
-      let status = 'healthy';
-      if (engineStopped && !allIdle) status = 'degraded';
-      if (engineStopped && projects.every(p => !p.reachable)) status = 'stopped';
-
-      return jsonReply(res, 200, {
-        status,
-        engine: { state: engine.state || 'stopped', pid: engine.pid || null },
-        agents,
-        projects,
-        uptime: Math.floor(process.uptime()),
-        timestamp: new Date().toISOString(),
-      });
-    } catch (e) {
-      return jsonReply(res, 500, { status: 'degraded', error: e.message, timestamp: new Date().toISOString() });
-    }
-  }
+  // (duplicate /api/health removed — first handler above is the canonical one)
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.end(HTML);

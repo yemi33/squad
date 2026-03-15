@@ -7,38 +7,10 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { safeRead, safeWrite } = require('./shared');
 
 const SQUAD_DIR = path.resolve(__dirname, '..');
 const ENGINE_DIR = __dirname;
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function safeRead(p) {
-  try { return fs.readFileSync(p, 'utf8'); } catch { return null; }
-}
-
-function safeWrite(p, data) {
-  const dir = path.dirname(p);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  const tmp = p + '.tmp.' + process.pid;
-  try {
-    fs.writeFileSync(tmp, content);
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try { fs.renameSync(tmp, p); return; } catch (e) {
-        if (e.code === 'EPERM' && attempt < 4) {
-          const delay = 50 * (attempt + 1);
-          const start = Date.now(); while (Date.now() - start < delay) {}
-          continue;
-        }
-      }
-    }
-    try { fs.unlinkSync(tmp); } catch {}
-    fs.writeFileSync(p, content);
-  } catch {
-    try { fs.unlinkSync(tmp); } catch {}
-  }
-}
 
 function cleanChildEnv() {
   const env = { ...process.env };
