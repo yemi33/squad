@@ -8,6 +8,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const llm = require('./engine/llm');
 const os = require('os');
 
 const PORT = parseInt(process.env.PORT || process.argv[2]) || 7331;
@@ -69,72 +70,6 @@ function timeSince(ms) {
   return `${Math.floor(s / 3600)}h ago`;
 }
 
-// -- Engine LLM Usage Tracking --
-
-function parseStreamJsonOutput(raw) {
-  // Parse stream-json output: extract text content and usage from result line
-  const lines = raw.split('\n');
-  let text = '';
-  let usage = null;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line || !line.startsWith('{')) continue;
-    try {
-      const obj = JSON.parse(line);
-      if (obj.type === 'result') {
-        if (obj.result) text = obj.result;
-        if (obj.total_cost_usd || obj.usage) {
-          usage = {
-            costUsd: obj.total_cost_usd || 0,
-            inputTokens: obj.usage?.input_tokens || 0,
-            outputTokens: obj.usage?.output_tokens || 0,
-            cacheRead: obj.usage?.cache_read_input_tokens || obj.usage?.cacheReadInputTokens || 0,
-          };
-        }
-        break;
-      }
-      // Also try assistant message for text extraction
-      if (obj.type === 'assistant' && obj.message?.content) {
-        for (const block of obj.message.content) {
-          if (block.type === 'text') text += (text ? '\n' : '') + block.text;
-        }
-      }
-    } catch {}
-  }
-  return { text, usage };
-}
-
-function trackEngineUsage(category, usage) {
-  if (!usage) return;
-  try {
-    const metricsPath = path.join(SQUAD_DIR, 'engine', 'metrics.json');
-    const raw = safeRead(metricsPath);
-    const metrics = raw ? JSON.parse(raw) : {};
-
-    if (!metrics._engine) metrics._engine = {};
-    if (!metrics._engine[category]) {
-      metrics._engine[category] = { calls: 0, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0 };
-    }
-    const cat = metrics._engine[category];
-    cat.calls++;
-    cat.costUsd += usage.costUsd || 0;
-    cat.inputTokens += usage.inputTokens || 0;
-    cat.outputTokens += usage.outputTokens || 0;
-    cat.cacheRead += usage.cacheRead || 0;
-
-    // Also track in daily totals
-    const today = new Date().toISOString().slice(0, 10);
-    if (!metrics._daily) metrics._daily = {};
-    if (!metrics._daily[today]) metrics._daily[today] = { costUsd: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, tasks: 0 };
-    const daily = metrics._daily[today];
-    daily.costUsd += usage.costUsd || 0;
-    daily.inputTokens += usage.inputTokens || 0;
-    daily.outputTokens += usage.outputTokens || 0;
-    daily.cacheRead += usage.cacheRead || 0;
-
-    safeWrite(metricsPath, metrics);
-  } catch {}
-}
 
 // -- Data Collectors --
 
@@ -582,6 +517,75 @@ function getTriageContext() {
   ).join('\n');
 
   return { agents, projects, workItems: wi, plans, activeDispatch: active };
+}
+
+function buildTriageSysPrompt(ctx) {
+  return `You are a triage assistant for a software engineering squad called "Squad."
+Given a user command, determine the intent and return structured JSON.
+
+## Squad Context
+
+### Agents
+${ctx.agents}
+
+### Projects
+${ctx.projects}
+
+### Recent Work Items
+${ctx.workItems}
+
+### Plans on Disk
+${ctx.plans}
+
+### Currently Active
+${ctx.activeDispatch}
+
+## Available Intents
+
+- "work-item": A task for an agent. Types: ask, explore, fix, review, test, implement, plan-to-prd
+- "note": A decision, reminder, or knowledge to save (keywords: remember, note, don't forget)
+- "plan": Create a NEW multi-step implementation plan from scratch. Use only when no plan exists yet.
+  Keywords: plan, design, architect, make a plan for, /plan
+- "work-item" with type "plan-to-prd": Convert an EXISTING plan into PRD items / executable tasks.
+  Use when the user references a plan that already exists on disk (check plans list above).
+  Keywords: create PRD from, convert plan to PRD, execute the plan, implement the plan, break down the plan
+
+## Rules
+
+1. Explicit prefixes override everything: /plan or /prd -> plan, /note or /decide -> note
+2. @mentions map to agent IDs. @everyone or @all -> fanout=true
+3. #tags map to project names from the project list above
+4. !high or !urgent -> priority "high"; !low -> "low"; default "medium"
+5. For work items, pick the best type:
+   - ask: user wants an explanation or answer (explain, why, what does, how)
+   - explore: user wants research, analysis, investigation, or document review
+   - fix: bugs, errors, broken things
+   - review: PR/code review specifically (not document review)
+   - test: build, run, verify, test
+   - implement: build something new, create, add feature
+6. When the user references an agent's work, resolve it to a specific artifact from the lists above.
+7. If the user references "the plan" or "latest plan", use the most recent plan from the plans list.
+8. Default branchStrategy for plans: "parallel"
+9. Be concise in title and description.
+10. When the user says "create PRD from X's plan", "execute the plan", "implement the plan":
+    -> If the plan EXISTS on disk -> intent "work-item", type "plan-to-prd", include plan filename in description
+    -> If NO plan exists yet -> intent "plan" (create one first)
+
+## Output Format
+
+Respond with ONLY a JSON object, no markdown fences, no explanation:
+{
+  "intent": "work-item|note|plan",
+  "title": "concise action title",
+  "description": "additional context, resolved references",
+  "type": "ask|explore|fix|review|test|implement|plan-to-prd",
+  "priority": "low|medium|high",
+  "agents": ["agent-id"] or [],
+  "fanout": false,
+  "project": "project-name or empty string",
+  "projects": [],
+  "branchStrategy": "parallel"
+}`;
 }
 
 // -- POST helpers --
@@ -1034,138 +1038,13 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/triage — Haiku LLM command triage for natural language input
   if (req.method === 'POST' && req.url === '/api/triage') {
-    try {
-      const body = await readBody(req);
-      if (!body.message) return jsonReply(res, 400, { error: 'message required' });
-
-      const ctx = getTriageContext();
-      const sysPrompt = `You are a triage assistant for a software engineering squad called "Squad."
-Given a user command, determine the intent and return structured JSON.
-
-## Squad Context
-
-### Agents
-${ctx.agents}
-
-### Projects
-${ctx.projects}
-
-### Recent Work Items
-${ctx.workItems}
-
-### Plans on Disk
-${ctx.plans}
-
-### Currently Active
-${ctx.activeDispatch}
-
-## Available Intents
-
-- "work-item": A task for an agent. Types: ask, explore, fix, review, test, implement, plan-to-prd
-- "note": A decision, reminder, or knowledge to save (keywords: remember, note, don't forget)
-- "plan": Create a NEW multi-step implementation plan from scratch. Use only when no plan exists yet.
-  Keywords: plan, design, architect, make a plan for, /plan
-- "work-item" with type "plan-to-prd": Convert an EXISTING plan into PRD items / executable tasks.
-  Use when the user references a plan that already exists on disk (check plans list above).
-  Keywords: create PRD from, convert plan to PRD, execute the plan, implement the plan, break down the plan
-
-## Rules
-
-1. Explicit prefixes override everything: /plan or /prd → plan, /note or /decide → note
-2. @mentions map to agent IDs. @everyone or @all → fanout=true
-3. #tags map to project names from the project list above
-4. !high or !urgent → priority "high"; !low → "low"; default "medium"
-5. For work items, pick the best type:
-   - ask: user wants an explanation or answer (explain, why, what does, how)
-   - explore: user wants research, analysis, investigation, or document review
-   - fix: bugs, errors, broken things
-   - review: PR/code review specifically (not document review)
-   - test: build, run, verify, test
-   - implement: build something new, create, add feature
-6. When the user references an agent's work ("ripley's plan", "what dallas found"),
-   resolve it to a specific artifact from the work items or plans list above.
-   Include the resolved file path or work item ID in the description.
-7. If the user references "the plan" or "latest plan" without specifying an agent,
-   use the most recent plan from the plans list.
-8. Default branchStrategy for plans: "parallel"
-9. Be concise in title and description — the title should be action-oriented,
-   the description should include any resolved references or context.
-10. When the user says "create PRD from X's plan", "execute the plan", "implement the plan":
-    → If the plan EXISTS on disk (check plans list above) → intent "work-item", type "plan-to-prd", include plan filename in description
-    → If NO plan exists yet → intent "plan" (create one first)
-
-## Output Format
-
-Respond with ONLY a JSON object, no markdown fences, no explanation:
-{
-  "intent": "work-item|note|plan",
-  "title": "concise action title",
-  "description": "additional context, resolved references",
-  "type": "ask|explore|fix|review|test|implement|plan-to-prd",
-  "priority": "low|medium|high",
-  "agents": ["agent-id"] or [],
-  "fanout": false,
-  "project": "project-name or empty string",
-  "projects": [],
-  "branchStrategy": "parallel"
-}`;
-
-      const userPrompt = `Classify this command and return ONLY a JSON object. No explanation, no markdown fences, no conversation.
-
-User command: ${body.message}`;
-      const id = Date.now();
-      const promptPath = path.join(SQUAD_DIR, 'engine', 'triage-prompt-' + id + '.md');
-      const sysPath = path.join(SQUAD_DIR, 'engine', 'triage-sys-' + id + '.md');
-      safeWrite(promptPath, userPrompt);
-      safeWrite(sysPath, sysPrompt);
-
-      const spawnScript = path.join(SQUAD_DIR, 'engine', 'spawn-agent.js');
-      const childEnv = { ...process.env };
-      for (const key of Object.keys(childEnv)) {
-        if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) delete childEnv[key];
-      }
-
-      const { spawn: cpSpawn } = require('child_process');
-      const proc = cpSpawn(process.execPath, [
-        spawnScript, promptPath, sysPath,
-        '--output-format', 'stream-json', '--max-turns', '1', '--model', 'haiku',
-        '--permission-mode', 'bypassPermissions', '--verbose',
-      ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv, windowsHide: true });
-
-      let stdout = '';
-      let stderr = '';
-      proc.stdout.on('data', d => { stdout += d.toString(); });
-      proc.stderr.on('data', d => { stderr += d.toString(); });
-
-      const timeout = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} }, 45000);
-
-      proc.on('close', (code) => {
-        clearTimeout(timeout);
-        try { fs.unlinkSync(promptPath); } catch {}
-        try { fs.unlinkSync(sysPath); } catch {}
-
-        if (code === 0 && stdout.trim()) {
-          const parsed = parseStreamJsonOutput(stdout);
-          trackEngineUsage('triage', parsed.usage);
-          let output = (parsed.text || stdout).trim();
-          // Strip markdown fences if Haiku wraps the JSON
-          output = output.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
-          try {
-            return jsonReply(res, 200, JSON.parse(output));
-          } catch {
-            return jsonReply(res, 500, { error: 'Invalid triage response', raw: output.slice(0, 500) });
-          }
-        }
-        return jsonReply(res, 500, { error: 'Triage failed', code, stderr: stderr.slice(0, 300) });
-      });
-
-      proc.on('error', (err) => {
-        clearTimeout(timeout);
-        try { fs.unlinkSync(promptPath); } catch {}
-        try { fs.unlinkSync(sysPath); } catch {}
-        return jsonReply(res, 500, { error: 'Triage spawn error: ' + err.message });
-      });
-    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+    const body = await readBody(req);
+    if (!body.message) return jsonReply(res, 400, { error: 'message required' });
+    const ctx = getTriageContext();
+    const sysPrompt = buildTriageSysPrompt(ctx);
+    llm.triageCommand(body.message, sysPrompt)
+      .then(result => jsonReply(res, 200, result))
+      .catch(e => jsonReply(res, 500, { error: e.message }));
     return;
   }
 
@@ -1547,7 +1426,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
-  // POST /api/doc-chat — unified Q&A + steering: Haiku decides whether to answer or edit
+  // POST /api/doc-chat — unified Q&A + steering via engine/llm.js
   if (req.method === 'POST' && req.url === '/api/doc-chat') {
     try {
       const body = await readBody(req);
@@ -1556,8 +1435,6 @@ What would you like to discuss or change? When you're happy, say "approve" and I
 
       const canEdit = !!body.filePath;
       const isJson = body.filePath?.endsWith('.json');
-
-      // Read current content from disk if editable (authoritative source)
       let currentContent = body.document;
       let fullPath = null;
       if (canEdit) {
@@ -1567,314 +1444,66 @@ What would you like to discuss or change? When you're happy, say "approve" and I
         if (diskContent !== null) currentContent = diskContent;
       }
 
-      const prompt = `You are a document assistant for a software engineering squad. You can answer questions AND edit documents.
+      const result = await llm.docChat({
+        message: body.message, document: currentContent, title: body.title,
+        filePath: canEdit ? body.filePath : null, selection: body.selection, history: body.history, isJson,
+      });
 
-## Document
-${body.title ? '**Title:** ' + body.title + '\n' : ''}File: ${body.filePath || '(read-only)'}
-${isJson ? 'Format: JSON' : 'Format: Markdown'}
+      if (!result.edited) return jsonReply(res, 200, { ok: true, answer: result.answer, edited: false });
 
-\`\`\`
-${currentContent.slice(0, 20000)}
-\`\`\`
-
-${body.selection ? '## Highlighted Selection\n> ' + body.selection.slice(0, 1500) + '\n' : ''}
-${(body.history && body.history.length > 0) ? '## Conversation So Far\n\n' + body.history.map(h => (h.role === 'user' ? 'User: ' : 'Assistant: ') + h.text).join('\n\n') + '\n' : ''}
-## User Message
-
-${body.message}
-
-## Instructions
-
-Determine what the user wants:
-
-**If they're asking a question** (e.g., "what does this mean", "why is this", "explain"):
-- Answer concisely with source citations
-- Do NOT include the ---DOCUMENT--- delimiter
-
-**If they want to edit the document** (e.g., "change", "remove", "add", "update", "rename", "fix", "reword"):
-- Briefly explain what you changed (1-2 sentences)
-- Then on a new line write exactly: ---DOCUMENT---
-- Then the COMPLETE updated document (full file, not a diff)
-${isJson ? '- The document MUST be valid JSON. No markdown code fences.' : ''}
-${!canEdit ? '\nNote: This document is READ-ONLY. Answer questions only — do not output ---DOCUMENT---.' : ''}
-
-Be concise. No preamble.`;
-
-      const sysPrompt = 'You are a precise document assistant. Determine intent (question vs edit) from the user message. Follow the output format exactly.';
-
-      const id = Date.now();
-      const promptPath = path.join(SQUAD_DIR, 'engine', 'chat-prompt-' + id + '.md');
-      const sysPath = path.join(SQUAD_DIR, 'engine', 'chat-sys-' + id + '.md');
-      safeWrite(promptPath, prompt);
-      safeWrite(sysPath, sysPrompt);
-
-      const spawnScript = path.join(SQUAD_DIR, 'engine', 'spawn-agent.js');
-      const childEnv = { ...process.env };
-      for (const key of Object.keys(childEnv)) {
-        if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) delete childEnv[key];
-      }
-
-      const { spawn: cpSpawn } = require('child_process');
-      const proc = cpSpawn(process.execPath, [
-        spawnScript, promptPath, sysPath,
-        '--output-format', 'stream-json', '--max-turns', '1', '--model', 'haiku',
-        '--permission-mode', 'bypassPermissions', '--verbose',
-      ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv, windowsHide: true });
-
-      let stdout = '';
-      let stderr = '';
-      proc.stdout.on('data', d => { stdout += d.toString(); });
-      proc.stderr.on('data', d => { stderr += d.toString(); });
-
-      const timeout = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} }, 90000);
-
-      proc.on('close', (code) => {
-        clearTimeout(timeout);
-        try { fs.unlinkSync(promptPath); } catch {}
-        try { fs.unlinkSync(sysPath); } catch {}
-
-        if (code === 0 && stdout.trim()) {
-          const parsed = parseStreamJsonOutput(stdout);
-          trackEngineUsage('doc-chat', parsed.usage);
-          const output = (parsed.text || stdout).trim();
-          const delimIdx = output.indexOf('---DOCUMENT---');
-
-          if (delimIdx < 0) {
-            // Q&A response — no edit
-            return jsonReply(res, 200, { ok: true, answer: output, edited: false });
-          }
-
-          // Edit response
-          const explanation = output.slice(0, delimIdx).trim();
-          let newContent = output.slice(delimIdx + '---DOCUMENT---'.length).trim();
-          newContent = newContent.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim();
-
-          if (isJson) {
-            try { JSON.parse(newContent); } catch (e) {
-              return jsonReply(res, 200, { ok: true, answer: explanation + '\n\n(JSON invalid — not saved: ' + e.message + ')', edited: false });
-            }
-          }
-
-          if (canEdit && fullPath) {
-            safeWrite(fullPath, newContent);
-            return jsonReply(res, 200, { ok: true, answer: explanation, edited: true, content: newContent });
-          } else {
-            return jsonReply(res, 200, { ok: true, answer: explanation + '\n\n(Read-only — changes not saved)', edited: false });
-          }
-        } else {
-          return jsonReply(res, 500, { error: 'Failed (code=' + code + ')', stderr: stderr.slice(0, 200) });
+      if (isJson) {
+        try { JSON.parse(result.content); } catch (e) {
+          return jsonReply(res, 200, { ok: true, answer: result.answer + '\n\n(JSON invalid — not saved: ' + e.message + ')', edited: false });
         }
-      });
-
-      proc.on('error', (err) => {
-        clearTimeout(timeout);
-        try { fs.unlinkSync(promptPath); } catch {}
-        try { fs.unlinkSync(sysPath); } catch {}
-        return jsonReply(res, 500, { error: err.message });
-      });
-      return;
-    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+      }
+      if (canEdit && fullPath) {
+        safeWrite(fullPath, result.content);
+        return jsonReply(res, 200, { ok: true, answer: result.answer, edited: true, content: result.content });
+      }
+      return jsonReply(res, 200, { ok: true, answer: result.answer + '\n\n(Read-only — changes not saved)', edited: false });
+    } catch (e) { return jsonReply(res, 500, { error: e.message }); }
   }
 
-  // POST /api/steer-document — modify a document via natural language instruction (Haiku)
+  // POST /api/steer-document — modify a document via engine/llm.js
   if (req.method === 'POST' && req.url === '/api/steer-document') {
     try {
       const body = await readBody(req);
       if (!body.instruction) return jsonReply(res, 400, { error: 'instruction required' });
       if (!body.filePath) return jsonReply(res, 400, { error: 'filePath required' });
-
-      // Read current document from disk (authoritative source)
       const fullPath = path.resolve(SQUAD_DIR, body.filePath);
-      // Security: must be under SQUAD_DIR
       if (!fullPath.startsWith(path.resolve(SQUAD_DIR))) return jsonReply(res, 400, { error: 'path must be under squad directory' });
       const currentContent = safeRead(fullPath);
       if (currentContent === null) return jsonReply(res, 404, { error: 'file not found' });
-
       const isJson = body.filePath.endsWith('.json');
-      const prompt = `You are editing a document based on a user instruction.
 
-## Current Document
-File: ${body.filePath}
-${isJson ? 'Format: JSON (you MUST output valid JSON)' : 'Format: Markdown'}
+      const result = await llm.steerDocument({
+        instruction: body.instruction, filePath: body.filePath,
+        content: currentContent, selection: body.selection, isJson,
+      });
 
-\`\`\`
-${currentContent.slice(0, 20000)}
-\`\`\`
-
-${body.selection ? '## Context: User highlighted this section\n> ' + body.selection.slice(0, 1000) + '\n' : ''}
-
-## Instruction
-
-${body.instruction}
-
-## Output Format
-
-Respond with EXACTLY two sections separated by the delimiter \`---DOCUMENT---\`:
-
-1. First: A brief explanation of what you changed (1-3 sentences)
-2. Then the delimiter on its own line: \`---DOCUMENT---\`
-3. Then the COMPLETE updated document content (not a diff — the full file)
-
-Example:
-Removed item P003 and reordered remaining items.
----DOCUMENT---
-{full updated file content here}
-
-${isJson ? 'CRITICAL: The document section must be valid JSON. Do not add markdown code fences around it.' : ''}`;
-
-      const sysPrompt = 'You are a precise document editor. Follow the output format exactly. No code fences around the document output.';
-
-      const id = Date.now();
-      const promptPath = path.join(SQUAD_DIR, 'engine', 'steer-prompt-' + id + '.md');
-      const sysPath = path.join(SQUAD_DIR, 'engine', 'steer-sys-' + id + '.md');
-      safeWrite(promptPath, prompt);
-      safeWrite(sysPath, sysPrompt);
-
-      const spawnScript = path.join(SQUAD_DIR, 'engine', 'spawn-agent.js');
-      const childEnv = { ...process.env };
-      for (const key of Object.keys(childEnv)) {
-        if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) delete childEnv[key];
-      }
-
-      const { spawn: cpSpawn } = require('child_process');
-      const proc = cpSpawn(process.execPath, [
-        spawnScript, promptPath, sysPath,
-        '--output-format', 'stream-json', '--max-turns', '1', '--model', 'haiku',
-        '--permission-mode', 'bypassPermissions', '--verbose',
-      ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv, windowsHide: true });
-
-      let stdout = '';
-      let stderr = '';
-      proc.stdout.on('data', d => { stdout += d.toString(); });
-      proc.stderr.on('data', d => { stderr += d.toString(); });
-
-      const timeout = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} }, 90000);
-
-      proc.on('close', (code) => {
-        clearTimeout(timeout);
-        try { fs.unlinkSync(promptPath); } catch {}
-        try { fs.unlinkSync(sysPath); } catch {}
-
-        if (code === 0 && stdout.trim()) {
-          const parsed = parseStreamJsonOutput(stdout);
-          trackEngineUsage('steer-document', parsed.usage);
-          const output = (parsed.text || stdout).trim();
-          const delimIdx = output.indexOf('---DOCUMENT---');
-          if (delimIdx < 0) {
-            return jsonReply(res, 200, { ok: true, answer: output, updated: false, reason: 'No document delimiter found — treated as Q&A response' });
-          }
-
-          const explanation = output.slice(0, delimIdx).trim();
-          let newContent = output.slice(delimIdx + '---DOCUMENT---'.length).trim();
-
-          // Strip code fences if model added them
-          newContent = newContent.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim();
-
-          // Validate JSON if applicable
-          if (isJson) {
-            try { JSON.parse(newContent); } catch (e) {
-              return jsonReply(res, 200, { ok: true, answer: explanation + '\n\n(Warning: JSON validation failed — document not saved: ' + e.message + ')', updated: false });
-            }
-          }
-
-          // Write back
-          safeWrite(fullPath, newContent);
-          return jsonReply(res, 200, { ok: true, answer: explanation, updated: true, content: newContent });
-        } else {
-          return jsonReply(res, 500, { error: 'Steer failed (code=' + code + ')', stderr: stderr.slice(0, 200) });
+      if (!result.updated) return jsonReply(res, 200, { ok: true, answer: result.answer, updated: false });
+      if (isJson) {
+        try { JSON.parse(result.content); } catch (e) {
+          return jsonReply(res, 200, { ok: true, answer: result.answer + '\n\n(JSON validation failed — not saved: ' + e.message + ')', updated: false });
         }
-      });
-
-      proc.on('error', (err) => {
-        clearTimeout(timeout);
-        try { fs.unlinkSync(promptPath); } catch {}
-        try { fs.unlinkSync(sysPath); } catch {}
-        return jsonReply(res, 500, { error: err.message });
-      });
-      return;
-    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+      }
+      safeWrite(fullPath, result.content);
+      return jsonReply(res, 200, { ok: true, answer: result.answer, updated: true, content: result.content });
+    } catch (e) { return jsonReply(res, 500, { error: e.message }); }
   }
 
-  // POST /api/ask-about — ask a question about a document with context, answered by Haiku
+  // POST /api/ask-about — document Q&A via engine/llm.js
   if (req.method === 'POST' && req.url === '/api/ask-about') {
     try {
       const body = await readBody(req);
       if (!body.question) return jsonReply(res, 400, { error: 'question required' });
       if (!body.document) return jsonReply(res, 400, { error: 'document required' });
-
-      const prompt = `You are answering a question about a document from a software engineering squad's knowledge base.
-
-## Document
-${body.title ? '**Title:** ' + body.title + '\n' : ''}
-${body.document.slice(0, 15000)}
-
-${body.selection ? '## Highlighted Selection\n\nThe user highlighted this specific part:\n> ' + body.selection.slice(0, 2000) + '\n' : ''}
-
-## Question
-
-${body.question}
-
-## Instructions
-
-Answer concisely and directly. Follow these rules:
-1. **Cite sources**: When the document includes file paths, line numbers, PR URLs, or code references — include them in your answer. Format: \`(source: path/to/file.ts:42)\`
-2. **Quote the document**: Reference the exact text that supports your answer.
-3. **Flag missing sources**: If the document makes a claim without a source reference (no file path, no PR link, no line number), say: "Note: this claim has no source reference in the document — verify independently."
-4. **Be honest**: If the document doesn't contain the answer, say so clearly. Don't speculate beyond what's written.
-5. Use markdown formatting.`;
-
-      const sysPrompt = 'You are a concise technical assistant. Answer based on the document provided. No preamble.';
-
-      // Write temp files
-      const id = Date.now();
-      const promptPath = path.join(SQUAD_DIR, 'engine', 'ask-prompt-' + id + '.md');
-      const sysPath = path.join(SQUAD_DIR, 'engine', 'ask-sys-' + id + '.md');
-      safeWrite(promptPath, prompt);
-      safeWrite(sysPath, sysPrompt);
-
-      // Spawn Haiku
-      const spawnScript = path.join(SQUAD_DIR, 'engine', 'spawn-agent.js');
-      const childEnv = { ...process.env };
-      for (const key of Object.keys(childEnv)) {
-        if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) delete childEnv[key];
-      }
-
-      const { spawn: cpSpawn } = require('child_process');
-      const proc = cpSpawn(process.execPath, [
-        spawnScript, promptPath, sysPath,
-        '--output-format', 'stream-json', '--max-turns', '1', '--model', 'haiku',
-        '--permission-mode', 'bypassPermissions', '--verbose',
-      ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv, windowsHide: true });
-
-      let stdout = '';
-      let stderr = '';
-      proc.stdout.on('data', d => { stdout += d.toString(); });
-      proc.stderr.on('data', d => { stderr += d.toString(); });
-
-      // Timeout 60s
-      const timeout = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} }, 60000);
-
-      proc.on('close', (code) => {
-        clearTimeout(timeout);
-        try { fs.unlinkSync(promptPath); } catch {}
-        try { fs.unlinkSync(sysPath); } catch {}
-        if (code === 0 && stdout.trim()) {
-          const parsed = parseStreamJsonOutput(stdout);
-          trackEngineUsage('ask-about', parsed.usage);
-          return jsonReply(res, 200, { ok: true, answer: (parsed.text || stdout).trim() });
-        } else {
-          return jsonReply(res, 500, { error: 'Failed to get answer', stderr: stderr.slice(0, 200) });
-        }
+      const result = await llm.askAbout({
+        question: body.question, document: body.document,
+        title: body.title, selection: body.selection,
       });
-
-      proc.on('error', (err) => {
-        clearTimeout(timeout);
-        try { fs.unlinkSync(promptPath); } catch {}
-        try { fs.unlinkSync(sysPath); } catch {}
-        return jsonReply(res, 500, { error: err.message });
-      });
-      return; // Don't fall through — response handled in callbacks
-    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+      return jsonReply(res, 200, { ok: true, answer: result.answer });
+    } catch (e) { return jsonReply(res, 500, { error: e.message }); }
   }
 
   // POST /api/inbox/persist — promote an inbox item to team notes
