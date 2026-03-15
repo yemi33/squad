@@ -208,8 +208,11 @@ function getPrdInfo() {
     items: items.map(i => ({
       id: i.id, name: i.name || i.title, priority: i.priority,
       complexity: i.estimated_complexity || i.size, status: i.status || 'missing',
+      description: (i.description || '').slice(0, 200),
       projects: i.projects || [],
-      prs: prdToPr[i.id] || []
+      prs: prdToPr[i.id] || [],
+      source: i._source || '',
+      planSummary: i._planSummary || '',
     })),
   };
 
@@ -1160,6 +1163,20 @@ User command: ${body.message}`;
       plan.approvedBy = body.approvedBy || os.userInfo().username;
       safeWrite(planPath, plan);
       return jsonReply(res, 200, { ok: true, status: 'approved' });
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
+  // POST /api/plans/pause — pause a plan (stops new item materialization)
+  if (req.method === 'POST' && req.url === '/api/plans/pause') {
+    try {
+      const body = await readBody(req);
+      if (!body.file) return jsonReply(res, 400, { error: 'file required' });
+      const planPath = path.join(SQUAD_DIR, 'plans', body.file);
+      const plan = JSON.parse(safeRead(planPath) || '{}');
+      plan.status = 'awaiting-approval';
+      plan.pausedAt = new Date().toISOString();
+      safeWrite(planPath, plan);
+      return jsonReply(res, 200, { ok: true, status: 'paused' });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 

@@ -939,24 +939,49 @@ function renderPrdProgress(prog) {
 
   const statusIcon = (s) => s === 'complete' ? 'OK' : s === 'pr-created' ? 'PR' : s === 'in-progress' ? 'WIP' : s === 'planned' ? 'PLAN' : '---';
 
-  const items = '<div class="prd-items-list">' +
-    (prog.items || []).map(i => {
-      const prLinks = (i.prs || []).map(pr =>
-        '<a class="pr-title" href="' + escHtml(pr.url || '#') + '" target="_blank" style="font-size:10px;margin-left:4px" title="' + escHtml(pr.title || '') + '">' + escHtml(pr.id) + '</a>'
-      ).join(' ');
-      const projBadges = (i.projects || []).map(p =>
-        '<span class="prd-project-badge">' + escHtml(p) + '</span>'
-      ).join(' ');
-      return '<div class="prd-item-row">' +
-        '<span>' + statusIcon(i.status) + '</span>' +
-        '<span class="prd-item-id">' + escHtml(i.id) + '</span>' +
-        '<span class="prd-item-name" title="' + escHtml(i.name) + '">' + escHtml(i.name) + '</span>' +
-        (projBadges ? '<span>' + projBadges + '</span>' : '') +
-        (prLinks ? '<span>' + prLinks + '</span>' : '') +
-        '<span class="prd-item-priority ' + (i.priority || '') + '">' + escHtml(i.priority || '') + '</span>' +
+  // Group items by source plan
+  const grouped = {};
+  for (const i of (prog.items || [])) {
+    const key = i.source || '_ungrouped';
+    if (!grouped[key]) grouped[key] = { summary: i.planSummary || i.source || 'Items', items: [] };
+    grouped[key].items.push(i);
+  }
+
+  const renderItem = (i) => {
+    const prLinks = (i.prs || []).map(pr =>
+      '<a class="pr-title" href="' + escHtml(pr.url || '#') + '" target="_blank" style="font-size:10px;margin-left:4px" title="' + escHtml(pr.title || '') + '">' + escHtml(pr.id) + '</a>'
+    ).join(' ');
+    const projBadges = (i.projects || []).map(p =>
+      '<span class="prd-project-badge">' + escHtml(p) + '</span>'
+    ).join(' ');
+    return '<div class="prd-item-row" style="flex-wrap:wrap">' +
+      '<span>' + statusIcon(i.status) + '</span>' +
+      '<span class="prd-item-id">' + escHtml(i.id) + '</span>' +
+      '<span class="prd-item-name" title="' + escHtml(i.name) + '">' + escHtml(i.name) + '</span>' +
+      (projBadges ? '<span>' + projBadges + '</span>' : '') +
+      (prLinks ? '<span>' + prLinks + '</span>' : '') +
+      '<span class="prd-item-priority ' + (i.priority || '') + '">' + escHtml(i.priority || '') + '</span>' +
+      (i.description ? '<div style="width:100%;font-size:11px;color:var(--muted);padding:2px 0 2px 52px;line-height:1.4">' + escHtml(i.description) + '</div>' : '') +
+    '</div>';
+  };
+
+  const keys = Object.keys(grouped);
+  let items;
+  if (keys.length <= 1) {
+    // Single plan — flat list
+    items = '<div class="prd-items-list" style="max-height:400px">' + (prog.items || []).map(renderItem).join('') + '</div>';
+  } else {
+    // Multiple plans — grouped with headers
+    items = keys.map(k => {
+      const g = grouped[k];
+      return '<div style="margin-bottom:12px">' +
+        '<div style="font-size:11px;font-weight:600;color:var(--blue);margin-bottom:4px;padding:4px 8px;background:var(--surface2);border-radius:4px">' +
+          escHtml(g.summary) + ' <span style="color:var(--muted);font-weight:400">(' + g.items.length + ' items)</span>' +
+        '</div>' +
+        '<div class="prd-items-list">' + g.items.map(renderItem).join('') + '</div>' +
       '</div>';
-    }).join('') +
-  '</div>';
+    }).join('');
+  }
 
   el.innerHTML = bar + legend + items;
 }
@@ -2729,6 +2754,12 @@ function renderPlans(plans) {
     }
     // No else needed — whole card is clickable
 
+    const isPaused = status === 'awaiting-approval';
+    const isApproved = status === 'approved' || status === 'active' || !status;
+    const pauseBtn = isApproved ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--yellow)" ' +
+      'onclick="event.stopPropagation();planPause(\'' + escHtml(p.file) + '\')">Pause</button>' : '';
+    const resumeBtn = isPaused ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green)" ' +
+      'onclick="event.stopPropagation();planApprove(\'' + escHtml(p.file) + '\')">Resume</button>' : '';
     const deleteBtn = '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--red)" ' +
       'onclick="event.stopPropagation();planDelete(\'' + escHtml(p.file) + '\')">Delete</button>';
 
@@ -2742,7 +2773,7 @@ function renderPlans(plans) {
             '<span>' + escHtml(p.branchStrategy) + '</span>' +
             (p.generatedBy ? '<span>by ' + escHtml(p.generatedBy) + '</span>' : '') +
             (p.generatedAt ? '<span>' + p.generatedAt + '</span>' : '') +
-            deleteBtn +
+            pauseBtn + resumeBtn + deleteBtn +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -2756,6 +2787,15 @@ async function planApprove(file) {
     await fetch('/api/plans/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }) });
     showToast('cmd-toast', 'Plan approved — work will begin on next engine tick', true);
     refreshPlans();
+  } catch (e) { showToast('cmd-toast', 'Error: ' + e.message, false); }
+}
+
+async function planPause(file) {
+  try {
+    await fetch('/api/plans/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }) });
+    showToast('cmd-toast', 'Plan paused — no new items will be dispatched', true);
+    refreshPlans();
+    refresh();
   } catch (e) { showToast('cmd-toast', 'Error: ' + e.message, false); }
 }
 
@@ -2867,9 +2907,20 @@ async function planView(file) {
       if (titleMatch) title = titleMatch[1];
     }
 
+    // Determine plan status for pause/resume button
+    let planStatus = '';
+    try { if (file.endsWith('.json')) planStatus = JSON.parse(raw).status || ''; } catch {}
+    const isActive = planStatus === 'approved' || planStatus === 'active' || !planStatus;
+    const isPaused = planStatus === 'awaiting-approval';
+    const modalPauseBtn = isActive ? ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--yellow);margin-left:8px;vertical-align:middle" ' +
+      'onclick="planPause(\'' + escHtml(file) + '\');closeModal()">Pause</button>' : '';
+    const modalResumeBtn = isPaused ? ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--green);margin-left:8px;vertical-align:middle" ' +
+      'onclick="planApprove(\'' + escHtml(file) + '\');closeModal()">Resume</button>' : '';
+
     document.getElementById('modal-title').innerHTML = escHtml(title) +
-      ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--red);margin-left:12px;vertical-align:middle" ' +
-      'onclick="planDelete(\'' + escHtml(file) + '\')">Delete Plan</button>';
+      modalPauseBtn + modalResumeBtn +
+      ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--red);margin-left:8px;vertical-align:middle" ' +
+      'onclick="planDelete(\'' + escHtml(file) + '\')">Delete</button>';
     document.getElementById('modal-body').textContent = text;
     document.getElementById('modal-body').style.fontFamily = 'Consolas, monospace';
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
