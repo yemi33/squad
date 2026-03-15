@@ -1597,6 +1597,7 @@ async function refresh() {
     renderEngineStatus(data.engine);
     renderDispatch(data.dispatch);
     window._lastDispatch = data.dispatch;
+    window._lastWorkItems = data.workItems || [];
     renderEngineLog(data.engineLog || []);
     renderProjects(data.projects || []);
     renderMetrics(data.metrics || {});
@@ -2826,15 +2827,26 @@ function renderPlans(plans) {
   const statusLabels = { 'awaiting-approval': 'Awaiting Approval', 'approved': 'Approved', 'rejected': 'Rejected', 'revision-requested': 'Revision Requested', 'completed': 'Completed', 'active': 'Active' };
   const statusClass = (s) => s === 'awaiting-approval' ? 'awaiting' : s || '';
 
-  // Check which plans have active dispatches (plan-to-prd or implement from plan)
+  // Check which plans have active dispatches or pending plan-to-prd work items
   const activeDisp = (window._lastDispatch?.active || []);
+  const pendingDisp = (window._lastDispatch?.pending || []);
   const workingPlanFiles = new Set();
-  for (const d of activeDisp) {
+  for (const d of [...activeDisp, ...pendingDisp]) {
     const src = d.meta?.item?.sourcePlan || '';
     if (src) workingPlanFiles.add(src);
-    // Also match plan-to-prd tasks by plan filename in task description
+    // Match plan-to-prd tasks by planFile in item meta
+    const planFile = d.meta?.item?.planFile || d.meta?.planFile || '';
+    if (planFile) workingPlanFiles.add(planFile);
+    // Also match by task description
     if (d.type === 'plan-to-prd' && d.task) {
-      for (const p of plans) { if (d.task.includes(p.file?.replace('.json', '') || '___')) workingPlanFiles.add(p.file); }
+      for (const p of plans) { if (d.task.includes(p.file?.replace('.md', '').replace('.json', '') || '___')) workingPlanFiles.add(p.file); }
+    }
+  }
+  // Also check work items for pending/dispatched plan-to-prd
+  const allWi = window._lastWorkItems || [];
+  for (const w of allWi) {
+    if (w.type === 'plan-to-prd' && (w.status === 'pending' || w.status === 'dispatched') && w.planFile) {
+      workingPlanFiles.add(w.planFile);
     }
   }
 
