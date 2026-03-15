@@ -33,8 +33,8 @@ This file is NOT checked into the repo. The engine reads it on every tick and di
   "generated_by": "{{agent_id}}",
   "generated_at": "{{date}}",
   "plan_summary": "{{plan_summary}}",
-  "status": "awaiting-approval",
-  "requires_approval": true,
+  "status": "approved",
+  "requires_approval": false,
   "branch_strategy": "shared-branch|parallel",
   "feature_branch": "feat/plan-short-name",
   "missing_features": [
@@ -86,9 +86,10 @@ Rules for items:
 
 ## Important
 
+- Write ONLY the single `.json` PRD file to `{{team_root}}/plans/` — do NOT write any `.md` files there
 - Do NOT create a git branch, worktree, or PR — this playbook writes squad-internal state only
 - Do NOT modify any files in the project repo
-- The engine will dispatch implementation agents automatically once this file exists
+- The engine will dispatch implementation agents automatically once the JSON file exists
 - For `shared-branch`: agents commit to a single branch — one PR is created automatically when all items are done
 - For `parallel`: each agent creates its own branch and PR
 
