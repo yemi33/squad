@@ -2239,9 +2239,9 @@ async function cmdSubmit() {
   if (!raw) return showToast('cmd-toast', 'Type something first', false);
 
   const btn = document.getElementById('cmd-send-btn');
+  btn.disabled = true;
   btn.textContent = '...';
   const parsed = await cmdTriageAndSubmit(raw);
-  btn.disabled = true;
 
   try {
     if (parsed.intent === 'note') {
