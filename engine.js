@@ -3037,8 +3037,43 @@ function runCleanup(config, verbose = false) {
     } catch {}
   }
 
-  if (cleaned.tempFiles + cleaned.liveOutputs + cleaned.worktrees + cleaned.zombies + (cleaned.files || 0) > 0) {
-    log('info', `Cleanup: ${cleaned.tempFiles} temp files, ${cleaned.liveOutputs} live outputs, ${cleaned.worktrees} worktrees, ${cleaned.zombies} zombies, ${cleaned.files || 0} old output archives`);
+  // 7. Prune orphaned dispatch entries — items whose source work item no longer exists
+  cleaned.orphanedDispatches = 0;
+  try {
+    const dispatch = getDispatch();
+    // Collect all work item IDs across all sources
+    const allWiIds = new Set();
+    try {
+      const central = safeJson(path.join(SQUAD_DIR, 'work-items.json')) || [];
+      central.forEach(w => allWiIds.add(w.id));
+    } catch {}
+    for (const project of projects) {
+      try {
+        const projItems = safeJson(path.join(project.localPath, '.squad', 'work-items.json')) || [];
+        projItems.forEach(w => allWiIds.add(w.id));
+      } catch {}
+    }
+
+    let changed = false;
+    for (const queue of ['pending', 'active']) {
+      if (!dispatch[queue]) continue;
+      const before = dispatch[queue].length;
+      dispatch[queue] = dispatch[queue].filter(d => {
+        const itemId = d.meta?.item?.id;
+        if (!itemId) return true; // keep entries without item tracking
+        return allWiIds.has(itemId);
+      });
+      const removed = before - dispatch[queue].length;
+      if (removed > 0) {
+        cleaned.orphanedDispatches += removed;
+        changed = true;
+      }
+    }
+    if (changed) safeWrite(DISPATCH_PATH, dispatch);
+  } catch {}
+
+  if (cleaned.tempFiles + cleaned.liveOutputs + cleaned.worktrees + cleaned.zombies + (cleaned.files || 0) + cleaned.orphanedDispatches > 0) {
+    log('info', `Cleanup: ${cleaned.tempFiles} temp, ${cleaned.liveOutputs} live outputs, ${cleaned.worktrees} worktrees, ${cleaned.zombies} zombies, ${cleaned.files || 0} archives, ${cleaned.orphanedDispatches} orphaned dispatches`);
   }
 
   return cleaned;

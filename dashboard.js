@@ -601,6 +601,47 @@ function jsonReply(res, code, data) {
   res.end(JSON.stringify(data));
 }
 
+// -- Dispatch cleanup helper --
+
+/**
+ * Remove dispatch entries matching a predicate. Scans pending, active, completed queues.
+ * Also kills agent processes for matched active entries.
+ * @param {(entry) => boolean} matchFn - return true for entries to remove
+ * @returns {number} count of removed entries
+ */
+function cleanDispatchEntries(matchFn) {
+  const dispatchPath = path.join(SQUAD_DIR, 'engine', 'dispatch.json');
+  try {
+    const dispatch = JSON.parse(safeRead(dispatchPath) || '{}');
+    let removed = 0;
+    for (const queue of ['pending', 'active', 'completed']) {
+      if (!dispatch[queue]) continue;
+      const before = dispatch[queue].length;
+
+      // Kill agents for matched active entries
+      if (queue === 'active') {
+        for (const d of dispatch[queue]) {
+          if (matchFn(d) && d.agent) {
+            const statusPath = path.join(SQUAD_DIR, 'agents', d.agent, 'status.json');
+            try {
+              const status = JSON.parse(safeRead(statusPath) || '{}');
+              if (status.pid) try { process.kill(status.pid, 'SIGTERM'); } catch {}
+              status.status = 'idle';
+              delete status.currentTask;
+              safeWrite(statusPath, status);
+            } catch {}
+          }
+        }
+      }
+
+      dispatch[queue] = dispatch[queue].filter(d => !matchFn(d));
+      removed += before - dispatch[queue].length;
+    }
+    if (removed > 0) safeWrite(dispatchPath, dispatch);
+    return removed;
+  } catch { return 0; }
+}
+
 // -- Server --
 
 const server = http.createServer(async (req, res) => {
@@ -981,6 +1022,12 @@ const server = http.createServer(async (req, res) => {
         if (filtered.length < before) { safeWrite(centralPath, filtered); cancelled = true; }
       } catch {}
 
+      // Clean dispatch entries for this item
+      cleanDispatchEntries(d =>
+        (d.meta?.item?.sourcePlan === body.source && d.meta?.item?.sourcePlanItem === body.itemId) ||
+        (d.meta?.item?.planItemId === body.itemId && d.meta?.item?.sourcePlan === body.source)
+      );
+
       return jsonReply(res, 200, { ok: true, cancelled });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
@@ -1358,7 +1405,14 @@ User command: ${body.message}`;
         } catch {}
       }
 
-      return jsonReply(res, 200, { ok: true, cleanedWorkItems: cleaned });
+      // Clean up dispatch entries for this plan's items
+      const dispatchCleaned = cleanDispatchEntries(d =>
+        d.meta?.item?.sourcePlan === body.file ||
+        d.meta?.planFile === body.file ||
+        (d.task && d.task.includes(body.file))
+      );
+
+      return jsonReply(res, 200, { ok: true, cleanedWorkItems: cleaned, cleanedDispatches: dispatchCleaned });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
