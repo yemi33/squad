@@ -1249,7 +1249,7 @@ function modalCancelEdit() {
   document.getElementById('modal-cancel-edit-btn').style.display = 'none';
 }
 
-function renderPrd(prd) {
+function renderPrd(prd, prog) {
   const section = document.getElementById('prd-content');
   const badge = document.getElementById('prd-badge');
   if (!prd) {
@@ -1262,12 +1262,20 @@ function renderPrd(prd) {
     return;
   }
   badge.innerHTML = '<span style="color:var(--green);font-size:11px">' + prd.age + '</span>';
+
+  // Use progress data for stats if available
+  const done = prog ? prog.complete + prog.prCreated : 0;
+  const wip = prog ? prog.inProgress : 0;
+  const todo = prog ? prog.missing + prog.planned : prd.missing;
+  const total = prog ? prog.total : (done + wip + todo);
+
   section.innerHTML =
     '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">' +
       '<div class="prd-stats" style="margin:0">' +
-        '<div class="prd-stat"><div class="prd-stat-num green">' + prd.existing + '</div><div class="prd-stat-label">Existing</div></div>' +
-        '<div class="prd-stat"><div class="prd-stat-num red">' + prd.missing + '</div><div class="prd-stat-label">Gaps</div></div>' +
-        '<div class="prd-stat"><div class="prd-stat-num orange">' + prd.questions + '</div><div class="prd-stat-label">Questions</div></div>' +
+        '<div class="prd-stat"><div class="prd-stat-num green">' + done + '</div><div class="prd-stat-label">Done</div></div>' +
+        '<div class="prd-stat"><div class="prd-stat-num" style="color:var(--blue)">' + wip + '</div><div class="prd-stat-label">In Progress</div></div>' +
+        '<div class="prd-stat"><div class="prd-stat-num" style="color:var(--muted)">' + todo + '</div><div class="prd-stat-label">To Do</div></div>' +
+        '<div class="prd-stat"><div class="prd-stat-num" style="color:var(--text)">' + total + '</div><div class="prd-stat-label">Total</div></div>' +
       '</div>' +
       (prd.summary ? '<div class="prd-summary" style="flex:1;min-width:200px">' + escHtml(prd.summary) + '</div>' : '') +
     '</div>';
@@ -1619,7 +1627,7 @@ async function refresh() {
     cmdUpdateAgentList(data.agents);
     cmdUpdateProjectList(data.projects || []);
     renderNotes(data.notes);
-    renderPrd(data.prd);
+    renderPrd(data.prd, data.prdProgress);
     renderPrs(data.pullRequests || []);
     renderArchiveButtons(data.archivedPrds || []);
     renderEngineStatus(data.engine);
