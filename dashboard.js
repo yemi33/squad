@@ -1733,6 +1733,21 @@ Answer concisely and directly. Follow these rules:
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
+  // POST /api/inbox/delete — delete an inbox note
+  if (req.method === 'POST' && req.url === '/api/inbox/delete') {
+    try {
+      const body = await readBody(req);
+      const { name } = body;
+      if (!name || name.includes('..') || name.includes('/') || name.includes('\\')) {
+        return jsonReply(res, 400, { error: 'invalid name' });
+      }
+      const filePath = path.join(SQUAD_DIR, 'notes', 'inbox', name);
+      if (!fs.existsSync(filePath)) return jsonReply(res, 404, { error: 'file not found' });
+      fs.unlinkSync(filePath);
+      return jsonReply(res, 200, { ok: true });
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
   // GET /api/skill?file=<name>.md&source=skills|project:<name>
   if (req.method === 'GET' && req.url.startsWith('/api/skill?')) {
     const params = new URL(req.url, 'http://localhost').searchParams;

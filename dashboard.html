@@ -975,6 +975,7 @@ function renderInbox(inbox) {
       <div style="display:flex;gap:6px;margin-top:6px;align-items:center">
         <button class="pr-pager-btn" style="font-size:9px;padding:2px 8px" onclick="event.stopPropagation();promoteToKB('${escHtml(item.name)}')">Add to Knowledge Base</button>
         <button class="pr-pager-btn" style="font-size:9px;padding:2px 8px" onclick="event.stopPropagation();openInboxInExplorer('${escHtml(item.name)}')">Open in Explorer</button>
+        <button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--red)" onclick="event.stopPropagation();deleteInboxItem('${escHtml(item.name)}')">Delete</button>
       </div>
     </div>
   `).join('');
@@ -1024,6 +1025,17 @@ async function openInboxInExplorer(name) {
       body: JSON.stringify({ name })
     });
   } catch {}
+}
+
+async function deleteInboxItem(name) {
+  if (!confirm('Delete "' + name + '" from inbox?')) return;
+  try {
+    const res = await fetch('/api/inbox/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (res.ok) { refresh(); } else { const d = await res.json(); alert('Failed: ' + (d.error || 'unknown')); }
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 function renderNotes(notes) {
