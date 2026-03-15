@@ -1146,6 +1146,133 @@ What would you like to discuss or change? When you're happy, say "approve" and I
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
+  // POST /api/doc-chat — unified Q&A + steering: Haiku decides whether to answer or edit
+  if (req.method === 'POST' && req.url === '/api/doc-chat') {
+    try {
+      const body = await readBody(req);
+      if (!body.message) return jsonReply(res, 400, { error: 'message required' });
+      if (!body.document) return jsonReply(res, 400, { error: 'document required' });
+
+      const canEdit = !!body.filePath;
+      const isJson = body.filePath?.endsWith('.json');
+
+      // Read current content from disk if editable (authoritative source)
+      let currentContent = body.document;
+      let fullPath = null;
+      if (canEdit) {
+        fullPath = path.resolve(SQUAD_DIR, body.filePath);
+        if (!fullPath.startsWith(path.resolve(SQUAD_DIR))) return jsonReply(res, 400, { error: 'path must be under squad directory' });
+        const diskContent = safeRead(fullPath);
+        if (diskContent !== null) currentContent = diskContent;
+      }
+
+      const prompt = `You are a document assistant for a software engineering squad. You can answer questions AND edit documents.
+
+## Document
+${body.title ? '**Title:** ' + body.title + '\n' : ''}File: ${body.filePath || '(read-only)'}
+${isJson ? 'Format: JSON' : 'Format: Markdown'}
+
+\`\`\`
+${currentContent.slice(0, 20000)}
+\`\`\`
+
+${body.selection ? '## Highlighted Selection\n> ' + body.selection.slice(0, 1500) + '\n' : ''}
+
+## User Message
+
+${body.message}
+
+## Instructions
+
+Determine what the user wants:
+
+**If they're asking a question** (e.g., "what does this mean", "why is this", "explain"):
+- Answer concisely with source citations
+- Do NOT include the ---DOCUMENT--- delimiter
+
+**If they want to edit the document** (e.g., "change", "remove", "add", "update", "rename", "fix", "reword"):
+- Briefly explain what you changed (1-2 sentences)
+- Then on a new line write exactly: ---DOCUMENT---
+- Then the COMPLETE updated document (full file, not a diff)
+${isJson ? '- The document MUST be valid JSON. No markdown code fences.' : ''}
+${!canEdit ? '\nNote: This document is READ-ONLY. Answer questions only — do not output ---DOCUMENT---.' : ''}
+
+Be concise. No preamble.`;
+
+      const sysPrompt = 'You are a precise document assistant. Determine intent (question vs edit) from the user message. Follow the output format exactly.';
+
+      const id = Date.now();
+      const promptPath = path.join(SQUAD_DIR, 'engine', 'chat-prompt-' + id + '.md');
+      const sysPath = path.join(SQUAD_DIR, 'engine', 'chat-sys-' + id + '.md');
+      safeWrite(promptPath, prompt);
+      safeWrite(sysPath, sysPrompt);
+
+      const spawnScript = path.join(SQUAD_DIR, 'engine', 'spawn-agent.js');
+      const childEnv = { ...process.env };
+      for (const key of Object.keys(childEnv)) {
+        if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) delete childEnv[key];
+      }
+
+      const { spawn: cpSpawn } = require('child_process');
+      const proc = cpSpawn(process.execPath, [
+        spawnScript, promptPath, sysPath,
+        '--output-format', 'text', '--max-turns', '1', '--model', 'haiku',
+        '--permission-mode', 'bypassPermissions', '--verbose',
+      ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv });
+
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', d => { stdout += d.toString(); });
+      proc.stderr.on('data', d => { stderr += d.toString(); });
+
+      const timeout = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} }, 90000);
+
+      proc.on('close', (code) => {
+        clearTimeout(timeout);
+        try { fs.unlinkSync(promptPath); } catch {}
+        try { fs.unlinkSync(sysPath); } catch {}
+
+        if (code === 0 && stdout.trim()) {
+          const output = stdout.trim();
+          const delimIdx = output.indexOf('---DOCUMENT---');
+
+          if (delimIdx < 0) {
+            // Q&A response — no edit
+            return jsonReply(res, 200, { ok: true, answer: output, edited: false });
+          }
+
+          // Edit response
+          const explanation = output.slice(0, delimIdx).trim();
+          let newContent = output.slice(delimIdx + '---DOCUMENT---'.length).trim();
+          newContent = newContent.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim();
+
+          if (isJson) {
+            try { JSON.parse(newContent); } catch (e) {
+              return jsonReply(res, 200, { ok: true, answer: explanation + '\n\n(JSON invalid — not saved: ' + e.message + ')', edited: false });
+            }
+          }
+
+          if (canEdit && fullPath) {
+            safeWrite(fullPath, newContent);
+            return jsonReply(res, 200, { ok: true, answer: explanation, edited: true, content: newContent });
+          } else {
+            return jsonReply(res, 200, { ok: true, answer: explanation + '\n\n(Read-only — changes not saved)', edited: false });
+          }
+        } else {
+          return jsonReply(res, 500, { error: 'Failed (code=' + code + ')', stderr: stderr.slice(0, 200) });
+        }
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        try { fs.unlinkSync(promptPath); } catch {}
+        try { fs.unlinkSync(sysPath); } catch {}
+        return jsonReply(res, 500, { error: err.message });
+      });
+      return;
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
   // POST /api/steer-document — modify a document via natural language instruction (Haiku)
   if (req.method === 'POST' && req.url === '/api/steer-document') {
     try {

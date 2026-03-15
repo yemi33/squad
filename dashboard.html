@@ -637,9 +637,8 @@
         <button class="pill-clear" onclick="clearQaSelection()" title="Clear selection">&times;</button>
       </div>
       <div class="modal-qa-input-wrap">
-        <input type="text" class="modal-qa-input" id="modal-qa-input" placeholder="Ask about this document (or select text first)..." onkeydown="if(event.key==='Enter')modalAskSubmit()">
-        <button class="modal-qa-btn" id="modal-qa-btn" onclick="modalAskSubmit()">Ask</button>
-        <button class="modal-qa-btn" id="modal-steer-btn" style="background:var(--green);display:none" onclick="modalSteerSubmit()">Edit</button>
+        <input type="text" class="modal-qa-input" id="modal-qa-input" placeholder="Ask a question or give an edit instruction..." onkeydown="if(event.key==='Enter')modalSend()">
+        <button class="modal-qa-btn" id="modal-send-btn" onclick="modalSend()">Send</button>
       </div>
     </div>
   </div>
@@ -970,7 +969,7 @@ function openNotesModal() {
   _modalEditable = 'notes.md';
   _modalFilePath = 'notes.md';
   document.getElementById('modal-edit-btn').style.display = '';
-  document.getElementById('modal-steer-btn').style.display = '';
+  // steer btn removed — unified send
   document.getElementById('modal').classList.add('open');
 }
 
@@ -1146,7 +1145,7 @@ function closeModal() {
   // Clear edit/steer state
   _modalEditable = null;
   _modalFilePath = null;
-  document.getElementById('modal-steer-btn').style.display = 'none';
+  // steer btn removed — unified send
   const body = document.getElementById('modal-body');
   body.contentEditable = 'false';
   body.style.border = '';
@@ -2312,10 +2311,10 @@ function clearQaSelection() {
   document.getElementById('modal-qa-input').placeholder = 'Ask about this document (or select text first)...';
 }
 
-async function modalAskSubmit() {
+async function modalSend() {
   const input = document.getElementById('modal-qa-input');
-  const question = input.value.trim();
-  if (!question) return;
+  const message = input.value.trim();
+  if (!message) return;
 
   // Capture content from modal body if not already set
   if (!_modalDocContext.content) {
@@ -2326,49 +2325,57 @@ async function modalAskSubmit() {
     }
   }
   if (!_modalDocContext.content) {
-    showToast('cmd-toast', 'No document content to ask about', false);
+    showToast('cmd-toast', 'No document content', false);
     return;
   }
 
   const thread = document.getElementById('modal-qa-thread');
-  const btn = document.getElementById('modal-qa-btn');
+  const btn = document.getElementById('modal-send-btn');
 
-  // Show question
-  let qHtml = '<div class="modal-qa-q">' + escHtml(question);
+  // Show message
+  let qHtml = '<div class="modal-qa-q">' + escHtml(message);
   if (_modalDocContext.selection) {
     qHtml += '<span class="selection-ref">Re: "' + escHtml(_modalDocContext.selection.slice(0, 100)) + ((_modalDocContext.selection.length > 100) ? '...' : '') + '"</span>';
   }
   qHtml += '</div>';
   thread.innerHTML += qHtml;
 
-  // Show loading
-  const loadingId = 'qa-loading-' + Date.now();
+  const loadingId = 'chat-loading-' + Date.now();
   thread.innerHTML += '<div class="modal-qa-loading" id="' + loadingId + '"><div class="dot-pulse"><span></span><span></span><span></span></div> Thinking...</div>';
   thread.scrollTop = thread.scrollHeight;
 
   input.value = '';
-  input.placeholder = 'Ask another question...';
   btn.disabled = true;
 
   try {
-    const res = await fetch('/api/ask-about', {
+    const res = await fetch('/api/doc-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        question,
+        message,
         document: _modalDocContext.content,
         title: _modalDocContext.title,
         selection: _modalDocContext.selection || '',
+        filePath: _modalFilePath || null,
       }),
     });
     const data = await res.json();
     const loadingEl = document.getElementById(loadingId);
     if (loadingEl) loadingEl.remove();
 
-    if (data.ok && data.answer) {
-      thread.innerHTML += '<div class="modal-qa-a">' + escHtml(data.answer) + '</div>';
+    if (data.ok) {
+      const borderColor = data.edited ? 'var(--green)' : 'var(--blue)';
+      const suffix = data.edited ? '\n\n✓ Document saved.' : '';
+      thread.innerHTML += '<div class="modal-qa-a" style="border-left-color:' + borderColor + '">' + escHtml(data.answer + suffix) + '</div>';
+
+      // Refresh modal body if document was edited
+      if (data.edited && data.content) {
+        const display = data.content.replace(/^---[\s\S]*?---\n*/m, '');
+        document.getElementById('modal-body').textContent = display;
+        _modalDocContext.content = display;
+      }
     } else {
-      thread.innerHTML += '<div class="modal-qa-a" style="color:var(--red)">Error: ' + escHtml(data.error || 'No answer') + '</div>';
+      thread.innerHTML += '<div class="modal-qa-a" style="color:var(--red)">Error: ' + escHtml(data.error || 'Failed') + '</div>';
     }
   } catch (e) {
     const loadingEl = document.getElementById(loadingId);
@@ -2376,9 +2383,9 @@ async function modalAskSubmit() {
     thread.innerHTML += '<div class="modal-qa-a" style="color:var(--red)">Error: ' + escHtml(e.message) + '</div>';
   }
 
-  _modalDocContext.selection = ''; // Clear selection after asking
+  _modalDocContext.selection = '';
   document.getElementById('modal-qa-pill').style.display = 'none';
-  document.getElementById('modal-qa-input').placeholder = 'Ask another question...';
+  input.placeholder = 'Ask or edit...';
   btn.disabled = false;
   thread.scrollTop = thread.scrollHeight;
   input.focus();
@@ -2626,7 +2633,7 @@ async function planView(file) {
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
     _modalDocContext = { title, content: text, selection: '' };
     _modalFilePath = 'plans/' + file;
-    document.getElementById('modal-steer-btn').style.display = '';
+    // steer btn removed — unified send
     document.getElementById('modal').classList.add('open');
   } catch (e) { console.error(e); }
 }
@@ -2729,7 +2736,7 @@ async function kbOpenItem(category, file) {
     document.getElementById('modal-body').textContent = display;
     _modalDocContext = { title: file, content: display, selection: '' };
     _modalFilePath = 'knowledge/' + category + '/' + file;
-    document.getElementById('modal-steer-btn').style.display = '';
+    // steer btn removed — unified send
     document.getElementById('modal').classList.add('open');
   } catch (e) {
     console.error('Failed to load KB item:', e);
