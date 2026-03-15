@@ -80,7 +80,7 @@
   .plan-card-title { font-size: 13px; font-weight: 600; color: var(--text); }
   .plan-card-meta { font-size: 10px; color: var(--muted); margin-top: 4px; display: flex; gap: 8px; flex-wrap: wrap; }
   .plan-card-actions { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
-  .plan-btn { font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text); transition: all 0.15s; }
+  .plan-btn { font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text); transition: all 0.15s; position: relative; z-index: 1; }
   .plan-btn:hover { border-color: var(--text); }
   .plan-btn.approve { color: var(--green); border-color: var(--green); }
   .plan-btn.approve:hover { background: rgba(63,185,80,0.1); }
@@ -2493,11 +2493,10 @@ function renderPlans(plans) {
 
     let actions = '';
     if (needsAction) {
-      actions = '<div class="plan-card-actions">' +
+      actions = '<div class="plan-card-actions" onclick="event.stopPropagation()">' +
         '<button class="plan-btn approve" onclick="planApprove(\'' + escHtml(p.file) + '\')">Approve</button>' +
         '<button class="plan-btn" style="color:var(--blue);border-color:var(--blue)" onclick="planDiscuss(\'' + escHtml(p.file) + '\')">Discuss &amp; Revise</button>' +
         '<button class="plan-btn reject" onclick="planReject(\'' + escHtml(p.file) + '\')">Reject</button>' +
-        '<button class="plan-btn" onclick="planView(\'' + escHtml(p.file) + '\')">View Full Plan</button>' +
       '</div>' +
       '<div id="revise-input-' + escHtml(p.file).replace(/\./g, '-') + '" style="display:none">' +
         '<textarea class="plan-feedback-input" placeholder="What should be changed? Be specific..." id="revise-feedback-' + escHtml(p.file).replace(/\./g, '-') + '"></textarea>' +
@@ -2508,14 +2507,12 @@ function renderPlans(plans) {
       '</div>';
     } else if (isRevision) {
       actions = '<div class="plan-card-meta" style="margin-top:6px;color:var(--purple,#a855f7)">Revision in progress: ' + escHtml((p.revisionFeedback || '').slice(0, 100)) + '</div>';
-    } else {
-      // All other statuses (approved, active, draft, completed) — always show View
-      actions = '<div class="plan-card-actions"><button class="plan-btn" onclick="planView(\'' + escHtml(p.file) + '\')">View</button></div>';
     }
+    // No else needed — whole card is clickable
 
-    return '<div class="plan-card ' + statusClass(status) + '">' +
+    return '<div class="plan-card ' + statusClass(status) + '" style="cursor:pointer" onclick="planView(\'' + escHtml(p.file) + '\')">' +
       '<div class="plan-card-header">' +
-        '<div><div class="plan-card-title" style="cursor:pointer" onclick="planView(\'' + escHtml(p.file) + '\')">' + escHtml(p.summary || p.file) + '</div>' +
+        '<div><div class="plan-card-title">' + escHtml(p.summary || p.file) + '</div>' +
           '<div class="plan-card-meta">' +
             '<span style="font-weight:600;color:' + (needsAction ? 'var(--yellow,#d29922)' : status === 'approved' ? 'var(--green)' : 'var(--muted)') + '">' + label + '</span>' +
             '<span>' + escHtml(p.project) + '</span>' +
