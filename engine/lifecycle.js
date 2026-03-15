@@ -218,6 +218,33 @@ function updateWorkItemStatus(meta, status, reason) {
 
     shared.safeWrite(wiPath, items);
     e.log('info', `Work item ${itemId} → ${status}${reason ? ': ' + reason : ''}`);
+
+    // Sync back to PRD: update plan JSON item status when a materialized work item completes
+    if (target && target.sourcePlan && target.sourcePlanItem) {
+      try {
+        const planPath = path.join(e.PLANS_DIR, target.sourcePlan);
+        const plan = e.safeJson(planPath);
+        if (plan?.missing_features) {
+          const feature = plan.missing_features.find(f => f.id === target.sourcePlanItem);
+          if (feature) {
+            const oldStatus = feature.status;
+            if (status === 'done') {
+              feature.status = 'implemented';
+              feature.implementedAt = e.ts();
+            } else if (status === 'failed') {
+              feature.status = 'failed';
+              if (reason) feature.failReason = reason;
+            } else if (status === 'dispatched' || status === 'in-progress') {
+              feature.status = 'in-progress';
+            }
+            if (feature.status !== oldStatus) {
+              shared.safeWrite(planPath, plan);
+              e.log('info', `PRD sync: ${target.sourcePlan} item ${target.sourcePlanItem} → ${feature.status}`);
+            }
+          }
+        }
+      } catch {}
+    }
   }
 }
 

@@ -1098,7 +1098,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // GET /api/plans — list all plan files (.json PRDs + .md raw plans)
+  // GET /api/plans — list plan files (.md drafts + .json PRDs that need action)
+  // PRD .json files with status 'approved'/'active' are shown in the PRD tile, not here
   if (req.method === 'GET' && req.url === '/api/plans') {
     const plansDir = path.join(SQUAD_DIR, 'plans');
     const allFiles = safeReadDir(plansDir).filter(f => f.endsWith('.json') || f.endsWith('.md'));
@@ -1108,11 +1109,15 @@ const server = http.createServer(async (req, res) => {
       if (isJson) {
         try {
           const plan = JSON.parse(content);
+          // Only show in plans tile if paused, rejected, or revision-requested
+          // Active/approved PRDs belong in the PRD tile exclusively
+          const status = plan.status || 'active';
+          if (status === 'approved' || status === 'active') return null;
           return {
             file: f, format: 'prd',
             project: plan.project || '',
             summary: plan.plan_summary || '',
-            status: plan.status || 'active',
+            status,
             branchStrategy: plan.branch_strategy || 'parallel',
             featureBranch: plan.feature_branch || '',
             itemCount: (plan.missing_features || []).length,
