@@ -596,7 +596,6 @@
       <span><code>#project</code> target</span>
       <span><code>!high</code> / <code>!low</code> priority</span>
       <span><code>/plan</code> feature plan</span>
-      <span><code>/prd</code> PRD item</span>
       <span><code>/note</code> team note</span>
       <span>or just type a task</span>
       <button class="cmd-history-btn" onclick="cmdShowHistory()">Past Commands</button>
@@ -1892,7 +1891,7 @@ function detectWorkItemType(text) {
 function cmdParseInput(raw) {
   let text = raw.trim();
   const result = {
-    intent: 'work-item', // 'work-item' | 'note' | 'prd'
+    intent: 'work-item', // 'work-item' | 'note' | 'plan'
     agents: [],           // assigned agent IDs
     fanout: false,
     priority: 'medium',
@@ -1984,7 +1983,7 @@ function cmdRenderMeta() {
     const stratLabel = strategy === 'parallel' ? 'parallel branches' : 'stacked';
     chips.push('<span class="cmd-chip" style="background:var(--purple,#a855f7);color:#fff">Plan → PRD → Dispatch (' + stratLabel + ')</span>');
   } else {
-    const intentLabels = { 'work-item': 'Work Item', 'note': 'Note', 'prd': 'PRD Item' };
+    const intentLabels = { 'work-item': 'Work Item', 'note': 'Note', 'plan': 'Plan' };
     chips.push('<span class="cmd-chip intent">' + intentLabels[parsed.intent] + '</span>');
   }
 
@@ -2105,7 +2104,7 @@ function cmdUpdateHighlight() {
   if (!text) { hl.innerHTML = ''; return; }
   // Escape HTML then wrap tokens with highlight spans
   let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  html = html.replace(/(\/(?:plan|prd|note|decide)\b)/gi, '<span class="hl-cmd">$1</span>');
+  html = html.replace(/(\/(?:plan|note|decide)\b)/gi, '<span class="hl-cmd">$1</span>');
   html = html.replace(/(@\w+)/g, '<span class="hl-mention">$1</span>');
   html = html.replace(/(![a-z]+\b)/gi, '<span class="hl-priority">$1</span>');
   html = html.replace(/(#\S+)/g, '<span class="hl-project">$1</span>');
@@ -2947,8 +2946,8 @@ function cmdShowHistory() {
   if (history.length === 0) {
     body.innerHTML = '<div class="cmd-history-empty">No commands yet. Submit something from the command center.</div>';
   } else {
-    const intentColors = { 'work-item': 'var(--blue)', 'note': 'var(--green)', 'plan': 'var(--purple,#a855f7)', 'prd': 'var(--yellow,#d29922)' };
-    const intentLabels = { 'work-item': 'Work Item', 'note': 'Note', 'plan': 'Plan', 'prd': 'PRD' };
+    const intentColors = { 'work-item': 'var(--blue)', 'note': 'var(--green)', 'plan': 'var(--purple,#a855f7)' };
+    const intentLabels = { 'work-item': 'Work Item', 'note': 'Note', 'plan': 'Plan' };
     body.innerHTML = '<ul class="cmd-history-list">' + history.map((item, i) => {
       const date = new Date(item.timestamp);
       const ago = timeSinceStr(date);
