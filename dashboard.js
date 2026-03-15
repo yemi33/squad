@@ -151,34 +151,19 @@ function getAgents() {
 }
 
 function getPrdInfo() {
-  // Merge items from squad-level prd.json AND plan-generated PRDs in plans/*.json
-  const prdPath = path.join(SQUAD_DIR, 'prd.json');
+  // All PRD items come from plans/*.json (both manual /prd entries and agent-generated plans)
   const plansDir = path.join(SQUAD_DIR, 'plans');
-
-  // Collect all PRD items from all sources
   let allPrdItems = [];
-  let prdExists = false;
-  let prdStat = null;
+  let latestStat = null;
 
-  // Source 1: squad-level prd.json
-  if (fs.existsSync(prdPath)) {
-    prdExists = true;
-    try {
-      prdStat = fs.statSync(prdPath);
-      const data = JSON.parse(fs.readFileSync(prdPath, 'utf8'));
-      (data.missing_features || []).forEach(f => allPrdItems.push({ ...f, _source: 'prd.json' }));
-    } catch {}
-  }
-
-  // Source 2: plans/*.json (plan-generated PRDs)
   try {
     const planFiles = fs.readdirSync(plansDir).filter(f => f.endsWith('.json'));
     for (const pf of planFiles) {
       try {
         const plan = JSON.parse(fs.readFileSync(path.join(plansDir, pf), 'utf8'));
         if (!plan.missing_features) continue;
-        prdExists = true;
-        if (!prdStat) try { prdStat = fs.statSync(path.join(plansDir, pf)); } catch {}
+        const stat = fs.statSync(path.join(plansDir, pf));
+        if (!latestStat || stat.mtimeMs > latestStat.mtimeMs) latestStat = stat;
         (plan.missing_features || []).forEach(f => allPrdItems.push({
           ...f, _source: pf, _planStatus: plan.status || 'active',
           _planSummary: plan.plan_summary || pf,
@@ -187,7 +172,18 @@ function getPrdInfo() {
     }
   } catch {}
 
-  if (!prdExists) return { progress: null, status: null };
+  // Also read legacy prd.json if it exists (backward compat)
+  const legacyPath = path.join(SQUAD_DIR, 'prd.json');
+  try {
+    if (fs.existsSync(legacyPath)) {
+      const data = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+      (data.missing_features || []).forEach(f => allPrdItems.push({ ...f, _source: 'prd.json (legacy)' }));
+      const stat = fs.statSync(legacyPath);
+      if (!latestStat || stat.mtimeMs > latestStat.mtimeMs) latestStat = stat;
+    }
+  } catch {}
+
+  if (allPrdItems.length === 0) return { progress: null, status: null };
 
   const items = allPrdItems;
 
@@ -233,7 +229,7 @@ function getPrdInfo() {
 
     const status = {
       exists: true,
-      age: prdStat ? timeSince(prdStat.mtimeMs) : 'unknown',
+      age: latestStat ? timeSince(latestStat.mtimeMs) : 'unknown',
       existing: 0,
       missing: items.filter(i => i.status === 'missing').length,
       questions: 0,
@@ -824,24 +820,36 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
-  // POST /api/prd-items — squad-level PRD
+  // POST /api/prd-items — create a PRD item as a plan file in plans/ (auto-approved)
   if (req.method === 'POST' && req.url === '/api/prd-items') {
     try {
       const body = await readBody(req);
       if (!body.name || !body.name.trim()) return jsonReply(res, 400, { error: 'name is required' });
-      const prdPath = path.join(SQUAD_DIR, 'prd.json');
-      let data = { missing_features: [], existing_features: [], open_questions: [] };
-      const existing = safeRead(prdPath);
-      if (existing) { try { data = JSON.parse(existing); } catch {} }
-      if (!data.missing_features) data.missing_features = [];
-      data.missing_features.push({
-        id: body.id, name: body.name, description: body.description || '',
-        priority: body.priority || 'medium', estimated_complexity: body.estimated_complexity || 'medium',
-        rationale: body.rationale || '', status: 'missing', affected_areas: [],
-        projects: body.projects || [],
-      });
-      safeWrite(prdPath, data);
-      return jsonReply(res, 200, { ok: true, id: body.id });
+
+      const plansDir = path.join(SQUAD_DIR, 'plans');
+      if (!fs.existsSync(plansDir)) fs.mkdirSync(plansDir, { recursive: true });
+
+      const id = body.id || ('M' + String(Date.now()).slice(-4));
+      const planFile = 'manual-' + Date.now() + '.json';
+      const plan = {
+        version: 'manual-' + new Date().toISOString().slice(0, 10),
+        project: body.project || (PROJECTS[0]?.name || 'Unknown'),
+        generated_by: 'dashboard',
+        generated_at: new Date().toISOString().slice(0, 10),
+        plan_summary: body.name,
+        status: 'approved',
+        approvedAt: new Date().toISOString(),
+        approvedBy: 'dashboard',
+        branch_strategy: 'parallel',
+        missing_features: [{
+          id, name: body.name, description: body.description || '',
+          priority: body.priority || 'medium', estimated_complexity: body.estimated_complexity || 'medium',
+          status: 'missing', depends_on: [], acceptance_criteria: [],
+        }],
+        open_questions: [],
+      };
+      safeWrite(path.join(plansDir, planFile), plan);
+      return jsonReply(res, 200, { ok: true, id, file: planFile });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
