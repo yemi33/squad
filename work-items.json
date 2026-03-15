@@ -313,5 +313,19 @@
     "dispatched_at": "2026-03-15T03:01:05.548Z",
     "dispatched_to": "ripley",
     "completedAt": "2026-03-15T03:17:35.377Z"
+  },
+  {
+    "id": "W026",
+    "title": "Convert plan to PRD: Claude Cowork UX in Bebop",
+    "type": "plan-to-prd",
+    "priority": "high",
+    "description": "Plan file: plans/plan-w025-2026-03-15.md\nChained from plan task (manual trigger — reconciliation path missed chain)",
+    "status": "dispatched",
+    "created": "2026-03-15T03:32:22.789Z",
+    "createdBy": "engine:chain-manual",
+    "project": "OfficeAgent",
+    "planFile": "plan-w025-2026-03-15.md",
+    "dispatched_at": "2026-03-15T03:32:37.109Z",
+    "dispatched_to": "lambert"
   }
 ]
