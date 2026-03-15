@@ -2692,6 +2692,9 @@ function renderPlans(plans) {
     }
     // No else needed — whole card is clickable
 
+    const deleteBtn = '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--red)" ' +
+      'onclick="event.stopPropagation();planDelete(\'' + escHtml(p.file) + '\')">Delete</button>';
+
     return '<div class="plan-card ' + statusClass(status) + '" style="cursor:pointer" onclick="planView(\'' + escHtml(p.file) + '\')">' +
       '<div class="plan-card-header">' +
         '<div><div class="plan-card-title">' + escHtml(p.summary || p.file) + '</div>' +
@@ -2702,6 +2705,7 @@ function renderPlans(plans) {
             '<span>' + escHtml(p.branchStrategy) + '</span>' +
             (p.generatedBy ? '<span>by ' + escHtml(p.generatedBy) + '</span>' : '') +
             (p.generatedAt ? '<span>' + p.generatedAt + '</span>' : '') +
+            deleteBtn +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -2726,6 +2730,25 @@ async function planReject(file) {
     showToast('cmd-toast', 'Plan rejected', true);
     refreshPlans();
   } catch (e) { showToast('cmd-toast', 'Error: ' + e.message, false); }
+}
+
+async function planDelete(file) {
+  if (!confirm('Delete plan "' + file + '"? This cannot be undone.')) return;
+  try {
+    const res = await fetch('/api/plans/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file })
+    });
+    if (res.ok) {
+      closeModal();
+      showToast('cmd-toast', 'Plan deleted', true);
+      refreshPlans();
+      refresh();
+    } else {
+      const d = await res.json();
+      alert('Failed: ' + (d.error || 'unknown'));
+    }
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 function planShowRevise(file) {
@@ -2807,7 +2830,9 @@ async function planView(file) {
       if (titleMatch) title = titleMatch[1];
     }
 
-    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-title').innerHTML = escHtml(title) +
+      ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--red);margin-left:12px;vertical-align:middle" ' +
+      'onclick="planDelete(\'' + escHtml(file) + '\')">Delete Plan</button>';
     document.getElementById('modal-body').textContent = text;
     document.getElementById('modal-body').style.fontFamily = 'Consolas, monospace';
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
