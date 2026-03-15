@@ -61,6 +61,61 @@ Power user shortcuts are preserved in the Haiku system prompt rules:
 
 If Haiku fails, times out, or returns invalid JSON, the frontend silently falls back to the existing `cmdParseInput()` regex parser. The user never sees an error — they just get the old keyword-matching behavior.
 
+## Commands to Try
+
+Try these in the Command Center to see triage in action:
+
+**Work items (implement, explore, fix, test):**
+```
+fix the auth bug in the login page @dallas !high #office-bohemia
+→ { intent: "work-item", type: "fix", agents: ["dallas"], priority: "high", project: "office-bohemia" }
+
+explore how the 1JS framework loads experiences
+→ { intent: "work-item", type: "explore", title: "Explore how 1JS framework loads experiences" }
+
+build and test dallas's latest PR
+→ { intent: "work-item", type: "test", title: "Build and test Dallas's latest PR" }
+```
+
+**Notes (team context, FYI, decisions):**
+```
+/note sachin is the eng who owns the Sydney NDJSON streaming backend
+→ { intent: "note", title: "Sachin is the eng who owns the Sydney NDJSON streaming backend" }
+
+/decide all PRs must have a test plan section
+→ { intent: "note", title: "All PRs must have a test plan section" }
+```
+
+**Plans (feature work, multi-step projects):**
+```
+/plan implement claude cowork UX in bebop with OfficeAgent capabilities #office-bohemia #OfficeAgent
+→ { intent: "plan", title: "Implement Claude Cowork UX...", projects: ["office-bohemia", "OfficeAgent"] }
+
+make a plan for adding progression UI to the cowork route --stack
+→ { intent: "plan", branchStrategy: "shared-branch" }
+```
+
+**PRD items (product backlog):**
+```
+/prd Add feature flag gating for cowork route !high #office-bohemia
+→ { intent: "prd", title: "Add feature flag gating for cowork route", priority: "high", projects: ["office-bohemia"] }
+```
+
+**Fan-out (parallel dispatch to all agents):**
+```
+explore all codebases and document architecture @everyone
+→ { intent: "work-item", type: "explore", fanout: true }
+```
+
+**Agent assignment:**
+```
+@rebecca design the API schema for the new agent protocol
+→ { intent: "work-item", type: "explore", agents: ["rebecca"] }
+
+ok ripley's plan - review it
+→ Haiku infers: review Ripley's plan (matches against recent plans in context)
+```
+
 ## Design Decisions
 
 - **Haiku, not Sonnet** — triage is a classification task; Haiku is sufficient and faster
