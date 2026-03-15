@@ -871,12 +871,13 @@ ${ctx.activeDispatch}
 
 ## Available Intents
 
-- "work-item": A task for an agent. Types: ask, explore, fix, review, test, implement
+- "work-item": A task for an agent. Types: ask, explore, fix, review, test, implement, plan-to-prd
 - "note": A decision, reminder, or knowledge to save (keywords: remember, note, don't forget)
-- "plan": Create a multi-step implementation plan that gets broken into tasks and auto-dispatched to agents.
-  Use this when the user wants to BUILD, IMPLEMENT, or PLAN something, especially from an existing plan/doc.
-  Also use for PRD creation — "create PRD from X" means analyze and break into executable tasks.
-  Keywords: plan, design, architect, implement, build, create PRD, execute, make it happen, prd
+- "plan": Create a NEW multi-step implementation plan from scratch. Use only when no plan exists yet.
+  Keywords: plan, design, architect, make a plan for, /plan
+- "work-item" with type "plan-to-prd": Convert an EXISTING plan into PRD items / executable tasks.
+  Use when the user references a plan that already exists on disk (check plans list above).
+  Keywords: create PRD from, convert plan to PRD, execute the plan, implement the plan, break down the plan
 
 ## Rules
 
@@ -899,8 +900,9 @@ ${ctx.activeDispatch}
 8. Default branchStrategy for plans: "parallel"
 9. Be concise in title and description — the title should be action-oriented,
    the description should include any resolved references or context.
-10. "Create PRD from X", "implement X's plan", "execute the plan", "build from the plan"
-    → all intent "plan". These mean "take a plan and break it into executable tasks."
+10. When the user says "create PRD from X's plan", "execute the plan", "implement the plan":
+    → If the plan EXISTS on disk (check plans list above) → intent "work-item", type "plan-to-prd", include plan filename in description
+    → If NO plan exists yet → intent "plan" (create one first)
 
 ## Output Format
 
@@ -909,7 +911,7 @@ Respond with ONLY a JSON object, no markdown fences, no explanation:
   "intent": "work-item|note|plan",
   "title": "concise action title",
   "description": "additional context, resolved references",
-  "type": "ask|explore|fix|review|test|implement",
+  "type": "ask|explore|fix|review|test|implement|plan-to-prd",
   "priority": "low|medium|high",
   "agents": ["agent-id"] or [],
   "fanout": false,
