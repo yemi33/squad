@@ -1129,7 +1129,7 @@ User command: ${body.message}`;
       const proc = cpSpawn(process.execPath, [
         spawnScript, promptPath, sysPath,
         '--output-format', 'stream-json', '--max-turns', '1', '--model', 'haiku',
-        '--permission-mode', 'bypassPermissions',
+        '--permission-mode', 'bypassPermissions', '--verbose',
       ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv, windowsHide: true });
 
       let stdout = '';
