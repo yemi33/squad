@@ -1189,6 +1189,36 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
+  // POST /api/plans/execute — queue plan-to-prd conversion for a .md plan
+  if (req.method === 'POST' && req.url === '/api/plans/execute') {
+    try {
+      const body = await readBody(req);
+      if (!body.file) return jsonReply(res, 400, { error: 'file required' });
+      if (!body.file.endsWith('.md')) return jsonReply(res, 400, { error: 'only .md plans can be executed' });
+      const planPath = path.join(SQUAD_DIR, 'plans', body.file);
+      if (!fs.existsSync(planPath)) return jsonReply(res, 404, { error: 'plan file not found' });
+
+      // Check if already queued
+      const centralPath = path.join(SQUAD_DIR, 'work-items.json');
+      const items = JSON.parse(safeRead(centralPath) || '[]');
+      const existing = items.find(w => w.type === 'plan-to-prd' && w.planFile === body.file && (w.status === 'pending' || w.status === 'dispatched'));
+      if (existing) return jsonReply(res, 200, { ok: true, id: existing.id, alreadyQueued: true });
+
+      const maxNum = items.reduce((max, i) => { const m = (i.id || '').match(/(\d+)$/); return m ? Math.max(max, parseInt(m[1])) : max; }, 0);
+      const id = 'W' + String(maxNum + 1).padStart(3, '0');
+      items.push({
+        id, title: 'Convert plan to PRD: ' + body.file.replace('.md', ''),
+        type: 'plan-to-prd', priority: 'high',
+        description: 'Plan file: plans/' + body.file,
+        status: 'pending', created: new Date().toISOString(),
+        createdBy: 'dashboard:execute', project: body.project || '',
+        planFile: body.file,
+      });
+      safeWrite(centralPath, items);
+      return jsonReply(res, 200, { ok: true, id });
+    } catch (e) { return jsonReply(res, 400, { error: e.message }); }
+  }
+
   // POST /api/plans/reject — reject a plan
   if (req.method === 'POST' && req.url === '/api/plans/reject') {
     try {

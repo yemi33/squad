@@ -2864,8 +2864,12 @@ function renderPlans(plans) {
     }
     // No else needed — whole card is clickable
 
+    const isDraft = p.format === 'draft' || status === 'draft';
     const isPaused = status === 'awaiting-approval';
-    const pauseBtn = isWorking ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--yellow)" ' +
+    const isApproved = status === 'approved' || status === 'active';
+    const executeBtn = isDraft ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green);font-weight:600" ' +
+      'onclick="event.stopPropagation();planExecute(\'' + escHtml(p.file) + '\',\'' + escHtml(p.project) + '\')">Execute</button>' : '';
+    const pauseBtn = (isApproved || isWorking) && !isDraft ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--yellow)" ' +
       'onclick="event.stopPropagation();planPause(\'' + escHtml(p.file) + '\')">Pause</button>' : '';
     const resumeBtn = isPaused ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green)" ' +
       'onclick="event.stopPropagation();planApprove(\'' + escHtml(p.file) + '\')">Resume</button>' : '';
@@ -2882,7 +2886,7 @@ function renderPlans(plans) {
             '<span>' + escHtml(p.branchStrategy) + '</span>' +
             (p.generatedBy ? '<span>by ' + escHtml(p.generatedBy) + '</span>' : '') +
             (p.generatedAt ? '<span>' + p.generatedAt + '</span>' : '') +
-            pauseBtn + resumeBtn + deleteBtn +
+            executeBtn + pauseBtn + resumeBtn + deleteBtn +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -2897,6 +2901,21 @@ async function planApprove(file) {
     showToast('cmd-toast', 'Plan approved — work will begin on next engine tick', true);
     refreshPlans();
   } catch (e) { showToast('cmd-toast', 'Error: ' + e.message, false); }
+}
+
+async function planExecute(file, project) {
+  try {
+    const res = await fetch('/api/plans/execute', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file, project })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      closeModal();
+      showToast('cmd-toast', data.alreadyQueued ? 'Already queued (' + data.id + ')' : 'Queued ' + data.id + ' — agent will convert plan to PRD', true);
+      refresh();
+    } else { alert('Failed: ' + (data.error || 'unknown')); }
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function planPause(file) {
@@ -3016,18 +3035,21 @@ async function planView(file) {
       if (titleMatch) title = titleMatch[1];
     }
 
-    // Determine plan status for pause/resume button
+    // Determine plan type and status for action buttons
+    const isMdPlan = file.endsWith('.md');
     let planStatus = '';
     try { if (file.endsWith('.json')) planStatus = JSON.parse(raw).status || ''; } catch {}
-    const isActive = planStatus === 'approved' || planStatus === 'active' || !planStatus;
+    const isActive = planStatus === 'approved' || planStatus === 'active';
     const isPaused = planStatus === 'awaiting-approval';
-    const modalPauseBtn = isActive ? ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--yellow);margin-left:8px;vertical-align:middle" ' +
+    const modalExecuteBtn = isMdPlan ? ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--green);font-weight:600;margin-left:8px;vertical-align:middle" ' +
+      'onclick="planExecute(\'' + escHtml(file) + '\',\'\')">Execute</button>' : '';
+    const modalPauseBtn = isActive && !isMdPlan ? ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--yellow);margin-left:8px;vertical-align:middle" ' +
       'onclick="planPause(\'' + escHtml(file) + '\');closeModal()">Pause</button>' : '';
     const modalResumeBtn = isPaused ? ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--green);margin-left:8px;vertical-align:middle" ' +
       'onclick="planApprove(\'' + escHtml(file) + '\');closeModal()">Resume</button>' : '';
 
     document.getElementById('modal-title').innerHTML = escHtml(title) +
-      modalPauseBtn + modalResumeBtn +
+      modalExecuteBtn + modalPauseBtn + modalResumeBtn +
       ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--red);margin-left:8px;vertical-align:middle" ' +
       'onclick="planDelete(\'' + escHtml(file) + '\')">Delete</button>';
     document.getElementById('modal-body').textContent = text;
