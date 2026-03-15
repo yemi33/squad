@@ -957,6 +957,7 @@ function detectDependencyCycles(items) {
 // ─── Inbox Consolidation (extracted to engine/consolidation.js) ──────────────
 
 const { consolidateInbox } = require('./engine/consolidation');
+const { pollPrStatus, pollPrHumanComments } = require('./engine/ado');
 
 // ─── State Snapshot ─────────────────────────────────────────────────────────
 
