@@ -69,6 +69,73 @@ function timeSince(ms) {
   return `${Math.floor(s / 3600)}h ago`;
 }
 
+// -- Engine LLM Usage Tracking --
+
+function parseStreamJsonOutput(raw) {
+  // Parse stream-json output: extract text content and usage from result line
+  const lines = raw.split('\n');
+  let text = '';
+  let usage = null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line || !line.startsWith('{')) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj.type === 'result') {
+        if (obj.result) text = obj.result;
+        if (obj.total_cost_usd || obj.usage) {
+          usage = {
+            costUsd: obj.total_cost_usd || 0,
+            inputTokens: obj.usage?.input_tokens || 0,
+            outputTokens: obj.usage?.output_tokens || 0,
+            cacheRead: obj.usage?.cache_read_input_tokens || obj.usage?.cacheReadInputTokens || 0,
+          };
+        }
+        break;
+      }
+      // Also try assistant message for text extraction
+      if (obj.type === 'assistant' && obj.message?.content) {
+        for (const block of obj.message.content) {
+          if (block.type === 'text') text += (text ? '\n' : '') + block.text;
+        }
+      }
+    } catch {}
+  }
+  return { text, usage };
+}
+
+function trackEngineUsage(category, usage) {
+  if (!usage) return;
+  try {
+    const metricsPath = path.join(SQUAD_DIR, 'engine', 'metrics.json');
+    const raw = safeRead(metricsPath);
+    const metrics = raw ? JSON.parse(raw) : {};
+
+    if (!metrics._engine) metrics._engine = {};
+    if (!metrics._engine[category]) {
+      metrics._engine[category] = { calls: 0, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0 };
+    }
+    const cat = metrics._engine[category];
+    cat.calls++;
+    cat.costUsd += usage.costUsd || 0;
+    cat.inputTokens += usage.inputTokens || 0;
+    cat.outputTokens += usage.outputTokens || 0;
+    cat.cacheRead += usage.cacheRead || 0;
+
+    // Also track in daily totals
+    const today = new Date().toISOString().slice(0, 10);
+    if (!metrics._daily) metrics._daily = {};
+    if (!metrics._daily[today]) metrics._daily[today] = { costUsd: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, tasks: 0 };
+    const daily = metrics._daily[today];
+    daily.costUsd += usage.costUsd || 0;
+    daily.inputTokens += usage.inputTokens || 0;
+    daily.outputTokens += usage.outputTokens || 0;
+    daily.cacheRead += usage.cacheRead || 0;
+
+    safeWrite(metricsPath, metrics);
+  } catch {}
+}
+
 // -- Data Collectors --
 
 function getAgentDetail(id) {
@@ -1014,7 +1081,7 @@ User command: ${body.message}`;
       const { spawn: cpSpawn } = require('child_process');
       const proc = cpSpawn(process.execPath, [
         spawnScript, promptPath, sysPath,
-        '--output-format', 'text', '--max-turns', '1', '--model', 'haiku',
+        '--output-format', 'stream-json', '--max-turns', '1', '--model', 'haiku',
         '--permission-mode', 'bypassPermissions',
       ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv, windowsHide: true });
 
@@ -1031,7 +1098,9 @@ User command: ${body.message}`;
         try { fs.unlinkSync(sysPath); } catch {}
 
         if (code === 0 && stdout.trim()) {
-          let output = stdout.trim();
+          const parsed = parseStreamJsonOutput(stdout);
+          trackEngineUsage('triage', parsed.usage);
+          let output = (parsed.text || stdout).trim();
           // Strip markdown fences if Haiku wraps the JSON
           output = output.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
           try {
@@ -1271,7 +1340,25 @@ User command: ${body.message}`;
       const planPath = path.join(SQUAD_DIR, 'plans', body.file);
       if (!fs.existsSync(planPath)) return jsonReply(res, 404, { error: 'plan not found' });
       fs.unlinkSync(planPath);
-      return jsonReply(res, 200, { ok: true });
+
+      // Clean up materialized work items from all projects + central
+      let cleaned = 0;
+      const wiPaths = [path.join(SQUAD_DIR, 'work-items.json')];
+      for (const proj of PROJECTS) {
+        wiPaths.push(path.join(proj.localPath, '.squad', 'work-items.json'));
+      }
+      for (const wiPath of wiPaths) {
+        try {
+          const items = JSON.parse(fs.readFileSync(wiPath, 'utf8'));
+          const filtered = items.filter(w => w.sourcePlan !== body.file);
+          if (filtered.length < items.length) {
+            cleaned += items.length - filtered.length;
+            safeWrite(wiPath, filtered);
+          }
+        } catch {}
+      }
+
+      return jsonReply(res, 200, { ok: true, cleanedWorkItems: cleaned });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
@@ -1476,7 +1563,7 @@ Be concise. No preamble.`;
       const { spawn: cpSpawn } = require('child_process');
       const proc = cpSpawn(process.execPath, [
         spawnScript, promptPath, sysPath,
-        '--output-format', 'text', '--max-turns', '1', '--model', 'haiku',
+        '--output-format', 'stream-json', '--max-turns', '1', '--model', 'haiku',
         '--permission-mode', 'bypassPermissions', '--verbose',
       ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv, windowsHide: true });
 
@@ -1493,7 +1580,9 @@ Be concise. No preamble.`;
         try { fs.unlinkSync(sysPath); } catch {}
 
         if (code === 0 && stdout.trim()) {
-          const output = stdout.trim();
+          const parsed = parseStreamJsonOutput(stdout);
+          trackEngineUsage('doc-chat', parsed.usage);
+          const output = (parsed.text || stdout).trim();
           const delimIdx = output.indexOf('---DOCUMENT---');
 
           if (delimIdx < 0) {
@@ -1596,7 +1685,7 @@ ${isJson ? 'CRITICAL: The document section must be valid JSON. Do not add markdo
       const { spawn: cpSpawn } = require('child_process');
       const proc = cpSpawn(process.execPath, [
         spawnScript, promptPath, sysPath,
-        '--output-format', 'text', '--max-turns', '1', '--model', 'haiku',
+        '--output-format', 'stream-json', '--max-turns', '1', '--model', 'haiku',
         '--permission-mode', 'bypassPermissions', '--verbose',
       ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv, windowsHide: true });
 
@@ -1613,7 +1702,9 @@ ${isJson ? 'CRITICAL: The document section must be valid JSON. Do not add markdo
         try { fs.unlinkSync(sysPath); } catch {}
 
         if (code === 0 && stdout.trim()) {
-          const output = stdout.trim();
+          const parsed = parseStreamJsonOutput(stdout);
+          trackEngineUsage('steer-document', parsed.usage);
+          const output = (parsed.text || stdout).trim();
           const delimIdx = output.indexOf('---DOCUMENT---');
           if (delimIdx < 0) {
             return jsonReply(res, 200, { ok: true, answer: output, updated: false, reason: 'No document delimiter found — treated as Q&A response' });
@@ -1697,7 +1788,7 @@ Answer concisely and directly. Follow these rules:
       const { spawn: cpSpawn } = require('child_process');
       const proc = cpSpawn(process.execPath, [
         spawnScript, promptPath, sysPath,
-        '--output-format', 'text', '--max-turns', '1', '--model', 'haiku',
+        '--output-format', 'stream-json', '--max-turns', '1', '--model', 'haiku',
         '--permission-mode', 'bypassPermissions', '--verbose',
       ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv, windowsHide: true });
 
@@ -1714,7 +1805,9 @@ Answer concisely and directly. Follow these rules:
         try { fs.unlinkSync(promptPath); } catch {}
         try { fs.unlinkSync(sysPath); } catch {}
         if (code === 0 && stdout.trim()) {
-          return jsonReply(res, 200, { ok: true, answer: stdout.trim() });
+          const parsed = parseStreamJsonOutput(stdout);
+          trackEngineUsage('ask-about', parsed.usage);
+          return jsonReply(res, 200, { ok: true, answer: (parsed.text || stdout).trim() });
         } else {
           return jsonReply(res, 500, { error: 'Failed to get answer', stderr: stderr.slice(0, 200) });
         }

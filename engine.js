@@ -2076,6 +2076,39 @@ function createReviewFeedbackForAuthor(reviewerAgentId, pr, config) {
   log('info', `Created review feedback for ${authorAgentId} from ${reviewerAgentId} on ${pr.id}`);
 }
 
+function trackEngineUsage(category, usage) {
+  if (!usage) return;
+  try {
+    const metricsPath = path.join(ENGINE_DIR, 'metrics.json');
+    const metrics = safeJson(metricsPath) || {};
+
+    if (!metrics._engine) metrics._engine = {};
+    if (!metrics._engine[category]) {
+      metrics._engine[category] = { calls: 0, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0 };
+    }
+    const cat = metrics._engine[category];
+    cat.calls++;
+    cat.costUsd += usage.costUsd || 0;
+    cat.inputTokens += usage.inputTokens || 0;
+    cat.outputTokens += usage.outputTokens || 0;
+    cat.cacheRead += usage.cacheRead || 0;
+
+    // Also add to daily totals
+    const today = dateStamp();
+    if (!metrics._daily) metrics._daily = {};
+    if (!metrics._daily[today]) metrics._daily[today] = { costUsd: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, tasks: 0 };
+    const daily = metrics._daily[today];
+    daily.costUsd += usage.costUsd || 0;
+    daily.inputTokens += usage.inputTokens || 0;
+    daily.outputTokens += usage.outputTokens || 0;
+    daily.cacheRead += usage.cacheRead || 0;
+
+    safeWrite(metricsPath, metrics);
+  } catch (e) {
+    log('warn', `Failed to track engine usage for ${category}: ${e.message}`);
+  }
+}
+
 function updateMetrics(agentId, dispatchItem, result, taskUsage, prsCreatedCount) {
   const metricsPath = path.join(ENGINE_DIR, 'metrics.json');
   const metrics = safeJson(metricsPath) || {};
@@ -2263,7 +2296,7 @@ Use today's date: ${dateStamp()}`;
   // Build args — use Haiku for speed/cost, single turn, print mode
   const spawnScript = path.join(ENGINE_DIR, 'spawn-agent.js');
   const args = [
-    '--output-format', 'text',
+    '--output-format', 'stream-json',
     '--max-turns', '1',
     '--model', 'haiku',
     '--permission-mode', 'bypassPermissions',
@@ -2303,8 +2336,35 @@ Use today's date: ${dateStamp()}`;
     try { fs.unlinkSync(promptPath); } catch {}
     try { fs.unlinkSync(sysPromptPath); } catch {}
 
-    if (code === 0 && stdout.trim().length > 50) {
-      let digest = stdout.trim();
+    // Extract text and usage from stream-json output
+    let extractedText = '';
+    let consolidationUsage = null;
+    try {
+      const lines = stdout.split('\n');
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i].trim();
+        if (!line || !line.startsWith('{')) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === 'result') {
+            if (obj.result) extractedText = obj.result;
+            if (obj.total_cost_usd || obj.usage) {
+              consolidationUsage = {
+                costUsd: obj.total_cost_usd || 0,
+                inputTokens: obj.usage?.input_tokens || 0,
+                outputTokens: obj.usage?.output_tokens || 0,
+                cacheRead: obj.usage?.cache_read_input_tokens || obj.usage?.cacheReadInputTokens || 0,
+              };
+            }
+            break;
+          }
+        } catch {}
+      }
+    } catch {}
+    trackEngineUsage('consolidation', consolidationUsage);
+
+    if (code === 0 && (extractedText || stdout).trim().length > 50) {
+      let digest = (extractedText || stdout).trim();
       // Strip any code fences the model might add
       digest = digest.replace(/^\`\`\`\w*\n?/gm, '').replace(/\n?\`\`\`$/gm, '').trim();
 

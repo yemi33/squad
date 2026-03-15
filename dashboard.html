@@ -1899,15 +1899,31 @@ function renderTokenUsage(metrics) {
   const el = document.getElementById('token-usage-content');
   const agents = Object.entries(metrics).filter(([k]) => !k.startsWith('_'));
   const daily = metrics._daily || {};
+  const engine = metrics._engine || {};
 
-  // Aggregate totals
-  let totalCost = 0, totalInput = 0, totalOutput = 0, totalCache = 0;
+  // Aggregate agent totals
+  let agentCost = 0, agentInput = 0, agentOutput = 0, agentCache = 0;
   for (const [, m] of agents) {
-    totalCost += m.totalCostUsd || 0;
-    totalInput += m.totalInputTokens || 0;
-    totalOutput += m.totalOutputTokens || 0;
-    totalCache += m.totalCacheRead || 0;
+    agentCost += m.totalCostUsd || 0;
+    agentInput += m.totalInputTokens || 0;
+    agentOutput += m.totalOutputTokens || 0;
+    agentCache += m.totalCacheRead || 0;
   }
+
+  // Aggregate engine totals
+  let engineCost = 0, engineInput = 0, engineOutput = 0, engineCache = 0, engineCalls = 0;
+  for (const [, e] of Object.entries(engine)) {
+    engineCost += e.costUsd || 0;
+    engineInput += e.inputTokens || 0;
+    engineOutput += e.outputTokens || 0;
+    engineCache += e.cacheRead || 0;
+    engineCalls += e.calls || 0;
+  }
+
+  const totalCost = agentCost + engineCost;
+  const totalInput = agentInput + engineInput;
+  const totalOutput = agentOutput + engineOutput;
+  const totalCache = agentCache + engineCache;
 
   if (totalCost === 0 && Object.keys(daily).length === 0) {
     el.innerHTML = '<p class="empty">No usage data yet. Token tracking starts on next agent completion.</p>';
@@ -1928,7 +1944,7 @@ function renderTokenUsage(metrics) {
   const today = new Date().toISOString().slice(0, 10);
   const todayData = daily[today];
   if (todayData) {
-    html += '<div class="token-tile"><div class="token-tile-label">Today</div><div class="token-tile-value">' + fmtCost(todayData.costUsd) + '</div><div class="token-tile-sub">' + todayData.tasks + ' tasks</div></div>';
+    html += '<div class="token-tile"><div class="token-tile-label">Today</div><div class="token-tile-value">' + fmtCost(todayData.costUsd) + '</div><div class="token-tile-sub">' + (todayData.tasks || 0) + ' tasks</div></div>';
   }
   html += '</div>';
 
@@ -1941,7 +1957,7 @@ function renderTokenUsage(metrics) {
     for (const day of days) {
       const d = daily[day];
       const pct = Math.max(((d.costUsd || 0) / maxCost) * 100, 2);
-      html += '<div class="token-bar" style="height:' + pct + '%"><div class="token-bar-tip">' + day.slice(5) + ': ' + fmtCost(d.costUsd) + ' / ' + d.tasks + ' tasks</div></div>';
+      html += '<div class="token-bar" style="height:' + pct + '%"><div class="token-bar-tip">' + day.slice(5) + ': ' + fmtCost(d.costUsd) + ' / ' + (d.tasks || 0) + ' tasks</div></div>';
     }
     html += '</div>';
     html += '<div class="token-chart-labels">';
@@ -1954,6 +1970,7 @@ function renderTokenUsage(metrics) {
   // Per-agent token table
   const agentsWithUsage = agents.filter(([, m]) => (m.totalCostUsd || 0) > 0);
   if (agentsWithUsage.length > 0) {
+    html += '<div style="font-size:10px;color:var(--muted);margin:12px 0 4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Agent Usage</div>';
     html += '<table class="token-agent-table"><thead><tr><th>Agent</th><th>Cost</th><th>Input</th><th>Output</th><th>Cache</th><th>$/task</th></tr></thead><tbody>';
     for (const [id, m] of agentsWithUsage.sort((a, b) => (b[1].totalCostUsd || 0) - (a[1].totalCostUsd || 0))) {
       const tasks = (m.tasksCompleted || 0) + (m.tasksErrored || 0);
@@ -1965,6 +1982,26 @@ function renderTokenUsage(metrics) {
         '<td>' + fmtTokens(m.totalOutputTokens || 0) + '</td>' +
         '<td>' + fmtTokens(m.totalCacheRead || 0) + '</td>' +
         '<td style="color:var(--muted)">' + perTask + '</td>' +
+      '</tr>';
+    }
+    html += '</tbody></table>';
+  }
+
+  // Engine (Haiku) usage table
+  const engineEntries = Object.entries(engine).filter(([, e]) => (e.costUsd || 0) > 0 || (e.calls || 0) > 0);
+  if (engineEntries.length > 0) {
+    const labels = { 'consolidation': 'Consolidation', 'triage': 'Command Triage', 'doc-chat': 'Doc Q&A + Edit', 'steer-document': 'Doc Steering', 'ask-about': 'Doc Q&A' };
+    html += '<div style="font-size:10px;color:var(--muted);margin:12px 0 4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Engine Usage (Haiku)</div>';
+    html += '<table class="token-agent-table"><thead><tr><th>Operation</th><th>Cost</th><th>Calls</th><th>Input</th><th>Output</th><th>$/call</th></tr></thead><tbody>';
+    for (const [cat, e] of engineEntries.sort((a, b) => (b[1].costUsd || 0) - (a[1].costUsd || 0))) {
+      const perCall = (e.calls || 0) > 0 ? fmtCost((e.costUsd || 0) / e.calls) : '-';
+      html += '<tr>' +
+        '<td style="font-weight:600">' + escHtml(labels[cat] || cat) + '</td>' +
+        '<td>' + fmtCost(e.costUsd || 0) + '</td>' +
+        '<td>' + (e.calls || 0) + '</td>' +
+        '<td>' + fmtTokens(e.inputTokens || 0) + '</td>' +
+        '<td>' + fmtTokens(e.outputTokens || 0) + '</td>' +
+        '<td style="color:var(--muted)">' + perCall + '</td>' +
       '</tr>';
     }
     html += '</tbody></table>';
