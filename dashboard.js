@@ -501,18 +501,37 @@ function getTriageContext() {
   const projects = PROJECTS.map(p => `- ${p.name}: ${(p.description || '').slice(0, 60)}`).join('\n');
 
   // Recent work items (last 10 central + all project items that are active/failed)
-  const centralWi = getWorkItems().slice(-10).map(i =>
-    `- ${i.id}: "${i.title.slice(0, 60)}" [${i.type}] ${i.status}${i.dispatched_to ? ' → ' + i.dispatched_to : ''}`
-  );
+  const centralWi = getWorkItems().slice(-10).map(i => {
+    let line = `- ${i.id}: "${(i.title || '').slice(0, 60)}" [${i.type}] ${i.status}`;
+    if (i.dispatched_to) line += ' → ' + i.dispatched_to;
+    if (i.status === 'failed' && i.failReason) line += ' | reason: ' + i.failReason.slice(0, 100);
+    return line;
+  });
   const projectWi = [];
   for (const proj of PROJECTS) {
     try {
       const items = JSON.parse(fs.readFileSync(path.join(proj.localPath, '.squad', 'work-items.json'), 'utf8'));
       items.filter(i => i.status === 'failed' || i.status === 'dispatched' || i.status === 'pending')
-        .forEach(i => projectWi.push(`- ${i.id}: "${(i.title || '').slice(0, 60)}" [${i.type}] ${i.status} (${proj.name})${i.dispatched_to ? ' → ' + i.dispatched_to : ''}`));
+        .forEach(i => {
+          let line = `- ${i.id}: "${(i.title || '').slice(0, 60)}" [${i.type}] ${i.status} (${proj.name})`;
+          if (i.dispatched_to) line += ' → ' + i.dispatched_to;
+          if (i.status === 'failed' && i.failReason) line += ' | reason: ' + i.failReason.slice(0, 100);
+          projectWi.push(line);
+        });
     } catch {}
   }
-  const wi = [...centralWi, ...projectWi].join('\n');
+  // Recent completed dispatches with errors (last 5 errors for context)
+  let recentErrors = '';
+  try {
+    const dispatch = JSON.parse(safeRead(path.join(SQUAD_DIR, 'engine', 'dispatch.json')) || '{}');
+    const errors = (dispatch.completed || []).filter(d => d.result === 'error').slice(-5);
+    if (errors.length > 0) {
+      recentErrors = '\n\n### Recent Failures\n' + errors.map(d =>
+        `- ${d.agent}: "${(d.task || '').slice(0, 60)}" | ${d.reason || 'unknown'} | ${d.completed_at || ''}`
+      ).join('\n');
+    }
+  } catch {}
+  const wi = [...centralWi, ...projectWi].join('\n') + recentErrors;
 
   // Plans (with summary, author, project, status)
   const plansDir = path.join(SQUAD_DIR, 'plans');
