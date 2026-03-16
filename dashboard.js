@@ -13,7 +13,7 @@ const shared = require('./engine/shared');
 const queries = require('./engine/queries');
 const os = require('os');
 
-const { safeRead, safeReadDir, safeWrite, getProjects: _getProjects } = shared;
+const { safeRead, safeReadDir, safeWrite, safeJson, safeUnlink, getProjects: _getProjects } = shared;
 const { getAgents, getAgentDetail, getPrdInfo, getWorkItems, getDispatchQueue,
   getSkills, getInbox, getNotesWithMeta, getPullRequests,
   getEngineLog, getMetrics, getKnowledgeBaseEntries, timeSince,
@@ -42,7 +42,7 @@ function resolvePlanPath(file) {
   return active;
 }
 
-const HTML_RAW = fs.readFileSync(path.join(SQUAD_DIR, 'dashboard.html'), 'utf8');
+const HTML_RAW = safeRead(path.join(SQUAD_DIR, 'dashboard.html')) || '';
 const HTML = HTML_RAW.replace('Squad Mission Control', `Squad Mission Control — ${projectNames}`);
 
 
@@ -119,7 +119,7 @@ function getTriageContext() {
   const projectWi = [];
   for (const proj of PROJECTS) {
     try {
-      const items = JSON.parse(fs.readFileSync(path.join(proj.localPath, '.squad', 'work-items.json'), 'utf8'));
+      const items = safeJson(path.join(proj.localPath, '.squad', 'work-items.json'));
       items.filter(i => i.status === 'failed' || i.status === 'dispatched' || i.status === 'pending')
         .forEach(i => {
           let line = `- ${i.id}: "${(i.title || '').slice(0, 60)}" [${i.type}] ${i.status} (${proj.name})`;
@@ -540,7 +540,7 @@ const server = http.createServer(async (req, res) => {
         if (content) { try { allArchived.push(...JSON.parse(content).map(i => ({ ...i, _source: project.name }))); } catch {} }
       }
       return jsonReply(res, 200, allArchived);
-    } catch (e) { return jsonReply(res, 200, []); }
+    } catch (e) { console.error('Archive fetch error:', e.message); return jsonReply(res, 500, { error: e.message }); }
   }
 
   // POST /api/work-items
@@ -666,7 +666,7 @@ const server = http.createServer(async (req, res) => {
       if (!body.source || !body.itemId) return jsonReply(res, 400, { error: 'source and itemId required' });
       const planPath = resolvePlanPath(body.source);
       if (!fs.existsSync(planPath)) return jsonReply(res, 404, { error: 'plan file not found' });
-      const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+      const plan = safeJson(planPath);
       const item = (plan.missing_features || []).find(f => f.id === body.itemId);
       if (!item) return jsonReply(res, 404, { error: 'item not found in plan' });
 
@@ -677,7 +677,17 @@ const server = http.createServer(async (req, res) => {
       if (body.estimated_complexity !== undefined) item.estimated_complexity = body.estimated_complexity;
       if (body.status !== undefined) item.status = body.status;
 
-      safeWrite(planPath, plan);
+      // Re-read plan before writing to minimize race window with engine
+      const freshPlan = safeJson(planPath) || plan;
+      const freshItem = (freshPlan.missing_features || []).find(f => f.id === body.itemId);
+      if (freshItem) {
+        if (body.name !== undefined) freshItem.name = body.name;
+        if (body.description !== undefined) freshItem.description = body.description;
+        if (body.priority !== undefined) freshItem.priority = body.priority;
+        if (body.estimated_complexity !== undefined) freshItem.estimated_complexity = body.estimated_complexity;
+        if (body.status !== undefined) freshItem.status = body.status;
+      }
+      safeWrite(planPath, freshPlan);
 
       // Feature 3: Sync edits to materialized work item if still pending
       let workItemSynced = false;
@@ -687,7 +697,7 @@ const server = http.createServer(async (req, res) => {
       }
       for (const wiPath of wiSyncPaths) {
         try {
-          const items = JSON.parse(fs.readFileSync(wiPath, 'utf8'));
+          const items = safeJson(wiPath);
           const wi = items.find(w => w.sourcePlan === body.source && w.sourcePlanItem === body.itemId);
           if (wi && wi.status === 'pending') {
             if (body.name !== undefined) wi.title = 'Implement: ' + body.name;
@@ -713,7 +723,7 @@ const server = http.createServer(async (req, res) => {
       if (!body.source || !body.itemId) return jsonReply(res, 400, { error: 'source and itemId required' });
       const planPath = resolvePlanPath(body.source);
       if (!fs.existsSync(planPath)) return jsonReply(res, 404, { error: 'plan file not found' });
-      const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+      const plan = safeJson(planPath);
       const idx = (plan.missing_features || []).findIndex(f => f.id === body.itemId);
       if (idx < 0) return jsonReply(res, 404, { error: 'item not found in plan' });
 
@@ -725,7 +735,7 @@ const server = http.createServer(async (req, res) => {
       for (const proj of PROJECTS) {
         const wiPath = path.join(proj.localPath, '.squad', 'work-items.json');
         try {
-          const items = JSON.parse(fs.readFileSync(wiPath, 'utf8'));
+          const items = safeJson(wiPath);
           const before = items.length;
           const filtered = items.filter(w => !(w.sourcePlan === body.source && w.sourcePlanItem === body.itemId));
           if (filtered.length < before) {
@@ -737,7 +747,7 @@ const server = http.createServer(async (req, res) => {
       // Also check central work-items
       const centralPath = path.join(SQUAD_DIR, 'work-items.json');
       try {
-        const items = JSON.parse(fs.readFileSync(centralPath, 'utf8'));
+        const items = safeJson(centralPath);
         const before = items.length;
         const filtered = items.filter(w => !(w.sourcePlan === body.source && w.sourcePlanItem === body.itemId));
         if (filtered.length < before) { safeWrite(centralPath, filtered); cancelled = true; }
@@ -800,7 +810,8 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/triage — Haiku LLM command triage for natural language input
   if (req.method === 'POST' && req.url === '/api/triage') {
-    const body = await readBody(req);
+    let body;
+    try { body = await readBody(req); } catch (e) { return jsonReply(res, 400, { error: 'Invalid request body' }); }
     if (!body.message) return jsonReply(res, 400, { error: 'message required' });
     const ctx = getTriageContext();
     const sysPrompt = buildTriageSysPrompt(ctx);
@@ -1082,7 +1093,7 @@ const server = http.createServer(async (req, res) => {
       if (!body.source) return jsonReply(res, 400, { error: 'source required' });
       const planPath = resolvePlanPath(body.source);
       if (!fs.existsSync(planPath)) return jsonReply(res, 404, { error: 'plan file not found' });
-      const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+      const plan = safeJson(planPath);
       const planItems = plan.missing_features || [];
 
       let reset = 0, kept = 0, newCount = 0;
@@ -1099,7 +1110,7 @@ const server = http.createServer(async (req, res) => {
 
       for (const wiInfo of wiPaths) {
         try {
-          const items = JSON.parse(fs.readFileSync(wiInfo.path, 'utf8'));
+          const items = safeJson(wiInfo.path);
           const filtered = [];
           for (const w of items) {
             if (w.sourcePlan === body.source) {
@@ -1150,7 +1161,7 @@ const server = http.createServer(async (req, res) => {
       }
       const planPath = resolvePlanPath(body.file);
       if (!fs.existsSync(planPath)) return jsonReply(res, 404, { error: 'plan not found' });
-      fs.unlinkSync(planPath);
+      safeUnlink(planPath);
 
       // Clean up materialized work items from all projects + central
       let cleaned = 0;
@@ -1160,7 +1171,7 @@ const server = http.createServer(async (req, res) => {
       }
       for (const wiPath of wiPaths) {
         try {
-          const items = JSON.parse(fs.readFileSync(wiPath, 'utf8'));
+          const items = safeJson(wiPath);
           const filtered = items.filter(w => w.sourcePlan !== body.file);
           if (filtered.length < items.length) {
             cleaned += items.length - filtered.length;
@@ -1299,7 +1310,7 @@ const server = http.createServer(async (req, res) => {
       const deletedItemIds = [];
       for (const wiInfo of wiPaths) {
         try {
-          const items = JSON.parse(fs.readFileSync(wiInfo.path, 'utf8'));
+          const items = safeJson(wiInfo.path);
           const filtered = [];
           for (const w of items) {
             if (w.sourcePlan === body.source) {
@@ -1570,7 +1581,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       // Move to archive
       const archiveDir = path.join(SQUAD_DIR, 'notes', 'archive');
       if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
-      try { fs.renameSync(inboxPath, path.join(archiveDir, `persisted-${name}`)); } catch {}
+      try { const _c = safeRead(inboxPath); safeWrite(path.join(archiveDir, `persisted-${name}`), _c); safeUnlink(inboxPath); } catch {}
 
       return jsonReply(res, 200, { ok: true, title });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
@@ -1608,7 +1619,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       // Move inbox item to archive
       const archiveDir = path.join(SQUAD_DIR, 'notes', 'archive');
       if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
-      try { fs.renameSync(inboxPath, path.join(archiveDir, `kb-${category}-${name}`)); } catch {}
+      try { const _c = safeRead(inboxPath); safeWrite(path.join(archiveDir, `kb-${category}-${name}`), _c); safeUnlink(inboxPath); } catch {}
 
       return jsonReply(res, 200, { ok: true, category, file: name });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
@@ -1625,14 +1636,14 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       const filePath = path.join(SQUAD_DIR, 'notes', 'inbox', name);
       if (!fs.existsSync(filePath)) return jsonReply(res, 404, { error: 'file not found' });
 
-      const { exec } = require('child_process');
+      const { execFile } = require('child_process');
       try {
         if (process.platform === 'win32') {
-          exec(`explorer /select,"${filePath.replace(/\//g, '\\\\')}"`);
+          execFile('explorer', ['/select,', filePath.replace(/\//g, '\\')]);
         } else if (process.platform === 'darwin') {
-          exec(`open -R "${filePath}"`);
+          execFile('open', ['-R', filePath]);
         } else {
-          exec(`xdg-open "${path.dirname(filePath)}"`);
+          execFile('xdg-open', [path.dirname(filePath)]);
         }
       } catch (e) {
         return jsonReply(res, 500, { error: 'Could not open file manager: ' + e.message });
@@ -1651,7 +1662,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       }
       const filePath = path.join(SQUAD_DIR, 'notes', 'inbox', name);
       if (!fs.existsSync(filePath)) return jsonReply(res, 404, { error: 'file not found' });
-      fs.unlinkSync(filePath);
+      safeUnlink(filePath);
       return jsonReply(res, 200, { ok: true });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
@@ -1716,7 +1727,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       if (!fs.existsSync(target)) return jsonReply(res, 400, { error: 'Directory not found: ' + target });
 
       const configPath = path.join(SQUAD_DIR, 'config.json');
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const config = safeJson(configPath);
       if (!config.projects) config.projects = [];
 
       // Check if already linked
@@ -1747,7 +1758,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       try {
         const pkgPath = path.join(target, 'package.json');
         if (fs.existsSync(pkgPath)) {
-          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          const pkg = safeJson(pkgPath);
           if (pkg.name) detected.name = pkg.name.replace(/^@[^/]+\//, '');
         }
       } catch {}
@@ -1755,7 +1766,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       try {
         const claudeMd = path.join(target, 'CLAUDE.md');
         if (fs.existsSync(claudeMd)) {
-          const lines = fs.readFileSync(claudeMd, 'utf8').split('\n').filter(l => l.trim() && !l.startsWith('#'));
+          const lines = (safeRead(claudeMd) || '').split('\n').filter(l => l.trim() && !l.startsWith('#'));
           if (lines[0] && lines[0].length < 200) description = lines[0].trim();
         }
       } catch {}
@@ -1784,7 +1795,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       const stateFiles = { 'pull-requests.json': '[]', 'work-items.json': '[]' };
       for (const [f, content] of Object.entries(stateFiles)) {
         const fp = path.join(squadDir, f);
-        if (!fs.existsSync(fp)) fs.writeFileSync(fp, content);
+        if (!fs.existsSync(fp)) safeWrite(fp, content);
       }
 
       return jsonReply(res, 200, { ok: true, name, path: target, detected });
@@ -1812,7 +1823,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
           const files = fs.readdirSync(dir).filter(f => f.endsWith('.md') || f.endsWith('.json'));
           for (const f of files) {
             try {
-              const raw = fs.readFileSync(path.join(dir, f), 'utf8');
+              const raw = safeRead(path.join(dir, f));
               if (f.endsWith('.md')) {
                 const truncated = raw.length > 4000 ? raw.slice(0, 4000) + '\n...(truncated)' : raw;
                 planContents += `\n#### ${f} (${label})\n${truncated}\n`;
@@ -1835,7 +1846,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
             const archived = fs.readdirSync(path.join(dir, 'archive')).filter(f => f.endsWith('.md') || f.endsWith('.json')).slice(-3);
             for (const f of archived) {
               try {
-                const raw = fs.readFileSync(path.join(dir, 'archive', f), 'utf8');
+                const raw = safeRead(path.join(dir, 'archive', f));
                 const truncated = raw.length > 2000 ? raw.slice(0, 2000) + '\n...(truncated)' : raw;
                 planContents += `\n#### [archived] ${f}\n${truncated}\n`;
               } catch {}
@@ -2059,7 +2070,7 @@ Use tools to dig deeper when the pre-loaded context isn't sufficient — e.g., r
     try {
       const body = await readBody(req);
       const configPath = path.join(SQUAD_DIR, 'config.json');
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const config = safeJson(configPath);
 
       if (body.engine) {
         // Validate and apply engine settings

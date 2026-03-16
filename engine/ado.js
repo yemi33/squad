@@ -35,19 +35,20 @@ function getAdoToken() {
   return null;
 }
 
-async function adoFetch(url, token, _retried = false) {
+async function adoFetch(url, token, _retryCount = 0) {
+  const MAX_RETRIES = 1;
   const res = await fetch(url, {
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
   });
   if (!res.ok) throw new Error(`ADO API ${res.status}: ${res.statusText}`);
   const text = await res.text();
   if (!text || text.trimStart().startsWith('<')) {
-    if (!_retried) {
+    if (_retryCount < MAX_RETRIES) {
       _adoTokenCache = { token: null, expiresAt: 0 };
       const freshToken = getAdoToken();
       if (freshToken) {
         engine().log('info', 'ADO token expired mid-session — refreshed and retrying');
-        return adoFetch(url, freshToken, true);
+        return adoFetch(url, freshToken, _retryCount + 1);
       }
     }
     throw new Error(`ADO returned HTML instead of JSON (likely auth redirect) for ${url.split('?')[0]}`);

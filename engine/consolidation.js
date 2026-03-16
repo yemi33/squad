@@ -23,12 +23,18 @@ function engine() {
 
 // Track in-flight LLM consolidation to prevent concurrent runs
 let _consolidationInFlight = false;
+let _consolidationStartedAt = 0;
 
 function consolidateInbox(config) {
   const e = engine();
   const threshold = config.engine?.inboxConsolidateThreshold || 3;
   const files = getInboxFiles();
   if (files.length < threshold) return;
+  // Auto-reset stale flag if consolidation has been running for >5 minutes (process died without cleanup)
+  if (_consolidationInFlight && (Date.now() - _consolidationStartedAt) > 300000) {
+    e.log('warn', 'Consolidation flag was stale (>5m) — resetting');
+    _consolidationInFlight = false;
+  }
   if (_consolidationInFlight) return;
 
   e.log('info', `Consolidating ${files.length} inbox items into notes.md`);
@@ -111,6 +117,7 @@ Use today's date: ${e.dateStamp()}`;
 function consolidateWithLLM(items, existingNotes, files, config) {
   const e = engine();
   _consolidationInFlight = true;
+  _consolidationStartedAt = Date.now();
 
   const kbPaths = items.map(item => {
     const cat = classifyInboxItem(item.name, item.content);
@@ -118,7 +125,7 @@ function consolidateWithLLM(items, existingNotes, files, config) {
     const agent = agentMatch ? agentMatch[1] : 'unknown';
     const titleMatch = (item.content || '').match(/^#\s+(.+)/m);
     const titleSlug = titleMatch ? titleMatch[1].toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50) : item.name.replace(/\.md$/, '');
-    return { file: item.name, category: cat, kbPath: `knowledge/${cat}/${e.dateStamp()}-${agent}-${titleSlug}.md` };
+    return { file: item.name, category: cat, kbPath: path.join('knowledge', cat, `${e.dateStamp()}-${agent}-${titleSlug}.md`) };
   });
 
   const prompt = buildConsolidationPrompt(items, existingNotes, kbPaths);
@@ -155,11 +162,12 @@ function consolidateWithLLM(items, existingNotes, files, config) {
   const timeout = setTimeout(() => {
     e.log('warn', 'LLM consolidation timed out after 3m — killing and falling back to regex');
     try { proc.kill('SIGTERM'); } catch {}
-    // Safety: if process doesn't exit within 10s after SIGTERM, force-reset the flag
+    // Escalate to SIGKILL after 10s if process doesn't exit
     setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch {}
       if (_consolidationInFlight) {
         _consolidationInFlight = false;
-        e.log('warn', 'Consolidation flag force-reset after SIGTERM timeout');
+        e.log('warn', 'Consolidation flag force-reset after SIGKILL');
       }
     }, 10000);
   }, 180000);
@@ -288,7 +296,8 @@ function consolidateWithRegex(items, files) {
     let isDup = false;
     for (const [fp, entry] of seen) {
       const a = new Set(fp.split(' ')), b = new Set(insight.fingerprint.split(' '));
-      if ([...a].filter(w => b.has(w)).length / Math.max(a.size, b.size) > 0.7) {
+      // Require at least 3 words in both fingerprints for meaningful similarity check
+      if (a.size >= 3 && b.size >= 3 && [...a].filter(w => b.has(w)).length / Math.max(a.size, b.size) > 0.7) {
         if (!entry.sources.includes(insight.agent)) entry.sources.push(insight.agent); isDup = true; break;
       }
     }

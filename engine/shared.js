@@ -180,6 +180,7 @@ const ENGINE_DEFAULTS = {
   worktreeRoot: '../worktrees',
   idleAlertMinutes: 15,
   fanOutTimeout: null, // falls back to agentTimeout
+  restartGracePeriod: 1200000, // 20min
 };
 
 const DEFAULT_AGENTS = {

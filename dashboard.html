@@ -777,7 +777,7 @@ let currentAgentId = null;
 let currentTab = 'thought-process';
 
 function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function statusColor(s) {
@@ -2222,7 +2222,7 @@ function openSkill(file, source, dir) {
 // -- Work Items --
 let allWorkItems = [];
 let wiPage = 0;
-const WI_PER_PAGE = 5;
+const WI_PER_PAGE = 6;
 
 function wiRow(item) {
   const statusBadge = (s) => {
@@ -4157,6 +4157,8 @@ async function ccSend() {
     [15000, 'Using tools to dig deeper...'],
     [30000, 'Still working (multi-turn)...'],
     [60000, 'Deep research in progress...'],
+    [180000, 'Still going (this is unusually long)...'],
+    [300000, 'Timing out soon...'],
   ];
   const ccTimer = setInterval(() => {
     const elapsed = Date.now() - ccStartTime;
@@ -4172,9 +4174,11 @@ async function ccSend() {
   }, 500);
 
   try {
+    const ccAbort = AbortSignal.timeout(330000); // 5.5min — slightly longer than backend's 5min LLM timeout
     const res = await fetch('/api/command-center', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, history: _ccHistory.slice(-10) })
+      body: JSON.stringify({ message, history: _ccHistory.slice(-11, -1) }),
+      signal: ccAbort
     });
     const data = await res.json();
 

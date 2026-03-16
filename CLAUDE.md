@@ -14,7 +14,7 @@ When syncing to personal, the following are stripped: agent history, decisions (
 ## Build & Run
 
 ```bash
-node engine.js start    # Start engine (ticks every 60s)
+node engine.js start    # Start engine (ticks every 30s)
 node dashboard.js       # Dashboard at http://localhost:7331
 node engine.js stop     # Stop engine
 node engine.js status   # Show current state

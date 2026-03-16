@@ -225,7 +225,7 @@ function resolveTaskContext(item, config) {
           const planFile = agentPlanItems[0]._planFileName;
           const planPath = path.join(SQUAD_DIR, 'plans', planFile);
           try {
-            const content = fs.readFileSync(planPath, 'utf8');
+            const content = safeRead(planPath);
             resolved.additionalContext += `\n\n## Referenced Plan: ${planFile} (created by ${agent.name})\n\n${content}`;
             resolved.referencedFiles.push(planPath);
             log('info', `Context resolution: found plan "${planFile}" by ${agent.name} for work item ${item.id}`);
@@ -236,7 +236,7 @@ function resolveTaskContext(item, config) {
           if (match) {
             const planPath = path.join(SQUAD_DIR, 'plans', match);
             try {
-              const content = fs.readFileSync(planPath, 'utf8');
+              const content = safeRead(planPath);
               resolved.additionalContext += `\n\n## Referenced Plan: ${match}\n\n${content}`;
               resolved.referencedFiles.push(planPath);
               log('info', `Context resolution: found plan "${match}" (name match) for work item ${item.id}`);
@@ -259,7 +259,7 @@ function resolveTaskContext(item, config) {
           .filter(f => f.startsWith(agent.id + '-'))
           .sort().reverse();
         if (files.length > 0) {
-          const content = fs.readFileSync(path.join(inboxDir, files[0]), 'utf8');
+          const content = safeRead(path.join(inboxDir, files[0]));
           resolved.additionalContext += `\n\n## Referenced Notes by ${agent.name}: ${files[0]}\n\n${content.slice(0, 5000)}`;
           resolved.referencedFiles.push(path.join(inboxDir, files[0]));
           log('info', `Context resolution: found notes "${files[0]}" by ${agent.name} for work item ${item.id}`);
@@ -277,7 +277,7 @@ function resolveTaskContext(item, config) {
         .sort().reverse();
       if (plans.length > 0) {
         const planPath = path.join(SQUAD_DIR, 'plans', plans[0]);
-        const content = fs.readFileSync(planPath, 'utf8');
+        const content = safeRead(planPath);
         resolved.additionalContext += `\n\n## Referenced Plan (latest): ${plans[0]}\n\n${content}`;
         resolved.referencedFiles.push(planPath);
         log('info', `Context resolution: using latest plan "${plans[0]}" for work item ${item.id}`);
@@ -602,26 +602,26 @@ function spawnAgent(dispatchItem, config) {
         if (isSharedBranch) {
           // Shared branch: fetch and checkout existing branch (no -b)
           log('info', `Creating worktree for shared branch: ${worktreePath} on ${branchName}`);
-          try { exec(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe' }); } catch {}
-          exec(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe' });
+          try { exec(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe', timeout: 30000 }); } catch {}
+          exec(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe', timeout: 30000 });
         } else {
           // Parallel: create new branch (reuse if exists from a previous attempt)
           log('info', `Creating worktree: ${worktreePath} on branch ${branchName}`);
           try {
             exec(`git worktree add "${worktreePath}" -b "${branchName}" ${sanitizeBranch(project.mainBranch || 'main')}`, {
-              cwd: rootDir, stdio: 'pipe', windowsHide: true
+              cwd: rootDir, stdio: 'pipe', windowsHide: true, timeout: 30000
             });
           } catch {
             // Branch already exists — use it without -b
-            try { exec(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe' }); } catch {}
-            exec(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe' });
+            try { exec(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe', timeout: 30000 }); } catch {}
+            exec(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe', timeout: 30000 });
             log('info', `Reusing existing branch: ${branchName}`);
           }
         }
       } else if (meta?.branchStrategy === 'shared-branch') {
         // Worktree exists — pull latest from prior plan item
         log('info', `Pulling latest on shared branch ${branchName}`);
-        try { exec(`git pull origin "${branchName}"`, { cwd: worktreePath, stdio: 'pipe' }); } catch {}
+        try { exec(`git pull origin "${branchName}"`, { cwd: worktreePath, stdio: 'pipe', timeout: 30000 }); } catch {}
       }
       // Merge dependency PR branches into worktree if this item has depends_on
       const depIds = meta?.item?.depends_on || [];
@@ -630,8 +630,8 @@ function spawnAgent(dispatchItem, config) {
           const depBranches = resolveDependencyBranches(depIds, meta?.item?.sourcePlan, project, config);
           for (const { branch: depBranch, prId } of depBranches) {
             try {
-              exec(`git fetch origin "${depBranch}"`, { cwd: rootDir, stdio: 'pipe' });
-              exec(`git merge "origin/${depBranch}" --no-edit`, { cwd: worktreePath, stdio: 'pipe' });
+              exec(`git fetch origin "${depBranch}"`, { cwd: rootDir, stdio: 'pipe', timeout: 30000 });
+              exec(`git merge "origin/${depBranch}" --no-edit`, { cwd: worktreePath, stdio: 'pipe', timeout: 30000 });
               log('info', `Merged dependency branch ${depBranch} (${prId}) into worktree ${branchName}`);
             } catch (mergeErr) {
               log('warn', `Failed to merge dependency ${depBranch} into ${branchName}: ${mergeErr.message}`);
@@ -700,13 +700,7 @@ function spawnAgent(dispatchItem, config) {
   });
 
   // Spawn the claude process
-  // Unset CLAUDECODE to allow nested sessions (engine runs inside Claude Code)
-  const childEnv = { ...process.env };
-  for (const key of Object.keys(childEnv)) {
-    if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) {
-      delete childEnv[key];
-    }
-  }
+  const childEnv = shared.cleanChildEnv();
 
   // Spawn via wrapper script — node directly (no bash intermediary)
   // spawn-agent.js handles CLAUDECODE env cleanup and claude binary resolution
@@ -823,15 +817,20 @@ function spawnAgent(dispatchItem, config) {
     }
   }, 5000);
 
-  // Move dispatch item to active
-  const dispatch = getDispatch();
-  const idx = dispatch.pending.findIndex(d => d.id === id);
-  if (idx >= 0) {
-    const item = dispatch.pending.splice(idx, 1)[0];
-    item.started_at = startedAt;
-    dispatch.active = dispatch.active || [];
-    dispatch.active.push(item);
-    safeWrite(DISPATCH_PATH, dispatch);
+  // Move dispatch item to active (atomic read-check-write to avoid race conditions)
+  {
+    const dispatch = getDispatch();
+    const idx = dispatch.pending.findIndex(d => d.id === id);
+    if (idx >= 0) {
+      const item = dispatch.pending.splice(idx, 1)[0];
+      item.started_at = startedAt;
+      dispatch.active = dispatch.active || [];
+      // Guard against duplicate active entries from concurrent ticks
+      if (!dispatch.active.some(d => d.id === id)) {
+        dispatch.active.push(item);
+      }
+      safeWrite(DISPATCH_PATH, dispatch);
+    }
   }
 
   return proc;
@@ -873,11 +872,11 @@ function completeDispatch(id, result = 'success', reason = '', resultSummary = '
     // Strip prompt from completed items (saves ~10KB per item, reduces file lock contention)
     delete item.prompt;
     dispatch.completed = dispatch.completed || [];
-    dispatch.completed.push(item);
-    // Keep last 100 completed
-    if (dispatch.completed.length > 100) {
-      dispatch.completed.splice(0, dispatch.completed.length - 100);
+    // Cap before pushing to prevent unbounded growth from concurrent dispatches
+    while (dispatch.completed.length >= 100) {
+      dispatch.completed.shift();
     }
+    dispatch.completed.push(item);
     safeWrite(DISPATCH_PATH, dispatch);
     log('info', `Completed dispatch: ${id} (${result}${reason ? ': ' + reason : ''})`);
 
@@ -1278,10 +1277,11 @@ function runCleanup(config, verbose = false) {
         // Check if this worktree's branch is merged
         let shouldClean = false;
 
-        // Match by directory name to branch (worktrees are named after branches)
+        // Match worktree dir to branch — dir format is "{project}-{branch}-{uid}" or legacy "{branch}"
         for (const branch of mergedBranches) {
           const branchSlug = branch.replace(/[^a-zA-Z0-9._\-\/]/g, '-');
-          if (dir === branchSlug || dir === branch || branch.endsWith(dir) || dir.includes(branchSlug)) {
+          // Only match if dir equals branch, or contains the full branch slug (not partial matches)
+          if (dir === branchSlug || dir === branch || (branchSlug.length >= 6 && dir.includes(branchSlug))) {
             shouldClean = true;
             break;
           }
@@ -1344,10 +1344,11 @@ function runCleanup(config, verbose = false) {
       if (info.proc?.pid) activePids.add(info.proc.pid);
     }
 
-    // If no active dispatches but active processes exist in the Map, clean the Map
-    if ((dispatch.active || []).length === 0 && activeProcesses.size > 0) {
-      for (const [id, info] of activeProcesses.entries()) {
-        try { info.proc.kill('SIGTERM'); } catch {}
+    // Clean individual orphaned processes — no matching active dispatch
+    const activeIds = new Set((dispatch.active || []).map(d => d.id));
+    for (const [id, info] of activeProcesses.entries()) {
+      if (!activeIds.has(id)) {
+        try { if (info.proc) info.proc.kill('SIGTERM'); } catch {}
         activeProcesses.delete(id);
         cleaned.zombies++;
       }
@@ -1432,11 +1433,12 @@ function loadCooldowns() {
   log('info', `Loaded ${dispatchCooldowns.size} cooldowns from disk`);
 }
 
-let _cooldownWritePending = false;
+let _cooldownWriteTimer = null;
 function saveCooldowns() {
-  if (_cooldownWritePending) return;
-  _cooldownWritePending = true;
-  setTimeout(() => {
+  // Debounce: reset timer on each call so latest state is always written
+  if (_cooldownWriteTimer) clearTimeout(_cooldownWriteTimer);
+  _cooldownWriteTimer = setTimeout(() => {
+    _cooldownWriteTimer = null;
     // Prune expired entries (>24h) before saving
     const now = Date.now();
     for (const [k, v] of dispatchCooldowns) {
@@ -1444,7 +1446,6 @@ function saveCooldowns() {
     }
     const obj = Object.fromEntries(dispatchCooldowns);
     safeWrite(COOLDOWN_PATH, obj);
-    _cooldownWritePending = false;
   }, 1000); // debounce — write at most once per second
 }
 
@@ -1505,14 +1506,14 @@ function materializePlansAsWorkItems(config) {
       const mdFiles = fs.readdirSync(checkDir).filter(f => f.endsWith('.md'));
       for (const mf of mdFiles) {
         try {
-          const content = fs.readFileSync(path.join(checkDir, mf), 'utf8').trim();
+          const content = (safeRead(path.join(checkDir, mf)) || '').trim();
           // Strip markdown code fences if agent wrapped JSON in them
           const stripped = content.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
           const parsed = JSON.parse(stripped);
           if (parsed.missing_features) {
             const jsonName = mf.replace(/\.md$/, '.json');
-            fs.writeFileSync(path.join(PRD_DIR, jsonName), JSON.stringify(parsed, null, 2));
-            fs.unlinkSync(path.join(checkDir, mf));
+            safeWrite(path.join(PRD_DIR, jsonName), parsed);
+            try { fs.unlinkSync(path.join(checkDir, mf)); } catch {}
             log('info', `Plan enforcement: moved ${mf} → prd/${jsonName} (PRDs must be .json in prd/)`);
           }
         } catch {} // Not JSON — it's a proper plan .md, leave it
@@ -1526,7 +1527,8 @@ function materializePlansAsWorkItems(config) {
           try {
             const parsed = safeJson(path.join(PLANS_DIR, jf));
             if (parsed?.missing_features) {
-              fs.renameSync(path.join(PLANS_DIR, jf), path.join(PRD_DIR, jf));
+              safeWrite(path.join(PRD_DIR, jf), parsed);
+              try { fs.unlinkSync(path.join(PLANS_DIR, jf)); } catch {}
               log('info', `Auto-migrated PRD ${jf} from plans/ to prd/`);
             }
           } catch {}
@@ -1568,6 +1570,17 @@ function materializePlansAsWorkItems(config) {
       itemsByProject.get(itemProject.name).items.push(item);
     }
 
+    // Cycle detection BEFORE materialization — skip cyclic items
+    const cycleSet = new Set();
+    const planDerivedItems = plan.missing_features.filter(f => f.depends_on && f.depends_on.length > 0);
+    if (planDerivedItems.length > 0) {
+      const cycles = detectDependencyCycles(plan.missing_features);
+      if (cycles.length > 0) {
+        log('error', `Dependency cycle detected in plan ${file}: ${cycles.join(', ')} — skipping cyclic items`);
+        cycles.forEach(c => cycleSet.add(c));
+      }
+    }
+
     let totalCreated = 0;
     for (const [projName, { project, items: projItems }] of itemsByProject) {
       const wiPath = projectWorkItemsPath(project);
@@ -1589,6 +1602,8 @@ function materializePlansAsWorkItems(config) {
           }
         }
         if (alreadyExists) continue;
+        // Skip items involved in dependency cycles
+        if (cycleSet.has(item.id)) continue;
 
         const id = nextWorkItemId(existingItems, 'PL-W');
         const complexity = item.estimated_complexity || 'medium';
@@ -1639,21 +1654,7 @@ function materializePlansAsWorkItems(config) {
         }
       }
 
-      // Cycle detection for plan items
-      const planDerivedItems = plan.missing_features.filter(f => f.depends_on && f.depends_on.length > 0);
-      if (planDerivedItems.length > 0) {
-        const cycles = detectDependencyCycles(plan.missing_features);
-        if (cycles.length > 0) {
-          log('error', `Dependency cycle detected in plan ${file}: ${cycles.join(', ')} — marking cycling items as failed`);
-          for (const wi of existingItems) {
-            if (wi.sourcePlan === file && cycles.includes(wi.planItemId)) {
-              wi.status = 'failed';
-              wi.failReason = `Dependency cycle detected: ${cycles.join(', ')}. Fix deps in plan and retry.`;
-            }
-          }
-          safeWrite(wiPath, existingItems);
-        }
-      }
+      // (cycle detection moved before materialization loop)
     }
   }
 }
@@ -2427,13 +2428,15 @@ async function tickInner() {
   const toDispatch = dispatch.pending.slice(0, slotsAvailable);
 
   // Collect IDs to dispatch, then spawn — spawnAgent mutates dispatch.pending
-  // so we snapshot the items first and re-read dispatch state is handled per-spawn
+  // so we snapshot the items first and re-read dispatch state per-spawn
   const idsToDispatch = toDispatch.map(item => item.id);
   for (const dispatchId of idsToDispatch) {
     // Re-read dispatch fresh each iteration since spawnAgent modifies it
     const freshDispatch = getDispatch();
     const item = freshDispatch.pending.find(d => d.id === dispatchId);
-    if (item) {
+    // Guard: skip if already moved to active (concurrent tick race)
+    const alreadyActive = (freshDispatch.active || []).some(d => d.id === dispatchId);
+    if (item && !alreadyActive) {
       spawnAgent(item, config);
     }
   }

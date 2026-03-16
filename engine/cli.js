@@ -132,7 +132,7 @@ const commands = {
 
       const unattached = activeOnStart.length - reattached;
       if (unattached > 0) {
-        const gracePeriod = config.engine?.restartGracePeriod || 1200000;
+        const gracePeriod = config.engine?.restartGracePeriod || shared.ENGINE_DEFAULTS.restartGracePeriod;
         e.engineRestartGraceUntil = Date.now() + gracePeriod;
         console.log(`  ${unattached} unattached dispatch(es) — ${gracePeriod / 60000}min grace period`);
       }

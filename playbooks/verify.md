@@ -1,4 +1,4 @@
-# Plan Verification: {{item_title}}
+# Plan Verification: {{item_name}}
 
 > Agent: {{agent_name}} ({{agent_role}}) | Team root: {{team_root}}
 

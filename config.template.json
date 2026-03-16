@@ -20,6 +20,12 @@
           "enabled": true,
           "path": ".squad/work-items.json",
           "cooldownMinutes": 0
+        },
+        "specs": {
+          "enabled": false,
+          "filePatterns": ["docs/specs/**/*.md"],
+          "statePath": ".squad/specs-state.json",
+          "lookbackDays": 7
         }
       }
     }

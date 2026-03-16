@@ -370,7 +370,7 @@ function updateWorkItemStatus(meta, status, reason) {
 
       const results = Object.values(target.agentResults);
       const anySuccess = results.some(r => r.status === 'done');
-      const allDone = target.fanOutAgents ? results.length >= target.fanOutAgents.length : false;
+      const allDone = Array.isArray(target.fanOutAgents) && target.fanOutAgents.length > 0 ? results.length >= target.fanOutAgents.length : false;
       const dispatchAge = target.dispatched_at ? Date.now() - new Date(target.dispatched_at).getTime() : 0;
       const timedOut = !allDone && dispatchAge > 6 * 60 * 60 * 1000 && results.length > 0;
 
