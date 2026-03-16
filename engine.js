@@ -461,16 +461,16 @@ function renderPlaybook(type, vars) {
 
   // Inject project-level variables from config
   const config = getConfig();
-  const project = config.project || {};
+  const projects = getProjects(config);
   // Find the specific project being dispatched (match by repo_id or repo_name from vars)
-  const dispatchProject = (vars.repo_id && config.projects?.find(p => p.repositoryId === vars.repo_id))
-    || (vars.repo_name && config.projects?.find(p => p.repoName === vars.repo_name))
-    || project;
+  const dispatchProject = (vars.repo_id && projects.find(p => p.repositoryId === vars.repo_id))
+    || (vars.repo_name && projects.find(p => p.repoName === vars.repo_name))
+    || projects[0] || {};
   const projectVars = {
-    project_name: project.name || 'Unknown Project',
-    ado_org: project.adoOrg || 'Unknown',
-    ado_project: project.adoProject || 'Unknown',
-    repo_name: project.repoName || 'Unknown',
+    project_name: dispatchProject.name || 'Unknown Project',
+    ado_org: dispatchProject.adoOrg || 'Unknown',
+    ado_project: dispatchProject.adoProject || 'Unknown',
+    repo_name: dispatchProject.repoName || 'Unknown',
     pr_create_instructions: getPrCreateInstructions(dispatchProject),
     pr_comment_instructions: getPrCommentInstructions(dispatchProject),
     pr_fetch_instructions: getPrFetchInstructions(dispatchProject),
@@ -547,7 +547,7 @@ function getRepoHostToolRule(project) {
 function buildSystemPrompt(agentId, config, project) {
   const agent = config.agents[agentId];
   const charter = getAgentCharter(agentId);
-  project = project || config.project || {};
+  project = project || getProjects(config)[0] || {};
 
   let prompt = '';
 
@@ -585,7 +585,7 @@ function buildSystemPrompt(agentId, config, project) {
 // Bulk context: history, notes, conventions, skills — prepended to user/task prompt.
 // This is the content that grows over time and would bloat the system prompt.
 function buildAgentContext(agentId, config, project) {
-  project = project || config.project || {};
+  project = project || getProjects(config)[0] || {};
   const notes = getNotes();
   let context = '';
 
@@ -681,7 +681,7 @@ function spawnAgent(dispatchItem, config) {
   const startedAt = ts();
 
   // Resolve project context for this dispatch
-  const project = meta?.project || config.project || {};
+  const project = meta?.project || getProjects(config)[0] || {};
   const rootDir = project.localPath ? path.resolve(project.localPath) : path.resolve(SQUAD_DIR, '..');
 
   // Determine working directory
@@ -1710,7 +1710,7 @@ function buildBaseVars(agentId, config, project) {
     agent_name: config.agents[agentId]?.name || agentId,
     agent_role: config.agents[agentId]?.role || 'Agent',
     team_root: SQUAD_DIR,
-    repo_id: project?.repositoryId || config.project?.repositoryId || '',
+    repo_id: project?.repositoryId || '',
     project_name: project?.name || 'Unknown Project',
     ado_org: project?.adoOrg || 'Unknown',
     ado_project: project?.adoProject || 'Unknown',

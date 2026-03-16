@@ -387,9 +387,7 @@ function getWorkItems() {
 
   // Per-project work items
   for (const project of PROJECTS) {
-    const root = path.resolve(project.localPath || path.resolve(SQUAD_DIR, '..'));
-    const wiSrc = project.workSources?.workItems || CONFIG.workSources?.workItems || {};
-    const wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+    const wiPath = shared.projectWorkItemsPath(project);
     const data = safeRead(wiPath);
     if (data) {
       try {
@@ -740,9 +738,7 @@ const server = http.createServer(async (req, res) => {
       } else {
         const proj = PROJECTS.find(p => p.name === source);
         if (proj) {
-          const root = path.resolve(proj.localPath || path.resolve(SQUAD_DIR, '..'));
-          const wiSrc = proj.workSources?.workItems || CONFIG.workSources?.workItems || {};
-          wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+          wiPath = shared.projectWorkItemsPath(proj);
         }
       }
       if (!wiPath) return jsonReply(res, 404, { error: 'source not found' });
@@ -794,9 +790,7 @@ const server = http.createServer(async (req, res) => {
       } else {
         const proj = PROJECTS.find(p => p.name === source);
         if (proj) {
-          const root = path.resolve(proj.localPath || path.resolve(SQUAD_DIR, '..'));
-          const wiSrc = proj.workSources?.workItems || CONFIG.workSources?.workItems || {};
-          wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+          wiPath = shared.projectWorkItemsPath(proj);
         }
       }
       if (!wiPath) return jsonReply(res, 404, { error: 'source not found' });
@@ -837,9 +831,7 @@ const server = http.createServer(async (req, res) => {
       } else {
         const proj = PROJECTS.find(p => p.name === source);
         if (proj) {
-          const root = path.resolve(proj.localPath || path.resolve(SQUAD_DIR, '..'));
-          const wiSrc = proj.workSources?.workItems || CONFIG.workSources?.workItems || {};
-          wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+          wiPath = shared.projectWorkItemsPath(proj);
         }
       }
       if (!wiPath) return jsonReply(res, 404, { error: 'source not found' });
@@ -881,9 +873,7 @@ const server = http.createServer(async (req, res) => {
       if (central) { try { allArchived.push(...JSON.parse(central).map(i => ({ ...i, _source: 'central' }))); } catch {} }
       // Project archives
       for (const project of PROJECTS) {
-        const root = path.resolve(project.localPath || path.resolve(SQUAD_DIR, '..'));
-        const wiSrc = project.workSources?.workItems || CONFIG.workSources?.workItems || {};
-        const archPath = path.resolve(root, (wiSrc.path || '.squad/work-items.json').replace('.json', '-archive.json'));
+        const archPath = shared.projectWorkItemsPath(project).replace('.json', '-archive.json');
         const content = safeRead(archPath);
         if (content) { try { allArchived.push(...JSON.parse(content).map(i => ({ ...i, _source: project.name }))); } catch {} }
       }
@@ -900,9 +890,7 @@ const server = http.createServer(async (req, res) => {
       if (body.project) {
         // Write to project-specific queue
         const targetProject = PROJECTS.find(p => p.name === body.project) || PROJECTS[0];
-        const root = path.resolve(targetProject.localPath || path.resolve(SQUAD_DIR, '..'));
-        const wiSrc = targetProject.workSources?.workItems || CONFIG.workSources?.workItems || {};
-        wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
+        wiPath = shared.projectWorkItemsPath(targetProject);
       } else {
         // Write to central queue — agent decides which project
         wiPath = path.join(SQUAD_DIR, 'work-items.json');

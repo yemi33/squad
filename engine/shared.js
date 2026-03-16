@@ -179,11 +179,7 @@ function getProjects(config) {
   if (config.projects && Array.isArray(config.projects)) {
     return config.projects;
   }
-  // Legacy single-project: derive localPath from .squad parent
-  const proj = config.project || {};
-  if (!proj.localPath) proj.localPath = path.resolve(SQUAD_DIR, '..');
-  if (!proj.workSources) proj.workSources = config.workSources || {};
-  return [proj];
+  return [];
 }
 
 function projectRoot(project) {
