@@ -2442,7 +2442,6 @@ function syncHighlightScroll() {
 }
 
 function cmdInputChanged() {
-  cmdDismissAnswer();
   cmdAutoResize();
   cmdUpdateHighlight();
   cmdRenderMeta();
@@ -2565,6 +2564,7 @@ async function cmdTriageAndSubmit(raw) {
 
 // Unified submit
 async function cmdSubmit() {
+  cmdDismissAnswer();
   const input = document.getElementById('cmd-input');
   const raw = input.value.trim();
   if (!raw) return showToast('cmd-toast', 'Type something first', false);
