@@ -604,6 +604,10 @@
       <button class="cmd-history-btn" onclick="cmdShowHistory()">Past Commands</button>
     </div>
     <div class="cmd-toast" id="cmd-toast"></div>
+    <div id="cmd-answer" style="display:none;margin-top:8px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:var(--radius-sm);font-size:12px;color:var(--text);line-height:1.5;white-space:pre-wrap;cursor:pointer;position:relative" onclick="this.style.display='none'">
+      <span style="position:absolute;top:4px;right:8px;color:var(--muted);font-size:10px">click to dismiss</span>
+      <span id="cmd-answer-text"></span>
+    </div>
   </section>
 
   <section>
@@ -2438,6 +2442,7 @@ function syncHighlightScroll() {
 }
 
 function cmdInputChanged() {
+  cmdDismissAnswer();
   cmdAutoResize();
   cmdUpdateHighlight();
   cmdRenderMeta();
@@ -2573,7 +2578,9 @@ async function cmdSubmit() {
   btn.textContent = 'Sending...';
 
   try {
-    if (parsed.intent === 'retry') {
+    if (parsed.intent === 'answer') {
+      cmdShowAnswer(parsed.answer || parsed.title || 'No answer');
+    } else if (parsed.intent === 'retry') {
       await cmdSubmitRetry(parsed);
     } else if (parsed.intent === 'note') {
       await cmdSubmitNote(parsed);
@@ -2622,6 +2629,16 @@ async function cmdSubmitWorkItem(parsed) {
   if (!res.ok) throw new Error(data.error || 'Failed to add');
   const agentLabel = parsed.fanout ? ' (fan-out)' : parsed.agents.length ? ' → ' + parsed.agents.join(', ') : '';
   showToast('cmd-toast', 'Work item ' + data.id + ' created' + agentLabel, true);
+}
+
+function cmdShowAnswer(text) {
+  const el = document.getElementById('cmd-answer');
+  document.getElementById('cmd-answer-text').textContent = text;
+  el.style.display = 'block';
+}
+
+function cmdDismissAnswer() {
+  document.getElementById('cmd-answer').style.display = 'none';
 }
 
 async function cmdSubmitRetry(parsed) {

@@ -516,13 +516,25 @@ function getTriageContext() {
       }).join('\n');
   } catch {}
 
+  // PRD items (from all plan JSONs)
+  let prdItems = '';
+  try {
+    const prdInfo = getPrdInfo();
+    if (prdInfo.progress && prdInfo.progress.items) {
+      prdItems = prdInfo.progress.items.map(i => {
+        const deps = (i.depends_on || []).join(',');
+        return `- ${i.id}: "${(i.name || '').slice(0, 50)}" [${i.status}] ${i.priority}${deps ? ' deps:[' + deps + ']' : ''} (${i.source})`;
+      }).join('\n');
+    }
+  } catch {}
+
   // Active dispatch
   const dq = getDispatchQueue();
   const active = (dq.active || []).map(d =>
     `- ${d.agentName || d.agent}: ${(d.task || '').slice(0, 50)}`
   ).join('\n');
 
-  return { agents, projects, workItems: wi, plans, activeDispatch: active };
+  return { agents, projects, workItems: wi, plans, prdItems, activeDispatch: active };
 }
 
 function buildTriageSysPrompt(ctx) {
@@ -543,6 +555,9 @@ ${ctx.workItems}
 ### Plans on Disk
 ${ctx.plans}
 
+### PRD Items (from active PRDs)
+${ctx.prdItems}
+
 ### Currently Active
 ${ctx.activeDispatch}
 
@@ -559,6 +574,9 @@ ${ctx.activeDispatch}
   Keywords: retry, restart, rerun, redo, try again, re-dispatch, reset
   Include the work item IDs to retry in the "retryIds" field. Match from the work items list above.
   If the user says "the failed tasks" or "the three failed ones", find items with status "failed" and include their IDs.
+- "answer": Answer a question about the squad state. Use when the user asks a question
+  (what, which, how many, status, what's blocking, what's left, who is working on, etc.)
+  Put your concise answer in the "answer" field. Use the context above to answer accurately.
 
 ## Rules
 
@@ -585,7 +603,7 @@ ${ctx.activeDispatch}
 
 Respond with ONLY a JSON object, no markdown fences, no explanation:
 {
-  "intent": "work-item|note|plan|retry",
+  "intent": "work-item|note|plan|retry|answer",
   "title": "concise action title",
   "description": "additional context, resolved references",
   "type": "ask|explore|fix|review|test|implement|plan-to-prd",
@@ -595,7 +613,8 @@ Respond with ONLY a JSON object, no markdown fences, no explanation:
   "project": "project-name or empty string",
   "projects": [],
   "branchStrategy": "parallel",
-  "retryIds": ["work-item-id"] // only for intent "retry"
+  "retryIds": ["work-item-id"], // only for intent "retry"
+  "answer": "text response" // only for intent "answer"
 }`;
 }
 
