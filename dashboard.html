@@ -767,7 +767,8 @@ async function openAgentDetail(id) {
   const badgeClass = agent.status;
   document.getElementById('detail-status-line').innerHTML =
     '<span class="status-badge ' + badgeClass + '">' + agent.status.toUpperCase() + '</span> ' +
-    '<span style="color:var(--muted)">' + escHtml(agent.lastAction) + '</span>';
+    '<span style="color:var(--muted)">' + escHtml(agent.lastAction) + '</span>' +
+    (agent.resultSummary ? '<div style="margin-top:4px;font-size:11px;color:var(--text);line-height:1.4">' + escHtml(agent.resultSummary.slice(0, 300)) + '</div>' : '');
 
   try {
     const detail = await fetch('/api/agent/' + id).then(r => r.json());
@@ -824,6 +825,9 @@ function renderDetailContent(detail, tab) {
       if (detail.statusData.started_at) html += 'Started: ' + detail.statusData.started_at + '\n';
       if (detail.statusData.completed_at) html += 'Completed: ' + detail.statusData.completed_at + '\n';
       html += '</div>';
+      if (detail.statusData.resultSummary) {
+        html += '<h4>Last Result</h4><div class="section" style="border-left:3px solid var(--green);padding-left:12px">' + escHtml(detail.statusData.resultSummary) + '</div>';
+      }
     }
 
     if (detail.inboxContents && detail.inboxContents.length > 0) {
