@@ -46,6 +46,45 @@ function trackEngineUsage(category, usage) {
 
 // ── Core LLM Call ───────────────────────────────────────────────────────────
 
+function callLLM(promptText, sysPromptText, { timeout = 120000, label = 'llm', model = 'sonnet', maxTurns = 1 } = {}) {
+  return new Promise((resolve) => {
+    const id = uid();
+    const promptPath = path.join(ENGINE_DIR, `${label}-prompt-${id}.md`);
+    const sysPath = path.join(ENGINE_DIR, `${label}-sys-${id}.md`);
+    safeWrite(promptPath, promptText);
+    safeWrite(sysPath, sysPromptText);
+
+    const spawnScript = path.join(ENGINE_DIR, 'spawn-agent.js');
+    const proc = runFile(process.execPath, [
+      spawnScript, promptPath, sysPath,
+      '--output-format', 'stream-json', '--max-turns', String(maxTurns), '--model', model,
+      '--permission-mode', 'bypassPermissions', '--verbose',
+    ], { cwd: SQUAD_DIR, stdio: ['pipe', 'pipe', 'pipe'], env: cleanChildEnv() });
+
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    const timer = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} }, timeout);
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      safeUnlink(promptPath);
+      safeUnlink(sysPath);
+      const parsed = parseStreamJsonOutput(stdout);
+      resolve({ text: parsed.text || '', usage: parsed.usage, code, stderr, raw: stdout });
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      safeUnlink(promptPath);
+      safeUnlink(sysPath);
+      resolve({ text: '', usage: null, code: 1, stderr: err.message, raw: '' });
+    });
+  });
+}
+
 function callHaiku(promptText, sysPromptText, { timeout = 60000, label = 'llm' } = {}) {
   return new Promise((resolve) => {
     const id = uid();
@@ -220,6 +259,7 @@ Answer concisely and directly. Follow these rules:
 }
 
 module.exports = {
+  callLLM,
   callHaiku,
   parseStreamJsonOutput,
   trackEngineUsage,

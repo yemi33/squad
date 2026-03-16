@@ -1762,6 +1762,106 @@ What would you like to discuss or change? When you're happy, say "approve" and I
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
 
+  // POST /api/command-center — conversational command center with full squad context
+  if (req.method === 'POST' && req.url === '/api/command-center') {
+    try {
+      const body = await readBody(req);
+      if (!body.message) return jsonReply(res, 400, { error: 'message required' });
+
+      const ctx = getTriageContext();
+      const notes = safeRead(path.join(SQUAD_DIR, 'notes.md')) || '';
+      const notesTail = notes.length > 3000 ? notes.slice(-3000) : notes;
+
+      // Build comprehensive system prompt with full squad state
+      const sysPrompt = `You are the Command Center AI for a software engineering squad called "Squad."
+You have complete visibility into the squad's state and can answer questions AND take actions.
+
+## Squad State
+
+### Agents
+${ctx.agents}
+
+### Projects
+${ctx.projects}
+
+### Work Items (active/pending/failed)
+${ctx.workItems}
+
+### Plans & PRDs
+${ctx.plans}
+
+### PRD Items
+${ctx.prdItems}
+
+### Currently Active
+${ctx.activeDispatch}
+
+### Team Notes (recent)
+${notesTail.slice(-1500)}
+
+## Actions You Can Take
+
+When the user wants you to DO something (not just answer), include an action block in your response.
+Format: a JSON code block tagged with \`action\`:
+
+\`\`\`action
+{"type": "dispatch", "title": "Fix login bug", "workType": "fix", "priority": "high", "agents": ["dallas"], "project": "OfficeAgent", "description": "..."}
+\`\`\`
+
+Available action types:
+- **dispatch**: Create a work item. Fields: title, workType (ask/explore/fix/review/test/implement), priority (low/medium/high), agents (array, optional), project, description
+- **note**: Save a note. Fields: title, content
+- **plan**: Create a plan. Fields: title, description, project, branchStrategy (parallel/shared-branch)
+- **cancel**: Cancel an agent. Fields: agent (id), reason
+- **retry**: Retry work items. Fields: ids (array of work item IDs)
+- **pause-plan**: Pause a PRD. Fields: file (plan filename)
+- **approve-plan**: Approve a PRD. Fields: file (plan filename)
+
+You can include MULTIPLE action blocks in one response if the user asks for several things.
+
+## Rules
+
+1. Answer questions conversationally using the squad state above. Be specific — cite IDs, agent names, statuses.
+2. When the user wants action, include the action block AND explain what you're doing.
+3. You can reference "the plan", "ripley's plan", "the failing PR" — resolve these to specific items from the context.
+4. If something is ambiguous, ask for clarification rather than guessing.
+5. Keep responses concise but informative. Use markdown formatting.
+6. Never modify engine source code or config files — only dispatch work and manage plans/items.`;
+
+      // Build conversation prompt with history
+      let prompt = '';
+      if (body.history && body.history.length > 0) {
+        prompt += '## Conversation History\n\n';
+        for (const msg of body.history.slice(-10)) {
+          prompt += msg.role === 'user' ? `**User:** ${msg.text}\n\n` : `**You:** ${msg.text}\n\n`;
+        }
+        prompt += '---\n\n';
+      }
+      prompt += `**User:** ${body.message}`;
+
+      const result = await llm.callLLM(prompt, sysPrompt, {
+        timeout: 90000, label: 'command-center', model: 'sonnet'
+      });
+      llm.trackEngineUsage('command-center', result.usage);
+
+      if (result.code !== 0 || !result.text) {
+        return jsonReply(res, 200, { text: 'I had trouble processing that. Try again or rephrase.', actions: [] });
+      }
+
+      // Parse action blocks from response
+      const actions = [];
+      const actionRegex = /```action\n([\s\S]*?)```/g;
+      let match;
+      while ((match = actionRegex.exec(result.text)) !== null) {
+        try { actions.push(JSON.parse(match[1].trim())); } catch {}
+      }
+      // Clean action blocks from display text
+      const displayText = result.text.replace(/```action\n[\s\S]*?```\n?/g, '').trim();
+
+      return jsonReply(res, 200, { text: displayText, actions });
+    } catch (e) { return jsonReply(res, 500, { error: e.message }); }
+  }
+
   // GET /api/settings — return current engine + claude + routing config
   if (req.method === 'GET' && req.url === '/api/settings') {
     try {
