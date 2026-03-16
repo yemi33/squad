@@ -64,7 +64,7 @@ function checkPlanCompletion(meta, config) {
   const prsCreated = [];
   for (const p of projects) {
     try {
-      const prPath = path.join(p.localPath, '.squad', 'pull-requests.json');
+      const prPath = shared.projectPrPath(p);
       const prs = e.safeJson(prPath) || [];
       for (const pr of prs) {
         if ((pr.prdItems || []).some(id => doneItems.find(w => w.sourcePlanItem === id || w.id === id))) {
@@ -129,7 +129,7 @@ function checkPlanCompletion(meta, config) {
     // Group PRs by project — one worktree per project with all branches merged in
     const projectPrs = {}; // projectName -> { project, prs: [], mainBranch }
     for (const p of projects) {
-      const prs = (e.safeJson(path.join(p.localPath, '.squad', 'pull-requests.json')) || [])
+      const prs = (e.safeJson(shared.projectPrPath(p)) || [])
         .filter(pr => pr.status === 'active' && (pr.prdItems || []).some(id =>
           doneItems.find(w => w.sourcePlanItem === id || w.id === id)));
       if (prs.length > 0) {
@@ -785,34 +785,8 @@ function updateMetrics(agentId, dispatchItem, result, taskUsage, prsCreatedCount
 // ─── Agent Output Parsing ────────────────────────────────────────────────────
 
 function parseAgentOutput(stdout) {
-  let resultSummary = '';
-  let taskUsage = null;
-  try {
-    const lines = stdout.split('\n');
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (!line || !line.startsWith('{')) continue;
-      try {
-        const obj = JSON.parse(line);
-        if (obj.type === 'result') {
-          if (obj.result) resultSummary = obj.result.slice(0, 500);
-          if (obj.total_cost_usd || obj.usage) {
-            taskUsage = {
-              costUsd: obj.total_cost_usd || 0,
-              inputTokens: obj.usage?.input_tokens || 0,
-              outputTokens: obj.usage?.output_tokens || 0,
-              cacheRead: obj.usage?.cache_read_input_tokens || obj.usage?.cacheReadInputTokens || 0,
-              cacheCreation: obj.usage?.cache_creation_input_tokens || obj.usage?.cacheCreationInputTokens || 0,
-              durationMs: obj.duration_ms || 0,
-              numTurns: obj.num_turns || 0,
-            };
-          }
-          break;
-        }
-      } catch {}
-    }
-  } catch {}
-  return { resultSummary, taskUsage };
+  const parsed = shared.parseStreamJsonOutput(stdout, { maxTextLength: 500 });
+  return { resultSummary: parsed.text, taskUsage: parsed.usage };
 }
 
 function runPostCompletionHooks(dispatchItem, agentId, code, stdout, config) {

@@ -1228,7 +1228,7 @@ const server = http.createServer(async (req, res) => {
   // GET /api/knowledge — list all knowledge base entries grouped by category
   if (req.method === 'GET' && req.url === '/api/knowledge') {
     const kbDir = path.join(SQUAD_DIR, 'knowledge');
-    const categories = ['architecture', 'conventions', 'project-notes', 'build-reports', 'reviews'];
+    const categories = shared.KB_CATEGORIES;
     const result = {};
     for (const cat of categories) {
       const catDir = path.join(kbDir, cat);
@@ -1931,9 +1931,8 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       const body = await readBody(req);
       const { name, category } = body;
       if (!name) return jsonReply(res, 400, { error: 'name required' });
-      const validCategories = ['architecture', 'conventions', 'project-notes', 'build-reports', 'reviews'];
-      if (!category || !validCategories.includes(category)) {
-        return jsonReply(res, 400, { error: 'category required: ' + validCategories.join(', ') });
+      if (!category || !shared.KB_CATEGORIES.includes(category)) {
+        return jsonReply(res, 400, { error: 'category required: ' + shared.KB_CATEGORIES.join(', ') });
       }
 
       const inboxPath = path.join(SQUAD_DIR, 'notes', 'inbox', name);

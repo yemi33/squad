@@ -46,10 +46,101 @@ function safeWrite(p, data) {
     // All rename attempts failed — direct write as fallback (not atomic but won't lose data)
     try { fs.unlinkSync(tmp); } catch {}
     fs.writeFileSync(p, content);
-  } catch {
-    // Even direct write failed — clean up tmp silently
+  } catch (err) {
+    // Even direct write failed — log and clean up tmp
+    console.error(`[safeWrite] FAILED to write ${p}: ${err.message}`);
     try { fs.unlinkSync(tmp); } catch {}
   }
+}
+
+function safeUnlink(p) {
+  try { fs.unlinkSync(p); } catch {}
+}
+
+// ── Process Spawning ────────────────────────────────────────────────────────
+// All child process calls go through these to ensure windowsHide: true
+
+const { execSync: _execSync, spawnSync: _spawnSync, spawn: _spawn } = require('child_process');
+
+function exec(cmd, opts = {}) {
+  return _execSync(cmd, { windowsHide: true, ...opts });
+}
+
+function run(cmd, opts = {}) {
+  return _spawn(cmd, { windowsHide: true, ...opts });
+}
+
+function runFile(file, args, opts = {}) {
+  return _spawn(file, args, { windowsHide: true, ...opts });
+}
+
+function execSilent(cmd, opts = {}) {
+  return _execSync(cmd, { stdio: 'pipe', windowsHide: true, ...opts });
+}
+
+// ── Environment ─────────────────────────────────────────────────────────────
+
+function cleanChildEnv() {
+  const env = { ...process.env };
+  delete env.CLAUDECODE;
+  delete env.CLAUDE_CODE_ENTRYPOINT;
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) delete env[key];
+  }
+  return env;
+}
+
+// ── Claude Output Parsing ───────────────────────────────────────────────────
+
+/**
+ * Parse stream-json output from claude CLI. Returns { text, usage }.
+ * Single source of truth — used by llm.js, consolidation.js, and lifecycle.js.
+ */
+function parseStreamJsonOutput(raw, { maxTextLength = 0 } = {}) {
+  const lines = raw.split('\n');
+  let text = '';
+  let usage = null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line || !line.startsWith('{')) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj.type === 'result') {
+        if (obj.result) text = maxTextLength ? obj.result.slice(0, maxTextLength) : obj.result;
+        if (obj.total_cost_usd || obj.usage) {
+          usage = {
+            costUsd: obj.total_cost_usd || 0,
+            inputTokens: obj.usage?.input_tokens || 0,
+            outputTokens: obj.usage?.output_tokens || 0,
+            cacheRead: obj.usage?.cache_read_input_tokens || obj.usage?.cacheReadInputTokens || 0,
+            cacheCreation: obj.usage?.cache_creation_input_tokens || obj.usage?.cacheCreationInputTokens || 0,
+            durationMs: obj.duration_ms || 0,
+            numTurns: obj.num_turns || 0,
+          };
+        }
+        break;
+      }
+    } catch {}
+  }
+  return { text, usage };
+}
+
+// ── Knowledge Base ──────────────────────────────────────────────────────────
+
+const KB_CATEGORIES = ['architecture', 'conventions', 'project-notes', 'build-reports', 'reviews'];
+
+/**
+ * Classify an inbox item into a knowledge base category.
+ * Single source of truth — used by consolidation.js (both LLM and regex paths).
+ */
+function classifyInboxItem(name, content) {
+  const nameLower = (name || '').toLowerCase();
+  const contentLower = (content || '').toLowerCase();
+  if (nameLower.includes('review') || nameLower.includes('pr-') || nameLower.includes('pr4') || nameLower.includes('feedback')) return 'reviews';
+  if (nameLower.includes('build') || nameLower.includes('bt-') || contentLower.includes('build pass') || contentLower.includes('build fail') || contentLower.includes('lint')) return 'build-reports';
+  if (contentLower.includes('architecture') || contentLower.includes('design doc') || contentLower.includes('system design') || contentLower.includes('data flow') || contentLower.includes('how it works')) return 'architecture';
+  if (contentLower.includes('convention') || contentLower.includes('pattern') || contentLower.includes('always use') || contentLower.includes('never use') || contentLower.includes('rule:') || contentLower.includes('best practice')) return 'conventions';
+  return 'project-notes';
 }
 
 // ── Project Helpers ──────────────────────────────────────────────────────────
@@ -135,6 +226,15 @@ module.exports = {
   safeReadDir,
   safeJson,
   safeWrite,
+  safeUnlink,
+  exec,
+  execSilent,
+  run,
+  runFile,
+  cleanChildEnv,
+  parseStreamJsonOutput,
+  KB_CATEGORIES,
+  classifyInboxItem,
   getProjects,
   projectRoot,
   projectWorkItemsPath,

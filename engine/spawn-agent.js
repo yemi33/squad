@@ -9,6 +9,7 @@
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { cleanChildEnv } = require('./shared');
 
 const [,, promptFile, sysPromptFile, ...extraArgs] = process.argv;
 
@@ -20,13 +21,7 @@ if (!promptFile || !sysPromptFile) {
 const prompt = fs.readFileSync(promptFile, 'utf8');
 const sysPrompt = fs.readFileSync(sysPromptFile, 'utf8');
 
-// Clean CLAUDECODE env vars
-const env = { ...process.env };
-delete env.CLAUDECODE;
-delete env.CLAUDE_CODE_ENTRYPOINT;
-for (const key of Object.keys(env)) {
-  if (key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) delete env[key];
-}
+const env = cleanChildEnv();
 
 // Resolve claude binary — find the actual JS entry point
 let claudeBin;

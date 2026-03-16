@@ -7,46 +7,11 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { safeRead, safeWrite } = require('./shared');
+const shared = require('./shared');
+const { safeRead, safeWrite, safeUnlink, cleanChildEnv, parseStreamJsonOutput } = shared;
 
 const SQUAD_DIR = path.resolve(__dirname, '..');
 const ENGINE_DIR = __dirname;
-
-function cleanChildEnv() {
-  const env = { ...process.env };
-  delete env.CLAUDECODE;
-  delete env.CLAUDE_CODE_ENTRYPOINT;
-  for (const key of Object.keys(env)) {
-    if (key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) delete env[key];
-  }
-  return env;
-}
-
-function parseStreamJsonOutput(raw) {
-  const lines = raw.split('\n');
-  let text = '';
-  let usage = null;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line || !line.startsWith('{')) continue;
-    try {
-      const obj = JSON.parse(line);
-      if (obj.type === 'result') {
-        if (obj.result) text = obj.result;
-        if (obj.total_cost_usd || obj.usage) {
-          usage = {
-            costUsd: obj.total_cost_usd || 0,
-            inputTokens: obj.usage?.input_tokens || 0,
-            outputTokens: obj.usage?.output_tokens || 0,
-            cacheRead: obj.usage?.cache_read_input_tokens || obj.usage?.cacheReadInputTokens || 0,
-          };
-        }
-        break;
-      }
-    } catch {}
-  }
-  return { text, usage };
-}
 
 function trackEngineUsage(category, usage) {
   if (!usage) return;
@@ -57,7 +22,7 @@ function trackEngineUsage(category, usage) {
 
     if (!metrics._engine) metrics._engine = {};
     if (!metrics._engine[category]) {
-      metrics._engine[category] = { calls: 0, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0 };
+      metrics._engine[category] = { calls: 0, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheCreation: 0 };
     }
     const cat = metrics._engine[category];
     cat.calls++;
@@ -65,6 +30,7 @@ function trackEngineUsage(category, usage) {
     cat.inputTokens += usage.inputTokens || 0;
     cat.outputTokens += usage.outputTokens || 0;
     cat.cacheRead += usage.cacheRead || 0;
+    cat.cacheCreation = (cat.cacheCreation || 0) + (usage.cacheCreation || 0);
 
     const today = new Date().toISOString().slice(0, 10);
     if (!metrics._daily) metrics._daily = {};
@@ -105,16 +71,16 @@ function callHaiku(promptText, sysPromptText, { timeout = 60000, label = 'llm' }
 
     proc.on('close', (code) => {
       clearTimeout(timer);
-      try { fs.unlinkSync(promptPath); } catch {}
-      try { fs.unlinkSync(sysPath); } catch {}
+      safeUnlink(promptPath);
+      safeUnlink(sysPath);
       const parsed = parseStreamJsonOutput(stdout);
       resolve({ text: parsed.text || '', usage: parsed.usage, code, stderr, raw: stdout });
     });
 
     proc.on('error', (err) => {
       clearTimeout(timer);
-      try { fs.unlinkSync(promptPath); } catch {}
-      try { fs.unlinkSync(sysPath); } catch {}
+      safeUnlink(promptPath);
+      safeUnlink(sysPath);
       resolve({ text: '', usage: null, code: 1, stderr: err.message, raw: '' });
     });
   });

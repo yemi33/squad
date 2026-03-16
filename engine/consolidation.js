@@ -40,15 +40,8 @@ function consolidateInbox(config) {
 
 // ─── LLM-Powered Consolidation ──────────────────────────────────────────────
 
-function classifyInboxItem(name, content) {
-  const nameLower = (name || '').toLowerCase();
-  const contentLower = (content || '').toLowerCase();
-  if (nameLower.includes('review') || nameLower.includes('pr-') || nameLower.includes('pr4') || nameLower.includes('feedback')) return 'reviews';
-  if (nameLower.includes('build') || nameLower.includes('bt-') || contentLower.includes('build pass') || contentLower.includes('build fail') || contentLower.includes('lint')) return 'build-reports';
-  if (contentLower.includes('architecture') || contentLower.includes('design doc') || contentLower.includes('system design')) return 'architecture';
-  if (contentLower.includes('convention') || contentLower.includes('pattern') || contentLower.includes('always use') || contentLower.includes('best practice')) return 'conventions';
-  return 'project-notes';
-}
+// Use shared classifyInboxItem — single source of truth for KB classification
+const { classifyInboxItem } = shared;
 
 function buildConsolidationPrompt(items, existingNotes, kbPaths) {
   const e = engine();
@@ -145,19 +138,12 @@ function consolidateWithLLM(items, existingNotes, files, config) {
     '--verbose',
   ];
 
-  const childEnv = { ...process.env };
-  for (const key of Object.keys(childEnv)) {
-    if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDECODE_')) {
-      delete childEnv[key];
-    }
-  }
-
   e.log('info', 'Spawning Haiku for LLM consolidation...');
 
   const proc = spawn(process.execPath, [spawnScript, promptPath, sysPromptPath, ...args], {
     cwd: e.SQUAD_DIR,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: childEnv,
+    env: shared.cleanChildEnv(),
     windowsHide: true
   });
 
@@ -174,34 +160,12 @@ function consolidateWithLLM(items, existingNotes, files, config) {
   proc.on('close', (code) => {
     clearTimeout(timeout);
     _consolidationInFlight = false;
-    try { fs.unlinkSync(promptPath); } catch {}
-    try { fs.unlinkSync(sysPromptPath); } catch {}
+    shared.safeUnlink(promptPath);
+    shared.safeUnlink(sysPromptPath);
 
-    let extractedText = '';
-    let consolidationUsage = null;
-    try {
-      const lines = stdout.split('\n');
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i].trim();
-        if (!line || !line.startsWith('{')) continue;
-        try {
-          const obj = JSON.parse(line);
-          if (obj.type === 'result') {
-            if (obj.result) extractedText = obj.result;
-            if (obj.total_cost_usd || obj.usage) {
-              consolidationUsage = {
-                costUsd: obj.total_cost_usd || 0,
-                inputTokens: obj.usage?.input_tokens || 0,
-                outputTokens: obj.usage?.output_tokens || 0,
-                cacheRead: obj.usage?.cache_read_input_tokens || obj.usage?.cacheReadInputTokens || 0,
-              };
-            }
-            break;
-          }
-        } catch {}
-      }
-    } catch {}
-    trackEngineUsage('consolidation', consolidationUsage);
+    const parsed = shared.parseStreamJsonOutput(stdout);
+    const extractedText = parsed.text;
+    trackEngineUsage('consolidation', parsed.usage);
 
     if (code === 0 && (extractedText || stdout).trim().length > 50) {
       let digest = (extractedText || stdout).trim();
@@ -247,8 +211,8 @@ function consolidateWithLLM(items, existingNotes, files, config) {
     clearTimeout(timeout);
     _consolidationInFlight = false;
     e.log('warn', `LLM consolidation spawn error: ${err.message} — falling back to regex`);
-    try { fs.unlinkSync(promptPath); } catch {}
-    try { fs.unlinkSync(sysPromptPath); } catch {}
+    shared.safeUnlink(promptPath);
+    shared.safeUnlink(sysPromptPath);
     consolidateWithRegex(items, files);
   });
 }
@@ -365,33 +329,16 @@ function classifyToKnowledgeBase(items) {
   const e = engine();
   if (!fs.existsSync(e.KNOWLEDGE_DIR)) fs.mkdirSync(e.KNOWLEDGE_DIR, { recursive: true });
 
-  const categoryDirs = {
-    architecture: path.join(e.KNOWLEDGE_DIR, 'architecture'),
-    conventions: path.join(e.KNOWLEDGE_DIR, 'conventions'),
-    'project-notes': path.join(e.KNOWLEDGE_DIR, 'project-notes'),
-    'build-reports': path.join(e.KNOWLEDGE_DIR, 'build-reports'),
-    reviews: path.join(e.KNOWLEDGE_DIR, 'reviews'),
-  };
-  for (const dir of Object.values(categoryDirs)) {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const categoryDirs = {};
+  for (const cat of shared.KB_CATEGORIES) {
+    categoryDirs[cat] = path.join(e.KNOWLEDGE_DIR, cat);
+    if (!fs.existsSync(categoryDirs[cat])) fs.mkdirSync(categoryDirs[cat], { recursive: true });
   }
 
   let classified = 0;
   for (const item of items) {
     const content = item.content || '';
-    const name = (item.name || '').toLowerCase();
-    const contentLower = content.toLowerCase();
-
-    let category = 'project-notes';
-    if (name.includes('review') || name.includes('pr-') || name.includes('pr4') || name.includes('feedback')) {
-      category = 'reviews';
-    } else if (name.includes('build') || name.includes('bt-') || contentLower.includes('build pass') || contentLower.includes('build fail') || contentLower.includes('lint')) {
-      category = 'build-reports';
-    } else if (contentLower.includes('architecture') || contentLower.includes('design doc') || contentLower.includes('system design') || contentLower.includes('data flow') || contentLower.includes('how it works')) {
-      category = 'architecture';
-    } else if (contentLower.includes('convention') || contentLower.includes('pattern') || contentLower.includes('always use') || contentLower.includes('never use') || contentLower.includes('rule:') || contentLower.includes('best practice')) {
-      category = 'conventions';
-    }
+    const category = classifyInboxItem(item.name, content);
 
     const agentMatch = item.name.match(/^(\w+)-/);
     const agent = agentMatch ? agentMatch[1] : 'unknown';
@@ -427,5 +374,4 @@ function archiveInboxFiles(files) {
 module.exports = {
   consolidateInbox,
   classifyToKnowledgeBase,
-  getKnowledgeBaseIndex: null, // stays in engine.js (used by buildAgentContext)
 };

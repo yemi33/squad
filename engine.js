@@ -23,8 +23,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn, execSync } = require('child_process');
 const shared = require('./engine/shared');
+const { exec, execSilent, runFile } = shared;
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -699,26 +699,26 @@ function spawnAgent(dispatchItem, config) {
         if (isSharedBranch) {
           // Shared branch: fetch and checkout existing branch (no -b)
           log('info', `Creating worktree for shared branch: ${worktreePath} on ${branchName}`);
-          try { execSync(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe', windowsHide: true }); } catch {}
-          execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe', windowsHide: true });
+          try { exec(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe' }); } catch {}
+          exec(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe' });
         } else {
           // Parallel: create new branch (reuse if exists from a previous attempt)
           log('info', `Creating worktree: ${worktreePath} on branch ${branchName}`);
           try {
-            execSync(`git worktree add "${worktreePath}" -b "${branchName}" ${sanitizeBranch(project.mainBranch || 'main')}`, {
+            exec(`git worktree add "${worktreePath}" -b "${branchName}" ${sanitizeBranch(project.mainBranch || 'main')}`, {
               cwd: rootDir, stdio: 'pipe', windowsHide: true
             });
           } catch {
             // Branch already exists — use it without -b
-            try { execSync(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe', windowsHide: true }); } catch {}
-            execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe', windowsHide: true });
+            try { exec(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe' }); } catch {}
+            exec(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe' });
             log('info', `Reusing existing branch: ${branchName}`);
           }
         }
       } else if (meta?.branchStrategy === 'shared-branch') {
         // Worktree exists — pull latest from prior plan item
         log('info', `Pulling latest on shared branch ${branchName}`);
-        try { execSync(`git pull origin "${branchName}"`, { cwd: worktreePath, stdio: 'pipe', windowsHide: true }); } catch {}
+        try { exec(`git pull origin "${branchName}"`, { cwd: worktreePath, stdio: 'pipe' }); } catch {}
       }
       // Merge dependency PR branches into worktree if this item has depends_on
       const depIds = meta?.item?.depends_on || [];
@@ -727,8 +727,8 @@ function spawnAgent(dispatchItem, config) {
           const depBranches = resolveDependencyBranches(depIds, meta?.item?.sourcePlan, project, config);
           for (const { branch: depBranch, prId } of depBranches) {
             try {
-              execSync(`git fetch origin "${depBranch}"`, { cwd: rootDir, stdio: 'pipe', windowsHide: true });
-              execSync(`git merge "origin/${depBranch}" --no-edit`, { cwd: worktreePath, stdio: 'pipe', windowsHide: true });
+              exec(`git fetch origin "${depBranch}"`, { cwd: rootDir, stdio: 'pipe' });
+              exec(`git merge "origin/${depBranch}" --no-edit`, { cwd: worktreePath, stdio: 'pipe' });
               log('info', `Merged dependency branch ${depBranch} (${prId}) into worktree ${branchName}`);
             } catch (mergeErr) {
               log('warn', `Failed to merge dependency ${depBranch} into ${branchName}: ${mergeErr.message}`);
@@ -810,11 +810,10 @@ function spawnAgent(dispatchItem, config) {
   const spawnScript = path.join(ENGINE_DIR, 'spawn-agent.js');
   const spawnArgs = [spawnScript, promptPath, sysPromptPath, ...args];
 
-  const proc = spawn(process.execPath, spawnArgs, {
+  const proc = runFile(process.execPath, spawnArgs, {
     cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: childEnv,
-    windowsHide: true
   });
 
   const MAX_OUTPUT = 1024 * 1024; // 1MB
@@ -1421,7 +1420,7 @@ function runCleanup(config, verbose = false) {
 
         if (shouldClean) {
           try {
-            execSync(`git worktree remove "${wtPath}" --force`, { cwd: root, stdio: 'pipe', windowsHide: true });
+            exec(`git worktree remove "${wtPath}" --force`, { cwd: root, stdio: 'pipe' });
             cleaned.worktrees++;
             if (verbose) console.log(`  Removed worktree: ${wtPath}`);
           } catch (e) {
@@ -1678,8 +1677,8 @@ function materializePlansAsWorkItems(config) {
           const mainBranch = project.mainBranch || 'main';
           const branch = sanitizeBranch(plan.feature_branch);
           // Create branch from main (idempotent — ignores if exists)
-          execSync(`git branch "${branch}" "${mainBranch}" 2>/dev/null || true`, { cwd: root, stdio: 'pipe', windowsHide: true });
-          execSync(`git push -u origin "${branch}" 2>/dev/null || true`, { cwd: root, stdio: 'pipe', windowsHide: true });
+          exec(`git branch "${branch}" "${mainBranch}" 2>/dev/null || true`, { cwd: root, stdio: 'pipe' });
+          exec(`git push -u origin "${branch}" 2>/dev/null || true`, { cwd: root, stdio: 'pipe' });
           log('info', `Shared branch pre-created: ${branch} for plan ${file}`);
         } catch (err) {
           log('warn', `Failed to pre-create shared branch for ${file}: ${err.message}`);
@@ -2027,9 +2026,9 @@ function materializeSpecsAsWorkItems(config, project) {
   let recentSpecs = [];
   for (const pattern of filePatterns) {
     try {
-      const result = execSync(
+      const result = exec(
         `git log --diff-filter=AM --name-only --pretty=format:"COMMIT:%H|%s" --since="${sinceDate}" -- "${pattern}"`,
-        { cwd: root, encoding: 'utf8', timeout: 10000, windowsHide: true }
+        { cwd: root, encoding: 'utf8', timeout: 10000 }
       ).trim();
       if (!result) continue;
 
