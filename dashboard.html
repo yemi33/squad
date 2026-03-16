@@ -3363,24 +3363,32 @@ async function planApprove(file) {
   } catch (e) { showToast('cmd-toast', 'Error: ' + e.message, false); }
 }
 
+// Disable all PRD action buttons to prevent double-clicks
+function qaDisablePrdButtons() {
+  const container = document.getElementById('qa-generate-prd-btn');
+  if (container) container.querySelectorAll('button').forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+}
+
 // Replace existing PRD: pause old, clean pending items, regenerate from revised plan
 async function qaReplacePrd(planFile) {
+  qaDisablePrdButtons();
   const allPlans = window._lastStatus?.plans || [];
   const mdPlan = allPlans.find(p => p.file === planFile);
   const project = mdPlan?.project || '';
   const existingPrd = allPlans.find(p => p.file.endsWith('.json') && p.project === project);
 
   if (existingPrd) {
-    try {
-      await fetch('/api/plans/regenerate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: existingPrd.file })
-      });
-    } catch {}
+    // Pause first to stop materialization, then clean pending items
     try {
       await fetch('/api/plans/pause', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file: existingPrd.file })
+      });
+    } catch {}
+    try {
+      await fetch('/api/plans/regenerate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: existingPrd.file })
       });
     } catch {}
   }
@@ -3393,6 +3401,7 @@ async function qaReplacePrd(planFile) {
 
 // New PRD: keep existing PRD running, create fresh PRD from revised plan
 async function qaNewPrd(planFile) {
+  qaDisablePrdButtons();
   const allPlans = window._lastStatus?.plans || [];
   const mdPlan = allPlans.find(p => p.file === planFile);
   const project = mdPlan?.project || '';

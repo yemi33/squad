@@ -22,7 +22,9 @@ A user has provided a plan. Analyze it against the codebase and produce a struct
 
 ## Output
 
-Write the PRD directly to: `{{team_root}}/plans/{{project_name_lower}}-{{date}}.json`
+Write the PRD to: `{{team_root}}/plans/{{project_name_lower}}-{{date}}.json`
+
+**If that file already exists**, append a counter: `{{project_name_lower}}-{{date}}-2.json`, `-3.json`, etc. Do NOT overwrite an existing PRD file — the engine tracks work items by filename.
 
 This file is NOT checked into the repo. The engine reads it on every tick and dispatches implementation work automatically.
 
@@ -30,6 +32,7 @@ This file is NOT checked into the repo. The engine reads it on every tick and di
 {
   "version": "plan-{{date}}",
   "project": "{{project_name}}",
+  "source_plan": "{{plan_file}}",
   "generated_by": "{{agent_id}}",
   "generated_at": "{{date}}",
   "plan_summary": "{{plan_summary}}",

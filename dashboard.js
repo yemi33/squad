@@ -1235,7 +1235,7 @@ const server = http.createServer(async (req, res) => {
         title: 'Regenerate PRD from revised plan: ' + sourcePlanFile,
         type: 'plan-to-prd',
         priority: 'high',
-        description: `The source plan \`${sourcePlanFile}\` has been revised. Convert it into a fresh PRD JSON.\n\nRevision instruction: ${body.instruction}\n\nRead the revised plan, generate updated PRD items (missing_features), and write to \`plans/${body.source}\`. Set status to "approved".\n\nPreserve items that are already done (status "implemented" or "complete"). Reset or replace items that were pending/failed.`,
+        description: `The source plan \`${sourcePlanFile}\` has been revised. Convert it into a fresh PRD JSON.\n\nRevision instruction: ${body.instruction}\n\nRead the revised plan, generate updated PRD items (missing_features), and write to \`plans/${body.source}\`. Set status to "approved". Include \`"source_plan": "${sourcePlanFile}"\` in the JSON root.\n\nPreserve items that are already done (status "implemented" or "complete"). Reset or replace items that were pending/failed.`,
         status: 'pending',
         created: new Date().toISOString(),
         createdBy: 'dashboard:revise-and-regenerate',

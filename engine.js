@@ -2152,6 +2152,7 @@ function discoverCentralWorkItems(config) {
           vars.plan_content = item.description || '';
         }
         vars.plan_summary = (item.title || item.planFile).substring(0, 80);
+        vars.plan_file = item.planFile || '';
         vars.project_name_lower = (firstProject?.name || 'project').toLowerCase();
         vars.branch_strategy_hint = item.branchStrategy
           ? `The user requested **${item.branchStrategy}** strategy. Use this unless the analysis strongly suggests otherwise.`
