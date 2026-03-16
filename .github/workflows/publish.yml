@@ -29,65 +29,57 @@ jobs:
           # Bump patch
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
           NEXT="$MAJOR.$MINOR.$((PATCH + 1))"
-          echo "Publishing version: $NEXT"
           TODAY=$(date +%Y-%m-%d)
+          echo "Publishing version: $NEXT"
 
           # Update package.json
           node -e "const p=require('./package.json'); p.version='$NEXT'; require('fs').writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n')"
 
-          # Generate changelog entry from changed files
-          # Compare against the last [skip ci] commit (previous publish) or fall back to HEAD~1
+          # Find changed files since last publish
           LAST_PUBLISH=$(git log --oneline --grep='\[skip ci\]' -1 --format='%H' 2>/dev/null || echo "")
           if [ -n "$LAST_PUBLISH" ]; then
-            CHANGED=$(git diff --name-only "$LAST_PUBLISH" HEAD -- . ':!package.json' 2>/dev/null || echo "")
+            git diff --name-only "$LAST_PUBLISH" HEAD -- . ':!package.json' > /tmp/changed_files.txt 2>/dev/null || true
           else
-            CHANGED=$(git diff --name-only HEAD~1 HEAD -- . ':!package.json' 2>/dev/null || echo "")
+            git diff --name-only HEAD~1 HEAD -- . ':!package.json' > /tmp/changed_files.txt 2>/dev/null || true
           fi
 
-          # Categorize changes
-          ENGINE_CHANGES=""
-          DASHBOARD_CHANGES=""
-          PLAYBOOK_CHANGES=""
-          AGENT_CHANGES=""
-          DOC_CHANGES=""
-          OTHER_CHANGES=""
+          # Write changelog update script to a temp file (avoids shell escaping)
+          cat > /tmp/update-changelog.js << 'SCRIPT'
+          const fs = require('fs');
+          const version = process.argv[2];
+          const date = process.argv[3];
+          const changed = fs.readFileSync('/tmp/changed_files.txt', 'utf8').trim().split('\n').filter(Boolean);
+          if (changed.length === 0) process.exit(0);
 
-          for f in $CHANGED; do
-            name=$(basename "$f")
-            case "$f" in
-              engine.js|engine/*) ENGINE_CHANGES="$ENGINE_CHANGES\n- \`$f\`" ;;
-              dashboard.*) DASHBOARD_CHANGES="$DASHBOARD_CHANGES\n- \`$f\`" ;;
-              playbooks/*) PLAYBOOK_CHANGES="$PLAYBOOK_CHANGES\n- \`$name\`" ;;
-              agents/*/charter.md) AGENT_CHANGES="$AGENT_CHANGES\n- \`$f\`" ;;
-              docs/*|README.md|CHANGELOG.md) DOC_CHANGES="$DOC_CHANGES\n- \`$name\`" ;;
-              bin/*|squad.js|config.template.json|routing.md|team.md|skills/*) OTHER_CHANGES="$OTHER_CHANGES\n- \`$f\`" ;;
-            esac
-          done
+          const cats = { Engine: [], Dashboard: [], Playbooks: [], Agents: [], Documentation: [], Other: [] };
+          for (const f of changed) {
+            const name = f.split('/').pop();
+            if (f.startsWith('engine') || f === 'engine.js') cats.Engine.push(f);
+            else if (f.startsWith('dashboard')) cats.Dashboard.push(f);
+            else if (f.startsWith('playbooks/')) cats.Playbooks.push(name);
+            else if (/^agents\/.*\/charter\.md$/.test(f)) cats.Agents.push(f);
+            else if (f.startsWith('docs/') || f === 'README.md' || f === 'CHANGELOG.md') cats.Documentation.push(name);
+            else if (f !== '.gitignore' && f !== '.npmignore') cats.Other.push(f);
+          }
 
-          # Build changelog entry
-          ENTRY="## $NEXT ($TODAY)\n"
-          [ -n "$ENGINE_CHANGES" ] && ENTRY="$ENTRY\n### Engine$ENGINE_CHANGES\n"
-          [ -n "$DASHBOARD_CHANGES" ] && ENTRY="$ENTRY\n### Dashboard$DASHBOARD_CHANGES\n"
-          [ -n "$PLAYBOOK_CHANGES" ] && ENTRY="$ENTRY\n### Playbooks$PLAYBOOK_CHANGES\n"
-          [ -n "$AGENT_CHANGES" ] && ENTRY="$ENTRY\n### Agents$AGENT_CHANGES\n"
-          [ -n "$DOC_CHANGES" ] && ENTRY="$ENTRY\n### Documentation$DOC_CHANGES\n"
-          [ -n "$OTHER_CHANGES" ] && ENTRY="$ENTRY\n### Other$OTHER_CHANGES\n"
+          let entry = `## ${version} (${date})\n\n`;
+          for (const [cat, files] of Object.entries(cats)) {
+            if (files.length > 0) {
+              entry += `### ${cat}\n`;
+              for (const f of files) entry += `- ${f}\n`;
+              entry += '\n';
+            }
+          }
 
-          # Only add entry if there are actual changes
-          if [ -n "$ENGINE_CHANGES$DASHBOARD_CHANGES$PLAYBOOK_CHANGES$AGENT_CHANGES$DOC_CHANGES$OTHER_CHANGES" ]; then
-            # Insert after the first line (# Changelog header + description)
-            node -e "
-              const fs = require('fs');
-              const cl = fs.readFileSync('CHANGELOG.md', 'utf8');
-              const entry = '$(echo -e "$ENTRY")';
-              // Insert after the header paragraph (first blank line after line 1)
-              const idx = cl.indexOf('\n\n');
-              if (idx !== -1) {
-                const updated = cl.slice(0, idx + 2) + entry + '\n' + cl.slice(idx + 2);
-                fs.writeFileSync('CHANGELOG.md', updated);
-              }
-            "
-          fi
+          const cl = fs.readFileSync('CHANGELOG.md', 'utf8');
+          const idx = cl.indexOf('\n\n');
+          if (idx !== -1) {
+            fs.writeFileSync('CHANGELOG.md', cl.slice(0, idx + 2) + entry + cl.slice(idx + 2));
+            console.log('Changelog updated with ' + changed.length + ' changed files');
+          }
+          SCRIPT
+
+          node /tmp/update-changelog.js "$NEXT" "$TODAY"
 
           # Publish
           npm publish --access public
@@ -96,7 +88,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add package.json CHANGELOG.md
-          git commit -m "chore: publish $NEXT — changelog updated [skip ci]"
-          git push
+          git diff --cached --quiet && echo "No changes to commit" || {
+            git commit -m "chore: publish $NEXT — changelog updated [skip ci]"
+            git push
+          }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
