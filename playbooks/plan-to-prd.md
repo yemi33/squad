@@ -45,6 +45,7 @@ This file is NOT checked into the repo. The engine reads it on every tick and di
       "id": "P001",
       "name": "Short feature name",
       "description": "What needs to be built and why",
+      "project": "ProjectName",
       "status": "missing",
       "estimated_complexity": "small|medium|large",
       "priority": "high|medium|low",
@@ -82,6 +83,7 @@ When using `parallel`:
 Rules for items:
 - IDs are `P001`, `P002`, etc. (P for plan-derived)
 - All items start with `status: "missing"` — the engine picks these up automatically
+- **`project` field is REQUIRED** — set it to the project name where the code changes go (e.g., `"OfficeAgent"`, `"office-bohemia"`). Cross-repo plans must route each item to the correct project. The engine materializes items into that project's work queue.
 - `depends_on` lists IDs of items that must be done first
 - Keep descriptions actionable — an implementing agent should know exactly what to build
 - Include `acceptance_criteria` so reviewers know when it's done

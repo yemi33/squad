@@ -1509,49 +1509,80 @@ function materializePlansAsWorkItems(config) {
       continue; // Skip — waiting for human approval or revision
     }
 
-    const projectName = plan.project || file.replace(/-\d{4}-\d{2}-\d{2}\.json$/, '');
-    const project = getProjects(config).find(p => p.name?.toLowerCase() === projectName.toLowerCase());
-    if (!project) continue;
+    const defaultProjectName = plan.project || file.replace(/-\d{4}-\d{2}-\d{2}\.json$/, '');
+    const allProjects = getProjects(config);
+    const defaultProject = allProjects.find(p => p.name?.toLowerCase() === defaultProjectName.toLowerCase());
+    if (!defaultProject) continue;
 
-    const wiPath = projectWorkItemsPath(project);
-    const existingItems = safeJson(wiPath) || [];
-
-    let created = 0;
     const statusFilter = ['missing', 'planned'];
     const items = plan.missing_features.filter(f => statusFilter.includes(f.status));
 
+    // Group items by target project (per-item project field overrides plan-level project)
+    const itemsByProject = new Map(); // projectName -> { project, items: [] }
     for (const item of items) {
-      // Skip if already materialized
-      if (existingItems.some(w => w.sourcePlan === file && w.sourcePlanItem === item.id)) continue;
-
-      const id = nextWorkItemId(existingItems, 'PL-W');
-
-      const complexity = item.estimated_complexity || 'medium';
-      const criteria = (item.acceptance_criteria || []).map(c => `- ${c}`).join('\n');
-
-      existingItems.push({
-        id,
-        title: `Implement: ${item.name}`,
-        type: complexity === 'large' ? 'implement:large' : 'implement',
-        priority: item.priority || 'medium',
-        description: `${item.description || ''}\n\n**Plan:** ${file}\n**Plan Item:** ${item.id}\n**Complexity:** ${complexity}${criteria ? '\n\n**Acceptance Criteria:**\n' + criteria : ''}`,
-        status: 'pending',
-        created: ts(),
-        createdBy: 'engine:plan-discovery',
-        sourcePlan: file,
-        sourcePlanItem: item.id,
-        planItemId: item.id,
-        depends_on: item.depends_on || [],
-        branchStrategy: plan.branch_strategy || 'parallel',
-        featureBranch: plan.feature_branch || null,
-        project: plan.project || null,
-      });
-      created++;
+      const itemProjectName = item.project || defaultProjectName;
+      const itemProject = allProjects.find(p => p.name?.toLowerCase() === itemProjectName.toLowerCase()) || defaultProject;
+      if (!itemsByProject.has(itemProject.name)) {
+        itemsByProject.set(itemProject.name, { project: itemProject, items: [] });
+      }
+      itemsByProject.get(itemProject.name).items.push(item);
     }
 
-    if (created > 0) {
-      safeWrite(wiPath, existingItems);
-      log('info', `Plan discovery: created ${created} work item(s) from ${file} → ${project.name}`);
+    let totalCreated = 0;
+    for (const [projName, { project, items: projItems }] of itemsByProject) {
+      const wiPath = projectWorkItemsPath(project);
+      const existingItems = safeJson(wiPath) || [];
+      let created = 0;
+
+      for (const item of projItems) {
+        // Skip if already materialized (check all projects for cross-project dedup)
+        let alreadyExists = existingItems.some(w => w.sourcePlan === file && w.sourcePlanItem === item.id);
+        if (!alreadyExists) {
+          // Also check other projects in case item was previously in a different queue
+          for (const p of allProjects) {
+            if (p.name === projName) continue;
+            const otherItems = safeJson(projectWorkItemsPath(p)) || [];
+            if (otherItems.some(w => w.sourcePlan === file && w.sourcePlanItem === item.id)) {
+              alreadyExists = true;
+              break;
+            }
+          }
+        }
+        if (alreadyExists) continue;
+
+        const id = nextWorkItemId(existingItems, 'PL-W');
+        const complexity = item.estimated_complexity || 'medium';
+        const criteria = (item.acceptance_criteria || []).map(c => `- ${c}`).join('\n');
+
+        existingItems.push({
+          id,
+          title: `Implement: ${item.name}`,
+          type: complexity === 'large' ? 'implement:large' : 'implement',
+          priority: item.priority || 'medium',
+          description: `${item.description || ''}\n\n**Plan:** ${file}\n**Plan Item:** ${item.id}\n**Complexity:** ${complexity}${criteria ? '\n\n**Acceptance Criteria:**\n' + criteria : ''}`,
+          status: 'pending',
+          created: ts(),
+          createdBy: 'engine:plan-discovery',
+          sourcePlan: file,
+          sourcePlanItem: item.id,
+          planItemId: item.id,
+          depends_on: item.depends_on || [],
+          branchStrategy: plan.branch_strategy || 'parallel',
+          featureBranch: plan.feature_branch || null,
+          project: item.project || plan.project || null,
+        });
+        created++;
+      }
+
+      if (created > 0) {
+        safeWrite(wiPath, existingItems);
+        log('info', `Plan discovery: created ${created} work item(s) from ${file} → ${projName}`);
+      }
+      totalCreated += created;
+    }
+
+    if (totalCreated > 0) {
+      log('info', `Plan discovery: ${totalCreated} total item(s) from ${file} across ${itemsByProject.size} project(s)`);
 
       // Pre-create shared feature branch if branch_strategy is shared-branch
       if (plan.branch_strategy === 'shared-branch' && plan.feature_branch) {
