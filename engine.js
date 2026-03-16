@@ -664,11 +664,18 @@ function spawnAgent(dispatchItem, config) {
           try { execSync(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe' }); } catch {}
           execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe' });
         } else {
-          // Parallel: create new branch
+          // Parallel: create new branch (reuse if exists from a previous attempt)
           log('info', `Creating worktree: ${worktreePath} on branch ${branchName}`);
-          execSync(`git worktree add "${worktreePath}" -b "${branchName}" ${sanitizeBranch(project.mainBranch || 'main')}`, {
-            cwd: rootDir, stdio: 'pipe'
-          });
+          try {
+            execSync(`git worktree add "${worktreePath}" -b "${branchName}" ${sanitizeBranch(project.mainBranch || 'main')}`, {
+              cwd: rootDir, stdio: 'pipe'
+            });
+          } catch {
+            // Branch already exists — use it without -b
+            try { execSync(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe' }); } catch {}
+            execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe' });
+            log('info', `Reusing existing branch: ${branchName}`);
+          }
         }
       } else if (meta?.branchStrategy === 'shared-branch') {
         // Worktree exists — pull latest from prior plan item
