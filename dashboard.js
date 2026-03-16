@@ -49,19 +49,17 @@ const HTML = HTML_RAW.replace('Squad Mission Control', `Squad Mission Control �
 // -- Data Collectors (most moved to engine/queries.js) --
 
 function getVerifyGuides() {
-  const prdDir = path.join(SQUAD_DIR, 'prd');
+  const guidesDir = path.join(SQUAD_DIR, 'prd', 'guides');
   const guides = [];
-  for (const dir of [prdDir, path.join(prdDir, 'archive')]) {
-    try {
-      const files = safeReadDir(dir).filter(f => f.startsWith('verify-') && f.endsWith('.md'));
-      for (const f of files) {
-        // Match guide to plan: verify-officeagent-2026-03-15.md → officeagent-2026-03-15.json
-        const planSlug = f.replace('verify-', '').replace('.md', '');
-        const planFile = planSlug + '.json';
-        guides.push({ file: f, planFile, path: path.relative(SQUAD_DIR, path.join(dir, f)).replace(/\\/g, '/') });
-      }
-    } catch {}
-  }
+  try {
+    const files = safeReadDir(guidesDir).filter(f => f.endsWith('.md'));
+    for (const f of files) {
+      // Match guide to plan: verify-officeagent-2026-03-15.md → officeagent-2026-03-15.json
+      const planSlug = f.replace('verify-', '').replace('.md', '');
+      const planFile = planSlug + '.json';
+      guides.push({ file: f, planFile });
+    }
+  } catch {}
   return guides;
 }
 
@@ -916,7 +914,7 @@ const server = http.createServer(async (req, res) => {
     );
     const plans = [];
     for (const { dir, archived } of dirs) {
-      const allFiles = safeReadDir(dir).filter(f => (f.endsWith('.json') || f.endsWith('.md')) && !f.startsWith('verify-'));
+      const allFiles = safeReadDir(dir).filter(f => f.endsWith('.json') || f.endsWith('.md'));
       for (const f of allFiles) {
         const content = safeRead(path.join(dir, f)) || '';
         const isJson = f.endsWith('.json');
@@ -988,8 +986,9 @@ const server = http.createServer(async (req, res) => {
     const file = decodeURIComponent(planFileMatch[1]);
     if (file.includes('..') || file.includes('/') || file.includes('\\')) return jsonReply(res, 400, { error: 'invalid' });
     let content = safeRead(resolvePlanPath(file));
-    // Fallback: check all directories (prd/, plans/, archives)
+    // Fallback: check all directories (prd/, plans/, guides/, archives)
     if (!content) content = safeRead(path.join(PRD_DIR, file));
+    if (!content) content = safeRead(path.join(PRD_DIR, 'guides', file));
     if (!content) content = safeRead(path.join(PLANS_DIR, file));
     if (!content) content = safeRead(path.join(PRD_DIR, 'archive', file));
     if (!content) content = safeRead(path.join(PLANS_DIR, 'archive', file));
