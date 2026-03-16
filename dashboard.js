@@ -819,54 +819,67 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // GET /api/plans — list plan files (.md drafts + .json PRDs that need action)
-  // PRD .json files with status 'approved'/'active' are shown in the PRD tile, not here
+  // GET /api/plans — list plan files (.md drafts + .json PRDs) from active + archive
   if (req.method === 'GET' && req.url === '/api/plans') {
     const plansDir = path.join(SQUAD_DIR, 'plans');
-    const allFiles = safeReadDir(plansDir).filter(f => f.endsWith('.json') || f.endsWith('.md'));
-    const plans = allFiles.map(f => {
-      const content = safeRead(path.join(plansDir, f)) || '';
-      const isJson = f.endsWith('.json');
-      if (isJson) {
-        try {
-          const plan = JSON.parse(content);
-          // All .json PRDs belong in the PRD tile, not the plans tile
-          return null;
-          return {
-            file: f, format: 'prd',
-            project: plan.project || '',
-            summary: plan.plan_summary || '',
-            status,
-            branchStrategy: plan.branch_strategy || 'parallel',
-            featureBranch: plan.feature_branch || '',
-            itemCount: (plan.missing_features || []).length,
-            generatedBy: plan.generated_by || '',
-            generatedAt: plan.generated_at || '',
-            requiresApproval: plan.requires_approval || false,
-            revisionFeedback: plan.revision_feedback || null,
-          };
-        } catch { return null; }
-      } else {
-        // .md raw plan — extract metadata from markdown
-        const titleMatch = content.match(/^#\s+(?:Plan:\s*)?(.+)/m);
-        const projectMatch = content.match(/\*\*Project:\*\*\s*(.+)/m);
-        const authorMatch = content.match(/\*\*Author:\*\*\s*(.+)/m);
-        const dateMatch = content.match(/\*\*Date:\*\*\s*(.+)/m);
-        return {
-          file: f, format: 'draft',
-          project: projectMatch ? projectMatch[1].trim() : '',
-          summary: titleMatch ? titleMatch[1].trim() : f.replace('.md', ''),
-          status: 'draft',
-          branchStrategy: '',
-          featureBranch: '',
-          itemCount: (content.match(/^\d+\.\s+\*\*/gm) || []).length,
-          generatedBy: authorMatch ? authorMatch[1].trim() : '',
-          generatedAt: dateMatch ? dateMatch[1].trim() : '',
-          requiresApproval: false,
-          revisionFeedback: null,
-        };
+    const archiveDir = path.join(plansDir, 'archive');
+    const dirs = [
+      { dir: plansDir, archived: false },
+      { dir: archiveDir, archived: true },
+    ];
+    // Load work items to check for completed plan-to-prd conversions
+    const centralWi = safeJson(path.join(SQUAD_DIR, 'work-items.json')) || [];
+    const completedPrdFiles = new Set(
+      centralWi.filter(w => w.type === 'plan-to-prd' && w.status === 'done' && w.planFile)
+        .map(w => w.planFile)
+    );
+    const plans = [];
+    for (const { dir, archived } of dirs) {
+      const allFiles = safeReadDir(dir).filter(f => f.endsWith('.json') || f.endsWith('.md'));
+      for (const f of allFiles) {
+        const content = safeRead(path.join(dir, f)) || '';
+        const isJson = f.endsWith('.json');
+        if (isJson) {
+          try {
+            const plan = JSON.parse(content);
+            const status = plan.status || 'active';
+            plans.push({
+              file: f, format: 'prd', archived,
+              project: plan.project || '',
+              summary: plan.plan_summary || '',
+              status,
+              branchStrategy: plan.branch_strategy || 'parallel',
+              featureBranch: plan.feature_branch || '',
+              itemCount: (plan.missing_features || []).length,
+              generatedBy: plan.generated_by || '',
+              generatedAt: plan.generated_at || '',
+              completedAt: plan.completedAt || '',
+              requiresApproval: plan.requires_approval || false,
+              revisionFeedback: plan.revision_feedback || null,
+            });
+          } catch {}
+        } else {
+          const titleMatch = content.match(/^#\s+(?:Plan:\s*)?(.+)/m);
+          const projectMatch = content.match(/\*\*Project:\*\*\s*(.+)/m);
+          const authorMatch = content.match(/\*\*Author:\*\*\s*(.+)/m);
+          const dateMatch = content.match(/\*\*Date:\*\*\s*(.+)/m);
+          plans.push({
+            file: f, format: 'draft', archived,
+            project: projectMatch ? projectMatch[1].trim() : '',
+            summary: titleMatch ? titleMatch[1].trim() : f.replace('.md', ''),
+            status: archived ? 'completed' : completedPrdFiles.has(f) ? 'completed' : 'draft',
+            branchStrategy: '',
+            featureBranch: '',
+            itemCount: (content.match(/^\d+\.\s+\*\*/gm) || []).length,
+            generatedBy: authorMatch ? authorMatch[1].trim() : '',
+            generatedAt: dateMatch ? dateMatch[1].trim() : '',
+            requiresApproval: false,
+            revisionFeedback: null,
+          });
+        }
       }
-    }).filter(Boolean).sort((a, b) => (b.generatedAt || '').localeCompare(a.generatedAt || ''));
+    }
+    plans.sort((a, b) => (b.generatedAt || '').localeCompare(a.generatedAt || ''));
     return jsonReply(res, 200, plans);
   }
 

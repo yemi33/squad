@@ -502,7 +502,7 @@ function getPrdInfo(config) {
       complexity: i.estimated_complexity || i.size, status: i.status || 'missing',
       description: (i.description || '').slice(0, 200), projects: i.projects || [],
       prs: prdToPr[i.id] || [], depends_on: i.depends_on || [],
-      source: i._source || '', planSummary: i._planSummary || '', planProject: i._planProject || '',
+      source: i._source || '', planSummary: i._planSummary || '', planProject: i._planProject || '', _archived: i._archived || false,
     })),
   };
 
