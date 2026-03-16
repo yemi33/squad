@@ -828,7 +828,7 @@ const server = http.createServer(async (req, res) => {
       { dir: archiveDir, archived: true },
     ];
     // Load work items to check for completed plan-to-prd conversions
-    const centralWi = safeJson(path.join(SQUAD_DIR, 'work-items.json')) || [];
+    const centralWi = JSON.parse(safeRead(path.join(SQUAD_DIR, 'work-items.json')) || '[]');
     const completedPrdFiles = new Set(
       centralWi.filter(w => w.type === 'plan-to-prd' && w.status === 'done' && w.planFile)
         .map(w => w.planFile)

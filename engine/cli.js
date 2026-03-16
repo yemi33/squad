@@ -187,9 +187,13 @@ const commands = {
 
           for (const planItem of donePlanChains) {
             const expectedMd = planItem._planFileName;
+            const planFile = expectedMd || mdFiles[mdFiles.length - 1];
+            const alreadyDone = centralItems.some(w =>
+              w.type === 'plan-to-prd' && w.status === 'done' && w.planFile === planFile
+            );
+            if (alreadyDone) continue;
             const mdExists = expectedMd ? fs.existsSync(path.join(planDir, expectedMd)) : mdFiles.length > 0;
             if (mdExists && jsonFiles.length === 0) {
-              const planFile = expectedMd || mdFiles[mdFiles.length - 1];
               centralItems.push({
                 id: shared.nextWorkItemId(centralItems, 'W'),
                 title: 'Convert plan to PRD: ' + (planItem.title || planFile),
