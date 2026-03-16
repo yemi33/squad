@@ -8,13 +8,14 @@ The engine runs a tick every 60 seconds (configurable via `config.json` → `eng
 
 ```
 tick()
-  1. checkTimeouts()       Kill stale/hung agents (>heartbeatTimeout)
-  2. consolidateInbox()    Merge learnings into notes.md (at 5+ inbox files)
-  2.5 runCleanup()         Periodic cleanup (every 10 ticks ≈ 5min)
-  2.6 pollPrStatus()       Poll ADO for build, review, merge status (every 6 ticks ≈ 3min)
-  3. discoverWork()        Scan ALL linked projects for new tasks
-  4. updateSnapshot()      Write identity/now.md
-  5. dispatch              Spawn agents for pending items (up to maxConcurrent)
+  1. checkTimeouts()            Kill stale/hung agents (>heartbeatTimeout)
+  2. consolidateInbox()         Merge learnings into notes.md (Haiku-powered)
+  2.5 runCleanup()              Periodic cleanup (every 10 ticks ≈ 5min)
+  2.6 pollPrStatus()            Poll ADO for build, review, merge status (every 6 ticks ≈ 3min)
+  2.7 pollPrHumanComments()     Poll PR threads for human @squad comments (every 12 ticks ≈ 6min)
+  3. discoverWork()             Scan ALL linked projects for new tasks
+  4. updateSnapshot()           Write identity/now.md
+  5. dispatch                   Spawn agents for pending items (up to maxConcurrent)
 ```
 
 ## Work Discovery
