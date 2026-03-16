@@ -1208,7 +1208,26 @@ function renderPrdProgress(prog) {
     '</div>';
   }
 
-  let html = renderViewToggle() + activeKeys.map(renderGroup).join('');
+  // E2E aggregate PRs — show prominently at the top
+  const allPrs = window._lastStatus?.pullRequests || [];
+  const e2ePrs = allPrs.filter(pr => pr.e2e || pr.title?.startsWith('[E2E]'));
+  let e2eHtml = '';
+  if (e2ePrs.length > 0) {
+    e2eHtml = '<div style="margin-bottom:12px;padding:8px 12px;background:rgba(56,139,253,0.08);border:1px solid rgba(56,139,253,0.25);border-radius:6px">' +
+      '<div style="font-size:11px;font-weight:600;color:var(--blue);margin-bottom:6px">E2E Aggregate PRs</div>' +
+      e2ePrs.map(pr => {
+        const statusColor = pr.status === 'active' ? 'var(--green)' : pr.status === 'merged' ? 'var(--purple)' : 'var(--muted)';
+        return '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px">' +
+          '<span style="color:' + statusColor + ';font-size:9px;font-weight:600;padding:1px 5px;border:1px solid;border-radius:3px">' + escHtml(pr.status || 'active') + '</span>' +
+          '<a href="' + escHtml(pr.url || '#') + '" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:500">' + escHtml(pr.id) + '</a>' +
+          '<span style="color:var(--text)">' + escHtml(pr.title || '') + '</span>' +
+          '<span style="color:var(--muted);font-size:10px;margin-left:auto">' + escHtml(pr._project || '') + '</span>' +
+        '</div>';
+      }).join('') +
+    '</div>';
+  }
+
+  let html = renderViewToggle() + e2eHtml + activeKeys.map(renderGroup).join('');
 
   if (archivedKeys.length > 0) {
     // Store archived data for the modal
