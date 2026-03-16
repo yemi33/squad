@@ -1919,12 +1919,18 @@ ${notesTail.slice(-1500)}
 
 ## Actions You Can Take
 
-When the user wants you to DO something (not just answer), include an action block in your response.
-Format: a JSON code block tagged with \`action\`:
+When the user wants you to DO something (not just answer), append actions at the END of your response.
 
-\`\`\`action
-{"type": "dispatch", "title": "Fix login bug", "workType": "fix", "priority": "high", "agents": ["dallas"], "project": "OfficeAgent", "description": "..."}
-\`\`\`
+**Format:** Write your conversational response first, then on a new line write exactly \`===ACTIONS===\` followed by a JSON array of actions. Example:
+
+I'll save that as a note and dispatch dallas to fix the bug.
+
+===ACTIONS===
+[{"type": "note", "title": "API v3 migration needed", "content": "We need to migrate..."}, {"type": "dispatch", "title": "Fix login bug", "workType": "fix", "priority": "high", "agents": ["dallas"], "project": "OfficeAgent", "description": "..."}]
+
+**CRITICAL:** The ===ACTIONS=== line and JSON array must be the LAST thing in your response. No text after it. The JSON must be a valid array on a single line.
+
+If no actions are needed (just answering a question), do NOT include the ===ACTIONS=== line at all.
 
 Available action types:
 - **dispatch**: Create a work item. Fields: title, workType (ask/explore/fix/review/test/implement), priority (low/medium/high), agents (array of IDs, optional), project, description
@@ -1937,8 +1943,6 @@ Available action types:
 - **edit-prd-item**: Edit a PRD item. Fields: source (PRD filename), itemId, name, description, priority, complexity
 - **remove-prd-item**: Remove a PRD item. Fields: source (PRD filename), itemId
 - **delete-work-item**: Delete a work item. Fields: id, source (project name or "central")
-
-You can include MULTIPLE action blocks in one response.
 
 ## Tool Access
 
@@ -1991,15 +1995,29 @@ Use tools to dig deeper when the pre-loaded context isn't sufficient — e.g., r
         return jsonReply(res, 200, { text: 'I had trouble processing that. Try again or rephrase.', actions: [] });
       }
 
-      // Parse action blocks from response (flexible: handles ```action, ``` action, extra backticks/whitespace)
-      const actions = [];
-      const actionRegex = /`{3,}\s*action\s*\r?\n([\s\S]*?)`{3,}/g;
-      let match;
-      while ((match = actionRegex.exec(result.text)) !== null) {
-        try { actions.push(JSON.parse(match[1].trim())); } catch {}
+      // Parse actions from ===ACTIONS=== delimiter at end of response
+      let actions = [];
+      let displayText = result.text;
+      const delimIdx = result.text.indexOf('===ACTIONS===');
+      if (delimIdx >= 0) {
+        displayText = result.text.slice(0, delimIdx).trim();
+        const jsonStr = result.text.slice(delimIdx + '===ACTIONS==='.length).trim();
+        try {
+          const parsed = JSON.parse(jsonStr);
+          actions = Array.isArray(parsed) ? parsed : [parsed];
+        } catch {}
       }
-      // Clean action blocks from display text
-      const displayText = result.text.replace(/`{3,}\s*action\s*\r?\n[\s\S]*?`{3,}\n?/g, '').trim();
+      // Fallback: also check for legacy ```action blocks (in case model uses old format)
+      if (actions.length === 0) {
+        const actionRegex = /`{3,}\s*action\s*\r?\n([\s\S]*?)`{3,}/g;
+        let match;
+        while ((match = actionRegex.exec(displayText)) !== null) {
+          try { actions.push(JSON.parse(match[1].trim())); } catch {}
+        }
+        if (actions.length > 0) {
+          displayText = displayText.replace(/`{3,}\s*action\s*\r?\n[\s\S]*?`{3,}\n?/g, '').trim();
+        }
+      }
 
       return jsonReply(res, 200, { text: displayText, actions });
     } catch (e) { return jsonReply(res, 500, { error: e.message }); }
