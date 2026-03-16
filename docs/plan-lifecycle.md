@@ -89,20 +89,20 @@ The verification task (`planItemId: "VERIFY"`) is the final step. It:
 ### Verification Worktree Setup
 
 ```
-# OfficeAgent — 3 PRs merged into one worktree
-cd C:/Users/yemishin/OfficeAgent
+# project-a — 3 PRs merged into one worktree
+cd ~/project-a
 git fetch origin "work/PL-W001" "work/PL-W002" "work/PL-W003" "main"
-git worktree add "../worktrees/verify-officeagent-2026-03-15" "origin/main"
-cd "../worktrees/verify-officeagent-2026-03-15"
-git merge "origin/work/PL-W001" --no-edit  # PR-4970100
-git merge "origin/work/PL-W002" --no-edit  # PR-4970101
-git merge "origin/work/PL-W003" --no-edit  # PR-4970102
+git worktree add "../worktrees/verify-my-plan-2026-03-15" "origin/main"
+cd "../worktrees/verify-my-plan-2026-03-15"
+git merge "origin/work/PL-W001" --no-edit
+git merge "origin/work/PL-W002" --no-edit
+git merge "origin/work/PL-W003" --no-edit
 
-# office-bohemia — 2 PRs merged into one worktree
-cd C:/Users/yemishin/office-bohemia
+# project-b — 2 PRs merged into one worktree
+cd ~/project-b
 git fetch origin "feat/PL-W004" "feat/PL-W005" "master"
-git worktree add "../worktrees/verify-officeagent-2026-03-15" "origin/master"
-cd "../worktrees/verify-officeagent-2026-03-15"
+git worktree add "../worktrees/verify-my-plan-2026-03-15" "origin/master"
+cd "../worktrees/verify-my-plan-2026-03-15"
 git merge "origin/feat/PL-W004" --no-edit
 git merge "origin/feat/PL-W005" --no-edit
 ```

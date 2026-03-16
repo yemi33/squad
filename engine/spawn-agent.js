@@ -25,10 +25,12 @@ const env = cleanChildEnv();
 // Resolve claude binary — find the actual JS entry point
 let claudeBin;
 const searchPaths = [
-  // npm global install locations
+  // npm global install locations (platform-adaptive)
   path.join(process.env.npm_config_prefix || '', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
-  'C:/.tools/.npm-global/node_modules/@anthropic-ai/claude-code/cli.js',
   path.join(process.env.APPDATA || '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
+  // Unix global locations
+  '/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+  '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js',
 ];
 for (const p of searchPaths) {
   if (p && fs.existsSync(p)) { claudeBin = p; break; }
