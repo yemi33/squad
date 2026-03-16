@@ -1610,6 +1610,9 @@ function openModal(i) {
 }
 function closeModal() {
   document.getElementById('modal').classList.remove('open');
+  // Remove settings save button if present
+  const settingsBtn = document.getElementById('modal-settings-save');
+  if (settingsBtn) settingsBtn.remove();
   // Save Q&A session for this document (persist across modal open/close)
   if (_qaSessionKey && (_qaHistory.length > 0 || _qaQueue.length > 0)) {
     _qaSessions.set(_qaSessionKey, {
@@ -3848,14 +3851,24 @@ async function openSettings() {
     '<h3 style="font-size:13px;color:var(--blue);margin-bottom:8px">Routing Table</h3>' +
     '<textarea id="set-routing" rows="12" style="width:100%;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:monospace;font-size:11px;resize:vertical">' + escHtml(data.routing || '') + '</textarea>' +
 
-    '<div style="display:flex;gap:8px;margin-top:12px">' +
-      '<button class="plan-btn approve" onclick="saveSettings()">Save</button>' +
-      '<button class="plan-btn" onclick="closeModal()">Cancel</button>' +
-      '<span id="settings-status" style="font-size:11px;color:var(--muted);align-self:center"></span>' +
-    '</div>' +
+    '<span id="settings-status" style="font-size:11px;color:var(--muted)"></span>' +
   '</div>';
 
   document.getElementById('modal-title').textContent = 'Settings';
+
+  // Add save button to modal header actions (next to copy/close)
+  const actions = document.querySelector('.modal-header-actions');
+  const existingSaveBtn = document.getElementById('modal-settings-save');
+  if (!existingSaveBtn) {
+    const saveBtn = document.createElement('button');
+    saveBtn.id = 'modal-settings-save';
+    saveBtn.className = 'modal-copy';
+    saveBtn.style.cssText = 'color:var(--green);border-color:var(--green)';
+    saveBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg> Save';
+    saveBtn.onclick = saveSettings;
+    // Insert before the close button (last child)
+    actions.insertBefore(saveBtn, actions.lastElementChild);
+  }
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('modal-body').style.fontFamily = '';
   document.getElementById('modal-body').style.whiteSpace = '';
