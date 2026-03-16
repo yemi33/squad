@@ -19,7 +19,7 @@ const ENGINE_DIR = path.join(SQUAD_DIR, 'engine');
 const INBOX_DIR = path.join(SQUAD_DIR, 'notes', 'inbox');
 const PLANS_DIR = path.join(SQUAD_DIR, 'plans');
 const PRD_DIR = path.join(SQUAD_DIR, 'prd');
-const SKILLS_DIR = path.join(SQUAD_DIR, 'skills');
+const SKILLS_DIR = path.join(process.env.HOME || process.env.USERPROFILE || '', '.claude', 'skills');
 const KNOWLEDGE_DIR = path.join(SQUAD_DIR, 'knowledge');
 const ARCHIVE_DIR = path.join(SQUAD_DIR, 'notes', 'archive');
 

@@ -320,8 +320,8 @@ function renderPlaybook(type, vars) {
   content += '````\n```skill\n';
   content += `---\nname: short-descriptive-name\ndescription: One-line description of what this skill does\nallowed-tools: Bash, Read, Edit\ntrigger: when should an agent use this\nscope: squad\nproject: any\n---\n\n# Skill Title\n\n## Steps\n1. ...\n2. ...\n\n## Notes\n...\n`;
   content += '```\n````\n\n';
-  content += `- Set \`scope: squad\` for cross-project skills (engine writes to \`${SKILLS_DIR}/\` automatically)\n`;
-  content += `- Set \`scope: project\` + \`project: <name>\` for repo-specific skills (engine queues a PR)\n`;
+  content += `- Set \`scope: squad\` for cross-project skills (engine writes to ~/.claude/skills/ automatically)\n`;
+  content += `- Set \`scope: project\` + \`project: <name>\` for repo-specific skills (engine queues a PR to <project>/.claude/skills/)\n`;
   content += `- Only output a skill block if you genuinely discovered something reusable — don't force it\n`;
 
   // Inject project-level variables from config
@@ -440,9 +440,7 @@ function buildSystemPrompt(agentId, config, project) {
   prompt += `3. Follow the project conventions in CLAUDE.md if present\n`;
   prompt += `4. Write learnings to: ${SQUAD_DIR}/notes/inbox/${agentId}-${dateStamp()}.md\n`;
   prompt += `5. Do NOT write to agents/*/status.json — the engine manages agent status automatically\n`;
-  prompt += `6. If you discover a repeatable workflow, save it as a skill:\n`;
-  prompt += `   - Squad-wide: \`${SKILLS_DIR}/<name>.md\` (no PR needed)\n`;
-  prompt += `   - Project-specific: \`<project>/.claude/skills/<name>.md\` (requires a PR since it modifies the repo)\n\n`;
+  prompt += `6. If you discover a repeatable workflow, output it as a \\\`\\\`\\\`skill fenced block — the engine auto-extracts it to ~/.claude/skills/\n\n`;
 
   return prompt;
 }

@@ -10,7 +10,7 @@ const { safeRead, safeJson, safeWrite, execSilent, projectPrPath } = shared;
 const { trackEngineUsage } = require('./llm');
 const queries = require('./queries');
 const { getConfig, getInboxFiles, getNotes, getPrs, getAgentStatus,
-  SQUAD_DIR, ENGINE_DIR, PLANS_DIR, PRD_DIR, INBOX_DIR, AGENTS_DIR, SKILLS_DIR } = queries;
+  SQUAD_DIR, ENGINE_DIR, PLANS_DIR, PRD_DIR, INBOX_DIR, AGENTS_DIR } = queries;
 
 // Lazy require — only for log(), ts(), dateStamp() and engine-specific functions
 let _engine = null;
