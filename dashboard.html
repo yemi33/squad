@@ -920,23 +920,35 @@ function renderPrdProgress(prog) {
 
   countEl.textContent = prog.donePercent + '%';
 
-  const pct = (n) => prog.total > 0 ? ((n / prog.total) * 100).toFixed(1) : 0;
+  function renderGroupStats(items) {
+    const total = items.length;
+    if (total === 0) return '';
+    const complete = items.filter(i => i.status === 'complete' || i.status === 'implemented').length;
+    const prCreated = items.filter(i => i.status === 'pr-created').length;
+    const inProgress = items.filter(i => i.status === 'in-progress' || i.status === 'dispatched').length;
+    const planned = items.filter(i => i.status === 'planned').length;
+    const missing = items.filter(i => i.status === 'missing' || !i.status).length;
+    const done = complete + prCreated;
+    const todo = missing + planned;
+    const pct = (n) => total > 0 ? ((n / total) * 100).toFixed(1) : 0;
 
-  const bar = '<div class="prd-progress-bar">' +
-    '<div class="seg complete" style="width:' + pct(prog.complete) + '%"></div>' +
-    '<div class="seg pr-created" style="width:' + pct(prog.prCreated) + '%"></div>' +
-    '<div class="seg in-progress" style="width:' + pct(prog.inProgress) + '%"></div>' +
-    '<div class="seg planned" style="width:' + pct(prog.planned) + '%"></div>' +
-    '<div class="seg missing" style="width:' + pct(prog.missing) + '%"></div>' +
-  '</div>';
+    const stats = '<div class="prd-stats" style="margin:0">' +
+      '<div class="prd-stat"><div class="prd-stat-num green">' + done + '</div><div class="prd-stat-label">Done</div></div>' +
+      '<div class="prd-stat"><div class="prd-stat-num" style="color:var(--blue)">' + inProgress + '</div><div class="prd-stat-label">In Progress</div></div>' +
+      '<div class="prd-stat"><div class="prd-stat-num" style="color:var(--muted)">' + todo + '</div><div class="prd-stat-label">To Do</div></div>' +
+      '<div class="prd-stat"><div class="prd-stat-num" style="color:var(--text)">' + total + '</div><div class="prd-stat-label">Total</div></div>' +
+    '</div>';
 
-  const legend = '<div class="prd-progress-legend">' +
-    '<div class="prd-legend-item"><span class="prd-legend-dot complete"></span>Complete (' + prog.complete + ')</div>' +
-    '<div class="prd-legend-item"><span class="prd-legend-dot pr-created"></span>PR Created (' + prog.prCreated + ')</div>' +
-    '<div class="prd-legend-item"><span class="prd-legend-dot in-progress"></span>In Progress (' + prog.inProgress + ')</div>' +
-    '<div class="prd-legend-item"><span class="prd-legend-dot planned"></span>Planned (' + prog.planned + ')</div>' +
-    '<div class="prd-legend-item"><span class="prd-legend-dot missing"></span>Missing (' + prog.missing + ')</div>' +
-  '</div>';
+    const bar = '<div class="prd-progress-bar">' +
+      '<div class="seg complete" style="width:' + pct(complete) + '%"></div>' +
+      '<div class="seg pr-created" style="width:' + pct(prCreated) + '%"></div>' +
+      '<div class="seg in-progress" style="width:' + pct(inProgress) + '%"></div>' +
+      '<div class="seg planned" style="width:' + pct(planned) + '%"></div>' +
+      '<div class="seg missing" style="width:' + pct(missing) + '%"></div>' +
+    '</div>';
+
+    return '<div style="margin:8px 0">' + stats + bar + '</div>';
+  }
 
   const statusBadge = (s) => {
     const styles = {
@@ -1013,13 +1025,14 @@ function renderPrdProgress(prog) {
 
   let items = keys.map(k => {
     const g = grouped[k];
-    return '<div style="margin-bottom:12px">' +
+    return '<div style="margin-bottom:16px">' +
       renderGroupHeader(g) +
+      renderGroupStats(g.items) +
       '<div class="prd-items-list">' + g.items.map(renderItem).join('') + '</div>' +
     '</div>';
   }).join('');
 
-  el.innerHTML = bar + legend + items;
+  el.innerHTML = items;
 }
 
 let _prdItems = []; // cache for edit lookups
@@ -1267,23 +1280,8 @@ function renderPrd(prd, prog) {
     return;
   }
   badge.innerHTML = '<span style="color:var(--green);font-size:11px">' + prd.age + '</span>';
-
-  // Use progress data for stats if available
-  const done = prog ? prog.complete + prog.prCreated : 0;
-  const wip = prog ? prog.inProgress : 0;
-  const todo = prog ? prog.missing + prog.planned : prd.missing;
-  const total = prog ? prog.total : (done + wip + todo);
-
-  section.innerHTML =
-    '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">' +
-      '<div class="prd-stats" style="margin:0">' +
-        '<div class="prd-stat"><div class="prd-stat-num green">' + done + '</div><div class="prd-stat-label">Done</div></div>' +
-        '<div class="prd-stat"><div class="prd-stat-num" style="color:var(--blue)">' + wip + '</div><div class="prd-stat-label">In Progress</div></div>' +
-        '<div class="prd-stat"><div class="prd-stat-num" style="color:var(--muted)">' + todo + '</div><div class="prd-stat-label">To Do</div></div>' +
-        '<div class="prd-stat"><div class="prd-stat-num" style="color:var(--text)">' + total + '</div><div class="prd-stat-label">Total</div></div>' +
-      '</div>' +
-      (prd.summary ? '<div class="prd-summary" style="flex:1;min-width:200px">' + escHtml(prd.summary) + '</div>' : '') +
-    '</div>';
+  // Stats are now rendered per-group inside renderPrdProgress
+  section.innerHTML = '';
 }
 
 let allPrs = [];
