@@ -1755,6 +1755,7 @@ async function refresh() {
     renderDispatch(data.dispatch);
     window._lastDispatch = data.dispatch;
     window._lastWorkItems = data.workItems || [];
+    window._lastStatus = data;
     renderEngineLog(data.engineLog || []);
     renderProjects(data.projects || []);
     renderMetrics(data.metrics || {});
@@ -2572,7 +2573,9 @@ async function cmdSubmit() {
   btn.textContent = 'Sending...';
 
   try {
-    if (parsed.intent === 'note') {
+    if (parsed.intent === 'retry') {
+      await cmdSubmitRetry(parsed);
+    } else if (parsed.intent === 'note') {
       await cmdSubmitNote(parsed);
     } else if (parsed.intent === 'plan' || parsed.intent === 'prd') {
       await cmdSubmitPlan(parsed);
@@ -2619,6 +2622,30 @@ async function cmdSubmitWorkItem(parsed) {
   if (!res.ok) throw new Error(data.error || 'Failed to add');
   const agentLabel = parsed.fanout ? ' (fan-out)' : parsed.agents.length ? ' → ' + parsed.agents.join(', ') : '';
   showToast('cmd-toast', 'Work item ' + data.id + ' created' + agentLabel, true);
+}
+
+async function cmdSubmitRetry(parsed) {
+  const ids = parsed.retryIds || [];
+  if (ids.length === 0) {
+    showToast('cmd-toast', 'No work items to retry', false);
+    return;
+  }
+  let retried = 0;
+  for (const id of ids) {
+    // Try central first, then each project
+    const sources = ['central', ...(window._lastStatus?.projects || []).map(p => p.name)];
+    for (const source of sources) {
+      try {
+        const res = await fetch('/api/work-items/retry', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, source })
+        });
+        if (res.ok) { retried++; break; }
+      } catch {}
+    }
+  }
+  showToast('cmd-toast', 'Retried ' + retried + '/' + ids.length + ' work items — engine will re-dispatch on next tick', true);
+  refresh();
 }
 
 async function cmdSubmitNote(parsed) {

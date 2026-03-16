@@ -485,10 +485,19 @@ function getTriageContext() {
   const agents = getAgents().map(a => `- ${a.name} (${a.id}): ${a.status}${a.currentTask ? ' — ' + a.currentTask.slice(0, 60) : ''}`).join('\n');
   const projects = PROJECTS.map(p => `- ${p.name}: ${(p.description || '').slice(0, 60)}`).join('\n');
 
-  // Recent work items (last 10, non-archived)
-  const wi = getWorkItems().slice(-10).map(i =>
+  // Recent work items (last 10 central + all project items that are active/failed)
+  const centralWi = getWorkItems().slice(-10).map(i =>
     `- ${i.id}: "${i.title.slice(0, 60)}" [${i.type}] ${i.status}${i.dispatched_to ? ' → ' + i.dispatched_to : ''}`
-  ).join('\n');
+  );
+  const projectWi = [];
+  for (const proj of PROJECTS) {
+    try {
+      const items = JSON.parse(fs.readFileSync(path.join(proj.localPath, '.squad', 'work-items.json'), 'utf8'));
+      items.filter(i => i.status === 'failed' || i.status === 'dispatched' || i.status === 'pending')
+        .forEach(i => projectWi.push(`- ${i.id}: "${(i.title || '').slice(0, 60)}" [${i.type}] ${i.status} (${proj.name})${i.dispatched_to ? ' → ' + i.dispatched_to : ''}`));
+    } catch {}
+  }
+  const wi = [...centralWi, ...projectWi].join('\n');
 
   // Plans (with summary, author, project, status)
   const plansDir = path.join(SQUAD_DIR, 'plans');
@@ -546,6 +555,10 @@ ${ctx.activeDispatch}
 - "work-item" with type "plan-to-prd": Convert an EXISTING plan into PRD items / executable tasks.
   Use when the user references a plan that already exists on disk (check plans list above).
   Keywords: create PRD from, convert plan to PRD, execute the plan, implement the plan, break down the plan
+- "retry": Retry/restart/rerun existing failed or stuck work items. Do NOT create new work items.
+  Keywords: retry, restart, rerun, redo, try again, re-dispatch, reset
+  Include the work item IDs to retry in the "retryIds" field. Match from the work items list above.
+  If the user says "the failed tasks" or "the three failed ones", find items with status "failed" and include their IDs.
 
 ## Rules
 
@@ -572,7 +585,7 @@ ${ctx.activeDispatch}
 
 Respond with ONLY a JSON object, no markdown fences, no explanation:
 {
-  "intent": "work-item|note|plan",
+  "intent": "work-item|note|plan|retry",
   "title": "concise action title",
   "description": "additional context, resolved references",
   "type": "ask|explore|fix|review|test|implement|plan-to-prd",
@@ -581,7 +594,8 @@ Respond with ONLY a JSON object, no markdown fences, no explanation:
   "fanout": false,
   "project": "project-name or empty string",
   "projects": [],
-  "branchStrategy": "parallel"
+  "branchStrategy": "parallel",
+  "retryIds": ["work-item-id"] // only for intent "retry"
 }`;
 }
 
