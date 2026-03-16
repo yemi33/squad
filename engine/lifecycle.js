@@ -330,34 +330,47 @@ function syncPrsFromOutput(output, agentId, meta, config) {
   if (prMatches.size === 0) return 0;
 
   const projects = shared.getProjects(config);
-  let targetProject = null;
-  if (meta?.project?.name) {
-    targetProject = projects.find(p => p.name === meta.project.name);
-  }
-  if (!targetProject) {
-    for (const p of projects) {
-      if (p.prUrlBase && output.includes(p.prUrlBase.replace(/pullrequest\/$/, ''))) { targetProject = p; break; }
-      if (p.repoName && output.includes(`_git/${p.repoName}`)) { targetProject = p; break; }
-    }
-  }
-  if (!targetProject) targetProject = projects[0];
-  if (!targetProject) return;
+  const defaultProject = (meta?.project?.name && projects.find(p => p.name === meta.project.name)) || projects[0];
+  if (!defaultProject) return 0;
 
-  const prPath = shared.projectPrPath(targetProject);
-  const prs = e.safeJson(prPath) || [];
+  // Match each PR to its correct project by finding which repo URL appears near the PR number in output
+  function resolveProjectForPr(prId) {
+    // Look for the PR URL in output to determine which ADO project it belongs to
+    for (const p of projects) {
+      if (!p.prUrlBase) continue;
+      const urlFragment = p.prUrlBase.replace(/pullrequest\/$/, '');
+      if (output.includes(urlFragment + 'pullrequest/' + prId) || output.includes(urlFragment + prId)) return p;
+    }
+    for (const p of projects) {
+      if (p.repoName && output.includes(`_git/${p.repoName}/pullrequest/${prId}`)) return p;
+    }
+    return defaultProject;
+  }
+
   const agentName = config.agents?.[agentId]?.name || agentId;
   let added = 0;
+  // Track which project PR files need writing
+  const dirtyProjects = new Map(); // projectName -> { project, prs, prPath }
 
   for (const prId of prMatches) {
     const fullId = `PR-${prId}`;
-    if (prs.some(p => p.id === fullId || String(p.id).includes(prId))) continue;
+    const targetProject = resolveProjectForPr(prId);
+    const prPath = shared.projectPrPath(targetProject);
+
+    // Load PRs for this project (cache per project)
+    if (!dirtyProjects.has(targetProject.name)) {
+      dirtyProjects.set(targetProject.name, { project: targetProject, prs: e.safeJson(prPath) || [], prPath });
+    }
+    const entry = dirtyProjects.get(targetProject.name);
+    if (entry.prs.some(p => p.id === fullId || String(p.id).includes(prId))) continue;
+
     let title = meta?.item?.title || '';
     const titleMatch = output.match(new RegExp(`${prId}[^\\n]*?[—–-]\\s*([^\\n]+)`, 'i'));
     if (titleMatch) title = titleMatch[1].trim();
     if (title.includes('session_id') || title.includes('is_error') || title.includes('uuid') || title.length > 120) {
       title = meta?.item?.title || '';
     }
-    prs.push({
+    entry.prs.push({
       id: fullId,
       title: (title || `PR created by ${agentName}`).slice(0, 120),
       agent: agentName,
@@ -371,9 +384,9 @@ function syncPrsFromOutput(output, agentId, meta, config) {
     added++;
   }
 
-  if (added > 0) {
-    shared.safeWrite(prPath, prs);
-    e.log('info', `Synced ${added} PR(s) from ${agentName}'s output to ${targetProject.name}/pull-requests.json`);
+  for (const [name, entry] of dirtyProjects) {
+    shared.safeWrite(entry.prPath, entry.prs);
+    e.log('info', `Synced PR(s) from ${agentName}'s output to ${name}/pull-requests.json`);
   }
   return added;
 }
