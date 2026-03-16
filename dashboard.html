@@ -754,7 +754,7 @@
       </div>
     </div>
     <div class="modal-body" id="modal-body"></div>
-    <div class="modal-qa" id="modal-qa">
+    <div class="modal-qa" id="modal-qa" style="display:none">
       <div style="display:flex;align-items:center;justify-content:space-between;min-height:0">
         <div class="modal-qa-thread" id="modal-qa-thread" style="flex:1"></div>
         <button id="qa-clear-btn" style="display:none;background:none;border:none;color:var(--muted);font-size:10px;cursor:pointer;padding:2px 6px;white-space:nowrap;align-self:flex-start" onclick="clearQaConversation()" title="Clear conversation">Clear chat</button>
@@ -1347,7 +1347,7 @@ async function openVerifyGuide(file) {
     document.getElementById('modal-body').style.fontFamily = 'Consolas, monospace';
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
     _modalDocContext = { title: 'Manual Testing Guide', content, selection: '' };
-    _modalFilePath = 'prd/' + file;
+    _modalFilePath = 'prd/' + file; showModalQa();
     document.getElementById('modal').classList.add('open');
   } catch (e) { alert('Failed to load guide: ' + e.message); }
 }
@@ -1515,7 +1515,7 @@ async function planOpenInDocChat(file) {
     document.getElementById('modal-body').style.fontFamily = 'Consolas, monospace';
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
     _modalDocContext = { title: title, content: text, selection: '' };
-    _modalFilePath = (file.endsWith('.json') ? 'prd/' : 'plans/') + file;
+    _modalFilePath = (file.endsWith('.json') ? 'prd/' : 'plans/') + file; showModalQa();
     document.getElementById('modal').classList.add('open');
   } catch (e) { alert('Error opening plan: ' + e.message); }
 }
@@ -1628,7 +1628,7 @@ function openNotesModal() {
   document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
   _modalDocContext = { title: 'Team Notes', content, selection: '' };
   _modalEditable = 'notes.md';
-  _modalFilePath = 'notes.md';
+  _modalFilePath = 'notes.md'; showModalQa();
   document.getElementById('modal-edit-btn').style.display = '';
   // steer btn removed — unified send
   document.getElementById('modal').classList.add('open');
@@ -1789,6 +1789,8 @@ function openModal(i) {
 }
 function closeModal() {
   document.getElementById('modal').classList.remove('open');
+  // Hide Q&A section (only shown for document modals)
+  document.getElementById('modal-qa').style.display = 'none';
   // Remove settings save button if present
   const settingsBtn = document.getElementById('modal-settings-save');
   if (settingsBtn) settingsBtn.remove();
@@ -3125,6 +3127,10 @@ async function cmdSubmitPlan(parsed) {
 
 let _modalDocContext = { title: '', content: '', selection: '' };
 let _modalFilePath = null; // file path for steering (null = read-only Q&A only)
+
+function showModalQa() {
+  document.getElementById('modal-qa').style.display = '';
+}
 let _qaHistory = []; // multi-turn conversation history [{role:'user',text:''},{role:'assistant',text:''}]
 let _qaProcessing = false; // true while waiting for Haiku response
 let _qaQueue = []; // queued messages while processing
@@ -3215,7 +3221,7 @@ function _initQaSession() {
     _qaHistory = prior.history;
     document.getElementById('modal-qa-thread').innerHTML = prior.threadHtml;
     if (prior.docContext) _modalDocContext = Object.assign({}, prior.docContext, { selection: _modalDocContext.selection });
-    if (prior.filePath) _modalFilePath = prior.filePath;
+    if (prior.filePath) { _modalFilePath = prior.filePath; showModalQa(); }
     document.getElementById('qa-clear-btn').style.display = 'block';
   } else {
     _qaHistory = [];
@@ -3851,7 +3857,7 @@ async function planView(file) {
     document.getElementById('modal-body').style.fontFamily = 'Consolas, monospace';
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
     _modalDocContext = { title, content: text, selection: '' };
-    _modalFilePath = (file.endsWith('.json') ? 'prd/' : 'plans/') + file;
+    _modalFilePath = (file.endsWith('.json') ? 'prd/' : 'plans/') + file; showModalQa();
     // steer btn removed — unified send
     document.getElementById('modal').classList.add('open');
   } catch (e) { console.error(e); }
@@ -3954,7 +3960,7 @@ async function kbOpenItem(category, file) {
     document.getElementById('modal-title').textContent = file;
     document.getElementById('modal-body').textContent = display;
     _modalDocContext = { title: file, content: display, selection: '' };
-    _modalFilePath = 'knowledge/' + category + '/' + file;
+    _modalFilePath = 'knowledge/' + category + '/' + file; showModalQa();
     // steer btn removed — unified send
     document.getElementById('modal').classList.add('open');
   } catch (e) {
