@@ -82,6 +82,7 @@ jobs:
             }
           }
 
+          if (!fs.existsSync('CHANGELOG.md')) fs.writeFileSync('CHANGELOG.md', '# Changelog\n\n');
           const cl = fs.readFileSync('CHANGELOG.md', 'utf8');
           const idx = cl.indexOf('\n\n');
           if (idx !== -1) {
