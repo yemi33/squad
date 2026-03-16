@@ -199,6 +199,7 @@ function getPrdInfo() {
       description: (i.description || '').slice(0, 200),
       projects: i.projects || [],
       prs: prdToPr[i.id] || [],
+      depends_on: i.depends_on || [],
       source: i._source || '',
       planSummary: i._planSummary || '',
       planProject: i._planProject || '',

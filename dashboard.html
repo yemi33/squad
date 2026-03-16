@@ -1050,16 +1050,104 @@ function renderPrdProgress(prog) {
     '</div>';
   };
 
+  // Graph view: render items as a dependency DAG
+  const renderGraph = (items) => {
+    // Build adjacency: compute depth (longest path from root)
+    const byId = {};
+    items.forEach(i => { byId[i.id] = i; });
+    const depths = {};
+    function getDepth(id, visited) {
+      if (depths[id] !== undefined) return depths[id];
+      if (!visited) visited = new Set();
+      if (visited.has(id)) return 0;
+      visited.add(id);
+      const item = byId[id];
+      if (!item || !item.depends_on || item.depends_on.length === 0) { depths[id] = 0; return 0; }
+      let maxDep = 0;
+      for (const depId of item.depends_on) {
+        if (byId[depId]) maxDep = Math.max(maxDep, getDepth(depId, visited) + 1);
+      }
+      depths[id] = maxDep;
+      return maxDep;
+    }
+    items.forEach(i => getDepth(i.id));
+
+    // Group by depth
+    const columns = {};
+    let maxDepth = 0;
+    items.forEach(i => {
+      const d = depths[i.id] || 0;
+      if (!columns[d]) columns[d] = [];
+      columns[d].push(i);
+      if (d > maxDepth) maxDepth = d;
+    });
+
+    const statusColor = (s) => {
+      if (s === 'complete' || s === 'implemented') return 'var(--green)';
+      if (s === 'in-progress' || s === 'dispatched') return 'var(--blue)';
+      if (s === 'failed') return 'var(--red)';
+      return 'var(--border)';
+    };
+
+    const wi = wiByPlanItem;
+    let html = '<div style="display:flex;gap:12px;overflow-x:auto;padding:8px;min-height:120px">';
+    for (let d = 0; d <= maxDepth; d++) {
+      const col = columns[d] || [];
+      const colLabel = d === 0 ? 'Root' : 'Wave ' + d;
+      html += '<div style="min-width:180px;flex-shrink:0">' +
+        '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;text-align:center">' + colLabel + '</div>';
+      for (const i of col) {
+        const borderColor = statusColor(i.status);
+        const src = escHtml(i.source || '');
+        const iid = escHtml(i.id || '');
+        const agent = wi[i.id]?.dispatched_to || '';
+        const deps = (i.depends_on || []).join(', ');
+        html += '<div onclick="prdItemEdit(\'' + src + '\',\'' + iid + '\')" ' +
+          'style="background:var(--surface2);border:1px solid var(--border);border-left:3px solid ' + borderColor + ';' +
+          'border-radius:4px;padding:6px 8px;margin-bottom:6px;cursor:pointer;font-size:11px">' +
+          '<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">' +
+            statusBadge(i.status) +
+            '<span style="font-weight:600;color:var(--text)">' + escHtml(i.id) + '</span>' +
+          '</div>' +
+          '<div style="color:var(--text);font-size:11px;line-height:1.3;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">' + escHtml(i.name) + '</div>' +
+          '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">' +
+            '<span class="prd-item-priority ' + (i.priority || '') + '" style="font-size:8px;padding:1px 4px">' + escHtml(i.priority || '') + '</span>' +
+            (agent ? '<span style="font-size:8px;color:var(--muted)">' + escHtml(agent) + '</span>' : '') +
+            (deps ? '<span style="font-size:8px;color:var(--muted)" title="Depends on: ' + escHtml(deps) + '">deps: ' + escHtml(deps) + '</span>' : '') +
+          '</div>' +
+        '</div>';
+      }
+      html += '</div>';
+      if (d < maxDepth) html += '<div style="display:flex;align-items:center;color:var(--border);font-size:18px;flex-shrink:0">&#x2192;</div>';
+    }
+    html += '</div>';
+    return html;
+  };
+
+  // View toggle state
+  if (!window._prdViewMode) window._prdViewMode = 'graph';
+
+  const renderViewToggle = () => {
+    const isGraph = window._prdViewMode === 'graph';
+    return '<div style="display:flex;gap:4px;margin-bottom:8px;padding:0 8px">' +
+      '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;' + (isGraph ? 'background:var(--blue);color:#fff;border-color:var(--blue)' : '') + '" onclick="window._prdViewMode=\'graph\';refresh()">Graph</button>' +
+      '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;' + (!isGraph ? 'background:var(--blue);color:#fff;border-color:var(--blue)' : '') + '" onclick="window._prdViewMode=\'list\';refresh()">List</button>' +
+    '</div>';
+  };
+
   let items = keys.map(k => {
     const g = grouped[k];
+    const viewContent = window._prdViewMode === 'graph'
+      ? renderGraph(g.items)
+      : '<div class="prd-items-list">' + g.items.map(renderItem).join('') + '</div>';
     return '<div style="margin-bottom:16px">' +
       renderGroupHeader(g) +
       renderGroupStats(g.items) +
-      '<div class="prd-items-list">' + g.items.map(renderItem).join('') + '</div>' +
+      viewContent +
     '</div>';
   }).join('');
 
-  el.innerHTML = items;
+  el.innerHTML = renderViewToggle() + items;
 }
 
 let _prdItems = []; // cache for edit lookups
