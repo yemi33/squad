@@ -964,7 +964,7 @@ function renderPrdProgress(prog) {
   const grouped = {};
   for (const i of (prog.items || [])) {
     const key = i.source || '_ungrouped';
-    if (!grouped[key]) grouped[key] = { summary: i.planSummary || i.source || 'Items', items: [] };
+    if (!grouped[key]) grouped[key] = { summary: i.planSummary || i.source || 'Items', project: i.planProject || '', file: i.source || '', items: [] };
     grouped[key].items.push(i);
   }
 
@@ -997,22 +997,27 @@ function renderPrdProgress(prog) {
   };
 
   const keys = Object.keys(grouped);
-  let items;
-  if (keys.length <= 1) {
-    // Single plan — flat list
-    items = '<div class="prd-items-list" style="max-height:400px">' + (prog.items || []).map(renderItem).join('') + '</div>';
-  } else {
-    // Multiple plans — grouped with headers
-    items = keys.map(k => {
-      const g = grouped[k];
-      return '<div style="margin-bottom:12px">' +
-        '<div style="font-size:11px;font-weight:600;color:var(--blue);margin-bottom:4px;padding:4px 8px;background:var(--surface2);border-radius:4px">' +
-          escHtml(g.summary) + ' <span style="color:var(--muted);font-weight:400">(' + g.items.length + ' items)</span>' +
-        '</div>' +
-        '<div class="prd-items-list">' + g.items.map(renderItem).join('') + '</div>' +
-      '</div>';
-    }).join('');
-  }
+  const renderGroupHeader = (g) => {
+    const done = g.items.filter(i => i.status === 'complete' || i.status === 'implemented').length;
+    const wip = g.items.filter(i => i.status === 'in-progress' || i.status === 'dispatched').length;
+    const summary = (g.summary || '').replace(/^Convert plan to PRD:\s*/i, '').slice(0, 80);
+    return '<div style="font-size:11px;font-weight:600;color:var(--blue);margin-bottom:4px;padding:6px 8px;background:var(--surface2);border-radius:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+      (g.project ? '<span class="prd-project-badge">' + escHtml(g.project) + '</span>' : '') +
+      '<span style="color:var(--text)">' + escHtml(summary || g.file) + '</span>' +
+      '<span style="color:var(--muted);font-weight:400;font-size:10px">' + g.items.length + ' items' +
+        (done ? ' · ' + done + ' done' : '') + (wip ? ' · ' + wip + ' active' : '') +
+      '</span>' +
+      '<span style="color:var(--muted);font-weight:400;font-size:10px;margin-left:auto" title="' + escHtml(g.file) + '">' + escHtml(g.file) + '</span>' +
+    '</div>';
+  };
+
+  let items = keys.map(k => {
+    const g = grouped[k];
+    return '<div style="margin-bottom:12px">' +
+      renderGroupHeader(g) +
+      '<div class="prd-items-list">' + g.items.map(renderItem).join('') + '</div>' +
+    '</div>';
+  }).join('');
 
   el.innerHTML = bar + legend + items;
 }

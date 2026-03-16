@@ -130,6 +130,7 @@ function getPrdInfo() {
         (plan.missing_features || []).forEach(f => allPrdItems.push({
           ...f, _source: pf, _planStatus: plan.status || 'active',
           _planSummary: plan.plan_summary || pf,
+          _planProject: plan.project || '',
         }));
       } catch {}
     }
@@ -176,6 +177,7 @@ function getPrdInfo() {
       prs: prdToPr[i.id] || [],
       source: i._source || '',
       planSummary: i._planSummary || '',
+      planProject: i._planProject || '',
     })),
   };
 
