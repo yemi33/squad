@@ -7,10 +7,14 @@
 const fs = require('fs');
 const path = require('path');
 const shared = require('./shared');
-const { runFile } = shared;
+const { safeRead, safeWrite, safeUnlink, runFile, cleanChildEnv,
+  parseStreamJsonOutput, classifyInboxItem, KB_CATEGORIES } = shared;
 const { trackEngineUsage } = require('./llm');
+const queries = require('./queries');
+const { getInboxFiles, getNotes, INBOX_DIR, ENGINE_DIR, SQUAD_DIR,
+  NOTES_PATH, KNOWLEDGE_DIR, ARCHIVE_DIR } = queries;
 
-// Lazy require to avoid circular dependency
+// Lazy require — only for log() and dateStamp() which live on engine.js
 let _engine = null;
 function engine() {
   if (!_engine) _engine = require('../engine');
@@ -23,7 +27,7 @@ let _consolidationInFlight = false;
 function consolidateInbox(config) {
   const e = engine();
   const threshold = config.engine?.inboxConsolidateThreshold || 3;
-  const files = e.getInboxFiles();
+  const files = getInboxFiles();
   if (files.length < threshold) return;
   if (_consolidationInFlight) return;
 
@@ -31,17 +35,14 @@ function consolidateInbox(config) {
 
   const items = files.map(f => ({
     name: f,
-    content: e.safeRead(path.join(e.INBOX_DIR, f))
+    content: safeRead(path.join(INBOX_DIR, f))
   }));
 
-  const existingNotes = e.getNotes() || '';
+  const existingNotes = getNotes() || '';
   consolidateWithLLM(items, existingNotes, files, config);
 }
 
 // ─── LLM-Powered Consolidation ──────────────────────────────────────────────
-
-// Use shared classifyInboxItem — single source of truth for KB classification
-const { classifyInboxItem } = shared;
 
 function buildConsolidationPrompt(items, existingNotes, kbPaths) {
   const e = engine();
@@ -122,14 +123,14 @@ function consolidateWithLLM(items, existingNotes, files, config) {
 
   const prompt = buildConsolidationPrompt(items, existingNotes, kbPaths);
 
-  const promptPath = path.join(e.ENGINE_DIR, 'consolidate-prompt.md');
-  shared.safeWrite(promptPath, prompt);
+  const promptPath = path.join(ENGINE_DIR, 'consolidate-prompt.md');
+  safeWrite(promptPath, prompt);
 
   const sysPrompt = 'You are a concise knowledge manager. Output only markdown. No preamble. No code fences around your output.';
-  const sysPromptPath = path.join(e.ENGINE_DIR, 'consolidate-sysprompt.md');
-  shared.safeWrite(sysPromptPath, sysPrompt);
+  const sysPromptPath = path.join(ENGINE_DIR, 'consolidate-sysprompt.md');
+  safeWrite(sysPromptPath, sysPrompt);
 
-  const spawnScript = path.join(e.ENGINE_DIR, 'spawn-agent.js');
+  const spawnScript = path.join(ENGINE_DIR, 'spawn-agent.js');
   const args = [
     '--output-format', 'stream-json',
     '--max-turns', '1',
@@ -141,9 +142,9 @@ function consolidateWithLLM(items, existingNotes, files, config) {
   e.log('info', 'Spawning Haiku for LLM consolidation...');
 
   const proc = runFile(process.execPath, [spawnScript, promptPath, sysPromptPath, ...args], {
-    cwd: e.SQUAD_DIR,
+    cwd: SQUAD_DIR,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: shared.cleanChildEnv()
+    env: cleanChildEnv()
   });
 
   let stdout = '';
@@ -159,10 +160,10 @@ function consolidateWithLLM(items, existingNotes, files, config) {
   proc.on('close', (code) => {
     clearTimeout(timeout);
     _consolidationInFlight = false;
-    shared.safeUnlink(promptPath);
-    shared.safeUnlink(sysPromptPath);
+    safeUnlink(promptPath);
+    safeUnlink(sysPromptPath);
 
-    const parsed = shared.parseStreamJsonOutput(stdout);
+    const parsed = parseStreamJsonOutput(stdout);
     const extractedText = parsed.text;
     trackEngineUsage('consolidation', parsed.usage);
 
@@ -182,7 +183,7 @@ function consolidateWithLLM(items, existingNotes, files, config) {
       }
 
       const entry = '\n\n---\n\n' + digest;
-      const current = e.getNotes();
+      const current = getNotes();
       let newContent = current + entry;
 
       if (newContent.length > 50000) {
@@ -195,7 +196,7 @@ function consolidateWithLLM(items, existingNotes, files, config) {
         }
       }
 
-      shared.safeWrite(e.NOTES_PATH, newContent);
+      safeWrite(NOTES_PATH, newContent);
       classifyToKnowledgeBase(items);
       archiveInboxFiles(files);
       e.log('info', `LLM consolidation complete: ${files.length} notes processed by Haiku`);
@@ -210,8 +211,8 @@ function consolidateWithLLM(items, existingNotes, files, config) {
     clearTimeout(timeout);
     _consolidationInFlight = false;
     e.log('warn', `LLM consolidation spawn error: ${err.message} — falling back to regex`);
-    shared.safeUnlink(promptPath);
-    shared.safeUnlink(sysPromptPath);
+    safeUnlink(promptPath);
+    safeUnlink(sysPromptPath);
     consolidateWithRegex(items, files);
   });
 }
@@ -269,7 +270,7 @@ function consolidateWithRegex(items, files) {
   }
 
   // Dedup
-  const existingNotes = (e.getNotes() || '').toLowerCase();
+  const existingNotes = (getNotes() || '').toLowerCase();
   const seen = new Map();
   const deduped = [];
   for (const insight of allInsights) {
@@ -310,13 +311,13 @@ function consolidateWithRegex(items, files) {
   const dupCount = allInsights.length - deduped.length;
   if (dupCount > 0) entry += `_Deduplication: ${dupCount} duplicate(s) removed._\n`;
 
-  const current = e.getNotes();
+  const current = getNotes();
   let newContent = current + entry;
   if (newContent.length > 50000) {
     const sections = newContent.split('\n---\n\n### ');
     if (sections.length > 10) { newContent = sections[0] + '\n---\n\n### ' + sections.slice(-8).join('\n---\n\n### '); }
   }
-  shared.safeWrite(e.NOTES_PATH, newContent);
+  safeWrite(NOTES_PATH, newContent);
   classifyToKnowledgeBase(items);
   archiveInboxFiles(files);
   e.log('info', `Regex fallback: consolidated ${files.length} notes \u2192 ${deduped.length} insights into notes.md`);
@@ -326,11 +327,11 @@ function consolidateWithRegex(items, files) {
 
 function classifyToKnowledgeBase(items) {
   const e = engine();
-  if (!fs.existsSync(e.KNOWLEDGE_DIR)) fs.mkdirSync(e.KNOWLEDGE_DIR, { recursive: true });
+  if (!fs.existsSync(KNOWLEDGE_DIR)) fs.mkdirSync(KNOWLEDGE_DIR, { recursive: true });
 
   const categoryDirs = {};
-  for (const cat of shared.KB_CATEGORIES) {
-    categoryDirs[cat] = path.join(e.KNOWLEDGE_DIR, cat);
+  for (const cat of KB_CATEGORIES) {
+    categoryDirs[cat] = path.join(KNOWLEDGE_DIR, cat);
     if (!fs.existsSync(categoryDirs[cat])) fs.mkdirSync(categoryDirs[cat], { recursive: true });
   }
 
@@ -350,7 +351,7 @@ function classifyToKnowledgeBase(items) {
 
     const frontmatter = `---\nsource: ${item.name}\nagent: ${agent}\ncategory: ${category}\ndate: ${e.dateStamp()}\n---\n\n`;
     try {
-      shared.safeWrite(kbPath, frontmatter + content);
+      safeWrite(kbPath, frontmatter + content);
       classified++;
     } catch (err) {
       e.log('warn', `Failed to classify ${item.name} to knowledge base: ${err.message}`);
@@ -364,9 +365,9 @@ function classifyToKnowledgeBase(items) {
 
 function archiveInboxFiles(files) {
   const e = engine();
-  if (!fs.existsSync(e.ARCHIVE_DIR)) fs.mkdirSync(e.ARCHIVE_DIR, { recursive: true });
+  if (!fs.existsSync(ARCHIVE_DIR)) fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
   for (const f of files) {
-    try { fs.renameSync(path.join(e.INBOX_DIR, f), path.join(e.ARCHIVE_DIR, `${e.dateStamp()}-${f}`)); } catch {}
+    try { fs.renameSync(path.join(INBOX_DIR, f), path.join(ARCHIVE_DIR, `${e.dateStamp()}-${f}`)); } catch {}
   }
 }
 

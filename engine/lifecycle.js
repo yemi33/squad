@@ -6,9 +6,13 @@
 const fs = require('fs');
 const path = require('path');
 const shared = require('./shared');
-const { execSilent } = shared;
+const { safeRead, safeJson, safeWrite, execSilent, projectPrPath } = shared;
 const { trackEngineUsage } = require('./llm');
+const queries = require('./queries');
+const { getConfig, getInboxFiles, getNotes, getPrs, getAgentStatus,
+  SQUAD_DIR, ENGINE_DIR, PLANS_DIR, INBOX_DIR, AGENTS_DIR, SKILLS_DIR } = queries;
 
+// Lazy require — only for log(), ts(), dateStamp() and engine-specific functions
 let _engine = null;
 function engine() {
   if (!_engine) _engine = require('../engine');
@@ -20,8 +24,8 @@ function checkPlanCompletion(meta, config) {
   const e = engine();
   const planFile = meta.item?.sourcePlan;
   if (!planFile) return;
-  const planPath = path.join(e.PLANS_DIR, planFile);
-  const plan = e.safeJson(planPath);
+  const planPath = path.join(PLANS_DIR, planFile);
+  const plan = safeJson(planPath);
   if (!plan?.missing_features) return;
   if (plan.status === 'completed') return;
 
@@ -31,7 +35,7 @@ function checkPlanCompletion(meta, config) {
     ? projects.find(p => p.name?.toLowerCase() === projectName?.toLowerCase()) : projects[0];
   if (!project) return;
   const wiPath = shared.projectWorkItemsPath(project);
-  const workItems = e.safeJson(wiPath) || [];
+  const workItems = safeJson(wiPath) || [];
   const planItems = workItems.filter(w => w.sourcePlan === planFile && w.planItemId !== 'PR');
   if (planItems.length === 0) return;
   if (!planItems.every(w => w.status === 'done' || w.status === 'failed')) return;
@@ -65,7 +69,7 @@ function checkPlanCompletion(meta, config) {
   for (const p of projects) {
     try {
       const prPath = shared.projectPrPath(p);
-      const prs = e.safeJson(prPath) || [];
+      const prs = safeJson(prPath) || [];
       for (const pr of prs) {
         if ((pr.prdItems || []).some(id => doneItems.find(w => w.sourcePlanItem === id || w.id === id))) {
           prsCreated.push(pr);
@@ -97,7 +101,7 @@ function checkPlanCompletion(meta, config) {
 
   // Write summary to notes/inbox
   const summaryFile = `prd-completion-${planFile.replace('.json', '')}-${e.ts().slice(0, 10)}.md`;
-  shared.safeWrite(path.join(e.SQUAD_DIR, 'notes', 'inbox', summaryFile), summary);
+  shared.safeWrite(path.join(SQUAD_DIR, 'notes', 'inbox', summaryFile), summary);
   e.log('info', `PRD completion summary written to notes/inbox/${summaryFile}`);
 
   // 3. For shared-branch plans, create PR work item
@@ -129,7 +133,7 @@ function checkPlanCompletion(meta, config) {
     // Group PRs by project — one worktree per project with all branches merged in
     const projectPrs = {}; // projectName -> { project, prs: [], mainBranch }
     for (const p of projects) {
-      const prs = (e.safeJson(shared.projectPrPath(p)) || [])
+      const prs = (safeJson(shared.projectPrPath(p)) || [])
         .filter(pr => pr.status === 'active' && (pr.prdItems || []).some(id =>
           doneItems.find(w => w.sourcePlanItem === id || w.id === id)));
       if (prs.length > 0) {
@@ -212,7 +216,7 @@ function checkPlanCompletion(meta, config) {
   }
 
   // 5. Archive: move PRD to plans/archive/
-  const archiveDir = path.join(e.PLANS_DIR, 'archive');
+  const archiveDir = path.join(PLANS_DIR, 'archive');
   if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
   shared.safeWrite(planPath, plan); // save completed status first
   try {
@@ -230,7 +234,7 @@ function checkPlanCompletion(meta, config) {
 // ─── Plan → PRD Chaining ─────────────────────────────────────────────────────
 function chainPlanToPrd(dispatchItem, meta, config) {
   const e = engine();
-  const planDir = path.join(e.SQUAD_DIR, 'plans');
+  const planDir = path.join(SQUAD_DIR, 'plans');
   if (!fs.existsSync(planDir)) fs.mkdirSync(planDir, { recursive: true });
 
   let planFileName = meta?.planFileName || meta?.item?._planFileName;
@@ -290,7 +294,7 @@ function chainPlanToPrd(dispatchItem, meta, config) {
   }
 
   e.log('info', `Plan chaining: queuing plan-to-prd for next tick (chained from ${dispatchItem.id})`);
-  const wiPath = path.join(e.SQUAD_DIR, 'work-items.json');
+  const wiPath = path.join(SQUAD_DIR, 'work-items.json');
   let items = [];
   try { items = JSON.parse(fs.readFileSync(wiPath, 'utf8')); } catch {}
   items.push({
@@ -316,17 +320,17 @@ function updateWorkItemStatus(meta, status, reason) {
 
   let wiPath;
   if (meta.source === 'central-work-item' || meta.source === 'central-work-item-fanout') {
-    wiPath = path.join(e.SQUAD_DIR, 'work-items.json');
+    wiPath = path.join(SQUAD_DIR, 'work-items.json');
   } else if (meta.source === 'work-item' && meta.project?.localPath) {
     const root = path.resolve(meta.project.localPath);
-    const config = e.getConfig();
+    const config = getConfig();
     const proj = (config.projects || []).find(p => p.name === meta.project.name);
     const wiSrc = proj?.workSources?.workItems || config.workSources?.workItems || {};
     wiPath = path.resolve(root, wiSrc.path || '.squad/work-items.json');
   }
   if (!wiPath) return;
 
-  const items = e.safeJson(wiPath);
+  const items = safeJson(wiPath);
   if (!items || !Array.isArray(items)) return;
 
   const target = items.find(i => i.id === itemId);
@@ -411,9 +415,9 @@ function syncPrsFromOutput(output, agentId, meta, config) {
   } catch {}
 
   const today = e.dateStamp();
-  const inboxFiles = e.getInboxFiles().filter(f => f.includes(agentId) && f.includes(today));
+  const inboxFiles = getInboxFiles().filter(f => f.includes(agentId) && f.includes(today));
   for (const f of inboxFiles) {
-    const content = e.safeRead(path.join(e.INBOX_DIR, f));
+    const content = safeRead(path.join(INBOX_DIR, f));
     const prHeaderPattern = /\*\*PR[:\*]*\*?\s*[#-]*\s*(?:(?:visualstudio\.com|dev\.azure\.com)[^\s"]*?pullrequest\/(\d+)|github\.com\/[^\s"]*?\/pull\/(\d+))/gi;
     while ((match = prHeaderPattern.exec(content)) !== null) prMatches.add(match[1] || match[2]);
   }
@@ -450,7 +454,7 @@ function syncPrsFromOutput(output, agentId, meta, config) {
 
     // Load PRs for this project (cache per project)
     if (!dirtyProjects.has(targetProject.name)) {
-      dirtyProjects.set(targetProject.name, { project: targetProject, prs: e.safeJson(prPath) || [], prPath });
+      dirtyProjects.set(targetProject.name, { project: targetProject, prs: safeJson(prPath) || [], prPath });
     }
     const entry = dirtyProjects.get(targetProject.name);
     if (entry.prs.some(p => p.id === fullId || String(p.id).includes(prId))) continue;
@@ -487,13 +491,13 @@ function syncPrsFromOutput(output, agentId, meta, config) {
 function updatePrAfterReview(agentId, pr, project) {
   const e = engine();
   if (!pr?.id) return;
-  const prs = e.getPrs(project);
+  const prs = getPrs(project);
   const target = prs.find(p => p.id === pr.id);
   if (!target) return;
 
-  const agentStatus = e.getAgentStatus(agentId);
+  const agentStatus = getAgentStatus(agentId);
   const verdict = agentStatus.verdict || 'reviewed';
-  const config = e.getConfig();
+  const config = getConfig();
   const reviewerName = config.agents[agentId]?.name || agentId;
   const isChangesRequested = verdict.toLowerCase().includes('request') || verdict.toLowerCase().includes('change');
   const squadVerdict = isChangesRequested ? 'changes-requested' : 'approved';
@@ -507,8 +511,8 @@ function updatePrAfterReview(agentId, pr, project) {
 
   const authorAgentId = (pr.agent || '').toLowerCase();
   if (authorAgentId && config.agents?.[authorAgentId]) {
-    const metricsPath = path.join(e.ENGINE_DIR, 'metrics.json');
-    const metrics = e.safeJson(metricsPath) || {};
+    const metricsPath = path.join(ENGINE_DIR, 'metrics.json');
+    const metrics = safeJson(metricsPath) || {};
     if (!metrics[authorAgentId]) metrics[authorAgentId] = { tasksCompleted:0, tasksErrored:0, prsCreated:0, prsApproved:0, prsRejected:0, reviewsDone:0, lastTask:null, lastCompleted:null };
     if (!metrics[authorAgentId]._reviewedPrs) metrics[authorAgentId]._reviewedPrs = {};
     const prevVerdict = metrics[authorAgentId]._reviewedPrs[pr.id];
@@ -522,7 +526,7 @@ function updatePrAfterReview(agentId, pr, project) {
     shared.safeWrite(metricsPath, metrics);
   }
 
-  shared.safeWrite(project ? shared.projectPrPath(project) : path.join(path.resolve(e.SQUAD_DIR, '..'), '.squad', 'pull-requests.json'), prs);
+  shared.safeWrite(project ? shared.projectPrPath(project) : path.join(path.resolve(SQUAD_DIR, '..'), '.squad', 'pull-requests.json'), prs);
   e.log('info', `Updated ${pr.id} → squad review: ${squadVerdict} by ${reviewerName}`);
   createReviewFeedbackForAuthor(agentId, { ...pr, ...target }, config);
 }
@@ -530,7 +534,7 @@ function updatePrAfterReview(agentId, pr, project) {
 function updatePrAfterFix(pr, project) {
   const e = engine();
   if (!pr?.id) return;
-  const prs = e.getPrs(project);
+  const prs = getPrs(project);
   const target = prs.find(p => p.id === pr.id);
   if (!target) return;
   target.squadReview = {
@@ -539,7 +543,7 @@ function updatePrAfterFix(pr, project) {
     note: 'Fixed, awaiting re-review',
     fixedAt: e.ts()
   };
-  shared.safeWrite(project ? shared.projectPrPath(project) : path.join(path.resolve(e.SQUAD_DIR, '..'), '.squad', 'pull-requests.json'), prs);
+  shared.safeWrite(project ? shared.projectPrPath(project) : path.join(path.resolve(SQUAD_DIR, '..'), '.squad', 'pull-requests.json'), prs);
   e.log('info', `Updated ${pr.id} → squad review: waiting (fix pushed)`);
 }
 
@@ -567,12 +571,12 @@ async function handlePostMerge(pr, project, config, newStatus) {
   if (newStatus !== 'merged') return;
 
   if (pr.prdItems?.length > 0) {
-    const plansDir = path.join(e.SQUAD_DIR, 'plans');
+    const plansDir = path.join(SQUAD_DIR, 'plans');
     try {
       const planFiles = fs.readdirSync(plansDir).filter(f => f.endsWith('.json'));
       let updated = 0;
       for (const pf of planFiles) {
-        const plan = e.safeJson(path.join(plansDir, pf));
+        const plan = safeJson(path.join(plansDir, pf));
         if (!plan?.missing_features) continue;
         let changed = false;
         for (const itemId of pr.prdItems) {
@@ -591,8 +595,8 @@ async function handlePostMerge(pr, project, config, newStatus) {
 
   const agentId = (pr.agent || '').toLowerCase();
   if (agentId && config.agents?.[agentId]) {
-    const metricsPath = path.join(e.ENGINE_DIR, 'metrics.json');
-    const metrics = e.safeJson(metricsPath) || {};
+    const metricsPath = path.join(ENGINE_DIR, 'metrics.json');
+    const metrics = safeJson(metricsPath) || {};
     if (!metrics[agentId]) metrics[agentId] = { tasksCompleted:0, tasksErrored:0, prsCreated:0, prsApproved:0, prsRejected:0, prsMerged:0, reviewsDone:0, lastTask:null, lastCompleted:null };
     metrics[agentId].prsMerged = (metrics[agentId].prsMerged || 0) + 1;
     shared.safeWrite(metricsPath, metrics);
@@ -615,7 +619,7 @@ async function handlePostMerge(pr, project, config, newStatus) {
 function checkForLearnings(agentId, agentInfo, taskDesc) {
   const e = engine();
   const today = e.dateStamp();
-  const inboxFiles = e.getInboxFiles();
+  const inboxFiles = getInboxFiles();
   const agentFiles = inboxFiles.filter(f => f.includes(agentId) && f.includes(today));
   if (agentFiles.length > 0) {
     e.log('info', `${agentInfo?.name || agentId} wrote ${agentFiles.length} finding(s) to inbox`);
@@ -663,8 +667,8 @@ function extractSkillsFromOutput(output, agentId, dispatchItem, config) {
     if (scope === 'project' && project) {
       const proj = shared.getProjects(config).find(p => p.name === project);
       if (proj) {
-        const centralPath = path.join(e.SQUAD_DIR, 'work-items.json');
-        const items = e.safeJson(centralPath) || [];
+        const centralPath = path.join(SQUAD_DIR, 'work-items.json');
+        const items = safeJson(centralPath) || [];
         const alreadyExists = items.some(i => i.title === `Add skill: ${name}` && i.status !== 'failed');
         if (!alreadyExists) {
           const skillId = `SK${String(items.filter(i => i.id?.startsWith('SK')).length + 1).padStart(3, '0')}`;
@@ -676,7 +680,7 @@ function extractSkillsFromOutput(output, agentId, dispatchItem, config) {
         }
       }
     } else {
-      const skillPath = path.join(e.SKILLS_DIR, filename);
+      const skillPath = path.join(SKILLS_DIR, filename);
       if (!fs.existsSync(skillPath)) {
         shared.safeWrite(skillPath, enrichedBlock);
         e.log('info', `Extracted squad skill "${name}" from ${agentName} → ${filename}`);
@@ -689,8 +693,8 @@ function extractSkillsFromOutput(output, agentId, dispatchItem, config) {
 
 function updateAgentHistory(agentId, dispatchItem, result) {
   const e = engine();
-  const historyPath = path.join(e.AGENTS_DIR, agentId, 'history.md');
-  let history = e.safeRead(historyPath) || '# Agent History\n\n';
+  const historyPath = path.join(AGENTS_DIR, agentId, 'history.md');
+  let history = safeRead(historyPath) || '# Agent History\n\n';
   const entry = `### ${e.ts()} — ${result}\n` +
     `- **Task:** ${dispatchItem.task}\n` +
     `- **Type:** ${dispatchItem.type}\n` +
@@ -717,12 +721,12 @@ function createReviewFeedbackForAuthor(reviewerAgentId, pr, config) {
   const authorAgentId = pr.agent.toLowerCase();
   if (!config.agents[authorAgentId]) return;
   const today = e.dateStamp();
-  const inboxFiles = e.getInboxFiles();
+  const inboxFiles = getInboxFiles();
   const reviewFiles = inboxFiles.filter(f => f.includes(reviewerAgentId) && f.includes(today));
   if (reviewFiles.length === 0) return;
-  const reviewContent = reviewFiles.map(f => e.safeRead(path.join(e.INBOX_DIR, f))).join('\n\n');
+  const reviewContent = reviewFiles.map(f => safeRead(path.join(INBOX_DIR, f))).join('\n\n');
   const feedbackFile = `feedback-${authorAgentId}-from-${reviewerAgentId}-${pr.id}-${today}.md`;
-  const feedbackPath = path.join(e.INBOX_DIR, feedbackFile);
+  const feedbackPath = path.join(INBOX_DIR, feedbackFile);
   const content = `# Review Feedback for ${config.agents[authorAgentId]?.name || authorAgentId}\n\n` +
     `**PR:** ${pr.id} — ${pr.title || ''}\n` +
     `**Reviewer:** ${config.agents[reviewerAgentId]?.name || reviewerAgentId}\n` +
@@ -737,8 +741,8 @@ function createReviewFeedbackForAuthor(reviewerAgentId, pr, config) {
 
 function updateMetrics(agentId, dispatchItem, result, taskUsage, prsCreatedCount) {
   const e = engine();
-  const metricsPath = path.join(e.ENGINE_DIR, 'metrics.json');
-  const metrics = e.safeJson(metricsPath) || {};
+  const metricsPath = path.join(ENGINE_DIR, 'metrics.json');
+  const metrics = safeJson(metricsPath) || {};
   if (!metrics[agentId]) {
     metrics[agentId] = { tasksCompleted: 0, tasksErrored: 0, prsCreated: 0, prsApproved: 0, prsRejected: 0,
       reviewsDone: 0, lastTask: null, lastCompleted: null, totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCacheRead: 0 };
@@ -807,10 +811,10 @@ function runPostCompletionHooks(dispatchItem, agentId, code, stdout, config) {
       // Increment retry counter on the source work item
       try {
         const wiPath = meta.source === 'central-work-item' || meta.source === 'central-work-item-fanout'
-          ? path.join(e.SQUAD_DIR, 'work-items.json')
+          ? path.join(SQUAD_DIR, 'work-items.json')
           : meta.project?.localPath ? path.join(meta.project.localPath, '.squad', 'work-items.json') : null;
         if (wiPath) {
-          const items = e.safeJson(wiPath) || [];
+          const items = safeJson(wiPath) || [];
           const wi = items.find(i => i.id === meta.item.id);
           if (wi) { wi._retryCount = retries + 1; wi.status = 'pending'; delete wi.dispatched_at; delete wi.dispatched_to; shared.safeWrite(wiPath, items); }
         }

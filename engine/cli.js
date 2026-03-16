@@ -5,9 +5,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const shared = require('./shared');
+const { safeRead, safeJson, safeWrite } = shared;
+const queries = require('./queries');
+const { getConfig, getControl, getDispatch, getAgentStatus, setAgentStatus,
+  SQUAD_DIR, ENGINE_DIR, AGENTS_DIR, PLANS_DIR, CONTROL_PATH, DISPATCH_PATH } = queries;
 
-// Lazy require to avoid circular dependency — engine.js loads cli.js,
-// cli.js needs functions from engine.js
+// Lazy require — only for engine-specific functions (log, ts, tick, addToDispatch, etc.)
 let _engine = null;
 function engine() {
   if (!_engine) _engine = require('../engine');
@@ -43,7 +47,7 @@ function handleCommand(cmd, args) {
 const commands = {
   start() {
     const e = engine();
-    const control = e.getControl();
+    const control = getControl();
     if (control.state === 'running') {
       let alive = false;
       if (control.pid) {
@@ -56,11 +60,11 @@ const commands = {
       console.log(`Engine was running (PID ${control.pid}) but process is dead — restarting.`);
     }
 
-    e.safeWrite(e.CONTROL_PATH, { state: 'running', pid: process.pid, started_at: e.ts() });
+    safeWrite(CONTROL_PATH, { state: 'running', pid: process.pid, started_at: e.ts() });
     e.log('info', 'Engine started');
     console.log(`Engine started (PID: ${process.pid})`);
 
-    const config = e.getConfig();
+    const config = getConfig();
     const interval = config.engine?.tickInterval || 60000;
 
     const { getProjects } = require('./shared');
@@ -80,7 +84,7 @@ const commands = {
 
     // Re-attach to surviving agent processes from previous session
     const { exec } = require('./shared');
-    const dispatch = e.getDispatch();
+    const dispatch = getDispatch();
     const activeOnStart = (dispatch.active || []);
     if (activeOnStart.length > 0) {
       let reattached = 0;
@@ -88,16 +92,16 @@ const commands = {
         const agentId = item.agent;
         let agentPid = null;
 
-        const pidFile = path.join(e.ENGINE_DIR, `pid-${item.id}.pid`);
+        const pidFile = path.join(ENGINE_DIR, `pid-${item.id}.pid`);
         try {
           const pidStr = fs.readFileSync(pidFile, 'utf8').trim();
           if (pidStr) agentPid = parseInt(pidStr);
         } catch {}
 
         if (!agentPid) {
-          const status = e.getAgentStatus(agentId);
+          const status = getAgentStatus(agentId);
           if (status.dispatch_id === item.id) {
-            const liveLog = path.join(e.AGENTS_DIR, agentId, 'live-output.log');
+            const liveLog = path.join(AGENTS_DIR, agentId, 'live-output.log');
             try {
               const stat = fs.statSync(liveLog);
               const ageMs = Date.now() - stat.mtimeMs;
@@ -148,13 +152,13 @@ const commands = {
       let fixes = 0;
 
       const activeIds = new Set((dispatch.active || []).map(d => d.meta?.item?.id).filter(Boolean));
-      const allWiPaths = [path.join(e.SQUAD_DIR, 'work-items.json')];
+      const allWiPaths = [path.join(SQUAD_DIR, 'work-items.json')];
       for (const p of projects) {
         allWiPaths.push(path.join(p.localPath, '.squad', 'work-items.json'));
       }
       for (const wiPath of allWiPaths) {
         try {
-          const items = e.safeJson(wiPath) || [];
+          const items = safeJson(wiPath) || [];
           let changed = false;
           for (const item of items) {
             if (item.status === 'dispatched' && !activeIds.has(item.id)) {
@@ -166,18 +170,18 @@ const commands = {
               e.log('info', `Recovery: reset stuck item ${item.id} from dispatched → pending`);
             }
           }
-          if (changed) e.safeWrite(wiPath, items);
+          if (changed) safeWrite(wiPath, items);
         } catch {}
       }
 
       try {
-        const centralItems = e.safeJson(path.join(e.SQUAD_DIR, 'work-items.json')) || [];
+        const centralItems = safeJson(path.join(SQUAD_DIR, 'work-items.json')) || [];
         const hasPlanToPrd = centralItems.some(w => w.type === 'plan-to-prd' && (w.status === 'pending' || w.status === 'dispatched'));
         const donePlanChains = centralItems.filter(w =>
           w.type === 'plan' && w.status === 'done' && w.chain === 'plan-to-prd'
         );
         if (donePlanChains.length > 0 && !hasPlanToPrd) {
-          const planDir = path.join(e.SQUAD_DIR, 'plans');
+          const planDir = path.join(SQUAD_DIR, 'plans');
           const jsonFiles = fs.existsSync(planDir) ? fs.readdirSync(planDir).filter(f => f.endsWith('.json')) : [];
           const mdFiles = fs.existsSync(planDir) ? fs.readdirSync(planDir).filter(f => f.endsWith('.md')) : [];
 
@@ -198,7 +202,7 @@ const commands = {
                 project: planItem.project || '',
                 planFile: planFile,
               });
-              e.safeWrite(path.join(e.SQUAD_DIR, 'work-items.json'), centralItems);
+              safeWrite(path.join(SQUAD_DIR, 'work-items.json'), centralItems);
               fixes++;
               e.log('info', `Recovery: re-queued plan-to-prd for ${planFile} (chain was broken)`);
               break;
@@ -208,10 +212,10 @@ const commands = {
       } catch {}
 
       try {
-        const centralItems = e.safeJson(path.join(e.SQUAD_DIR, 'work-items.json')) || [];
+        const centralItems = safeJson(path.join(SQUAD_DIR, 'work-items.json')) || [];
         const pendingPlanToPrd = centralItems.filter(w => w.type === 'plan-to-prd' && w.status === 'pending');
         if (pendingPlanToPrd.length === 0) {
-          const planDir = path.join(e.SQUAD_DIR, 'plans');
+          const planDir = path.join(SQUAD_DIR, 'plans');
           if (fs.existsSync(planDir)) {
             const mdFiles = fs.readdirSync(planDir).filter(f => f.endsWith('.md'));
             const jsonFiles = fs.readdirSync(planDir).filter(f => f.endsWith('.json'));
@@ -235,7 +239,7 @@ const commands = {
                     project: '',
                     planFile: md,
                   });
-                  e.safeWrite(path.join(e.SQUAD_DIR, 'work-items.json'), centralItems);
+                  safeWrite(path.join(SQUAD_DIR, 'work-items.json'), centralItems);
                   fixes++;
                   e.log('info', `Recovery: queued plan-to-prd for orphaned plan ${md}`);
                   break;
@@ -262,7 +266,7 @@ const commands = {
 
   stop() {
     const e = engine();
-    const dispatch = e.getDispatch();
+    const dispatch = getDispatch();
     const active = (dispatch.active || []);
     if (active.length > 0) {
       console.log(`\n  WARNING: ${active.length} agent(s) are still working:`);
@@ -273,39 +277,39 @@ const commands = {
       console.log('  On next start, they\'ll get a 20-min grace period before being marked as orphans.');
       console.log('  To kill them now, run: node engine.js kill\n');
     }
-    const control = e.getControl();
+    const control = getControl();
     if (control.pid && control.pid !== process.pid) {
       try { process.kill(control.pid); } catch {}
     }
-    e.safeWrite(e.CONTROL_PATH, { state: 'stopped', stopped_at: e.ts() });
+    safeWrite(CONTROL_PATH, { state: 'stopped', stopped_at: e.ts() });
     e.log('info', 'Engine stopped');
     console.log('Engine stopped.');
   },
 
   pause() {
     const e = engine();
-    e.safeWrite(e.CONTROL_PATH, { state: 'paused', paused_at: e.ts() });
+    safeWrite(CONTROL_PATH, { state: 'paused', paused_at: e.ts() });
     e.log('info', 'Engine paused');
     console.log('Engine paused. Run `node .squad/engine.js resume` to resume.');
   },
 
   resume() {
     const e = engine();
-    const control = e.getControl();
+    const control = getControl();
     if (control.state === 'running') {
       console.log('Engine is already running.');
       return;
     }
-    e.safeWrite(e.CONTROL_PATH, { state: 'running', resumed_at: e.ts() });
+    safeWrite(CONTROL_PATH, { state: 'running', resumed_at: e.ts() });
     e.log('info', 'Engine resumed');
     console.log('Engine resumed.');
   },
 
   status() {
     const e = engine();
-    const config = e.getConfig();
-    const control = e.getControl();
-    const dispatch = e.getDispatch();
+    const config = getConfig();
+    const control = getControl();
+    const dispatch = getDispatch();
     const agents = config.agents || {};
 
     const { getProjects } = require('./shared');
@@ -321,7 +325,7 @@ const commands = {
     console.log(`  ${'ID'.padEnd(12)} ${'Name (Role)'.padEnd(30)} ${'Status'.padEnd(10)} Task`);
     console.log('  ' + '-'.repeat(70));
     for (const [id, agent] of Object.entries(agents)) {
-      const status = e.getAgentStatus(id);
+      const status = getAgentStatus(id);
       console.log(`  ${id.padEnd(12)} ${`${agent.emoji} ${agent.name} (${agent.role})`.padEnd(30)} ${(status.status || 'idle').padEnd(10)} ${status.task || '-'}`);
     }
 
@@ -329,8 +333,8 @@ const commands = {
     console.log(`Dispatch: ${dispatch.pending.length} pending | ${(dispatch.active || []).length} active | ${(dispatch.completed || []).length} completed`);
     console.log(`Active processes: ${e.activeProcesses.size}`);
 
-    const metricsPath = path.join(e.ENGINE_DIR, 'metrics.json');
-    const metrics = e.safeJson(metricsPath);
+    const metricsPath = path.join(ENGINE_DIR, 'metrics.json');
+    const metrics = safeJson(metricsPath);
     if (metrics && Object.keys(metrics).length > 0) {
       console.log('\nMetrics:');
       console.log(`  ${'Agent'.padEnd(12)} ${'Done'.padEnd(6)} ${'Err'.padEnd(6)} ${'PRs'.padEnd(6)} ${'Appr'.padEnd(6)} ${'Rej'.padEnd(6)} ${'Reviews'.padEnd(8)} ${'Cost'.padEnd(8)}`);
@@ -346,7 +350,7 @@ const commands = {
 
   queue() {
     const e = engine();
-    const dispatch = e.getDispatch();
+    const dispatch = getDispatch();
 
     console.log('\n=== Dispatch Queue ===\n');
 
@@ -387,12 +391,12 @@ const commands = {
   dispatch() {
     const e = engine();
     console.log('Forcing dispatch cycle...');
-    const control = e.getControl();
+    const control = getControl();
     const prevState = control.state;
-    e.safeWrite(e.CONTROL_PATH, { ...control, state: 'running' });
+    safeWrite(CONTROL_PATH, { ...control, state: 'running' });
     e.tick();
     if (prevState !== 'running') {
-      e.safeWrite(e.CONTROL_PATH, { ...control, state: prevState });
+      safeWrite(CONTROL_PATH, { ...control, state: prevState });
     }
     console.log('Dispatch cycle complete.');
   },
@@ -405,7 +409,7 @@ const commands = {
       return;
     }
 
-    const config = e.getConfig();
+    const config = getConfig();
     if (!config.agents[agentId]) {
       console.log(`Unknown agent: ${agentId}. Available: ${Object.keys(config.agents).join(', ')}`);
       return;
@@ -421,7 +425,7 @@ const commands = {
       meta: {}
     });
 
-    const dispatch = e.getDispatch();
+    const dispatch = getDispatch();
     const item = dispatch.pending.find(d => d.id === id);
     if (item) {
       e.spawnAgent(item, config);
@@ -444,14 +448,14 @@ const commands = {
       }
     }
 
-    const config = e.getConfig();
+    const config = getConfig();
     const { getProjects, projectWorkItemsPath } = require('./shared');
     const projects = getProjects(config);
     const targetProject = opts.project
       ? projects.find(p => p.name?.toLowerCase() === opts.project?.toLowerCase()) || projects[0]
       : projects[0];
     const wiPath = projectWorkItemsPath(targetProject);
-    const items = e.safeJson(wiPath) || [];
+    const items = safeJson(wiPath) || [];
 
     const item = {
       id: `W${String(items.length + 1).padStart(3, '0')}`,
@@ -468,7 +472,7 @@ const commands = {
     };
 
     items.push(item);
-    e.safeWrite(wiPath, items);
+    safeWrite(wiPath, items);
 
     console.log(`Queued work item: ${item.id} — ${item.title} (project: ${targetProject.name || 'default'})`);
     console.log(`  Type: ${item.type} | Priority: ${item.priority} | Agent: ${item.agent || 'auto'}`);
@@ -490,7 +494,7 @@ const commands = {
       return;
     }
 
-    const config = e.getConfig();
+    const config = getConfig();
     const { getProjects } = require('./shared');
     const projects = getProjects(config);
     const targetProject = projectName
@@ -535,14 +539,14 @@ const commands = {
       ado_org: targetProject.adoOrg || 'Unknown',
       ado_project: targetProject.adoProject || 'Unknown',
       repo_name: targetProject.repoName || 'Unknown',
-      team_root: e.SQUAD_DIR,
+      team_root: SQUAD_DIR,
       date: e.dateStamp(),
       plan_content: planContent,
       plan_summary: planSummary,
       project_name_lower: (targetProject.name || 'project').toLowerCase()
     };
 
-    if (!fs.existsSync(e.PLANS_DIR)) fs.mkdirSync(e.PLANS_DIR, { recursive: true });
+    if (!fs.existsSync(PLANS_DIR)) fs.mkdirSync(PLANS_DIR, { recursive: true });
 
     const prompt = e.renderPlaybook('plan-to-prd', vars);
     if (!prompt) {
@@ -567,9 +571,9 @@ const commands = {
     console.log(`Dispatched: ${id} → ${config.agents[agentId]?.name} (${agentId})`);
     console.log('The agent will analyze your plan and generate a PRD in plans/.');
 
-    const control = e.getControl();
+    const control = getControl();
     if (control.state === 'running') {
-      const dispatch = e.getDispatch();
+      const dispatch = getDispatch();
       const item = dispatch.pending.find(d => d.id === id);
       if (item) {
         e.spawnAgent(item, config);
@@ -582,7 +586,7 @@ const commands = {
 
   sources() {
     const e = engine();
-    const config = e.getConfig();
+    const config = getConfig();
     const shared = require('./shared');
     const projects = shared.getProjects(config);
 
@@ -605,26 +609,26 @@ const commands = {
         console.log(`    Cooldown: ${src.cooldownMinutes || 0}m`);
 
         if (exists && name === 'prd') {
-          const prd = e.safeJson(filePath);
+          const prd = safeJson(filePath);
           if (prd) {
             const missing = (prd.missing_features || []).filter(f => ['missing', 'planned'].includes(f.status));
             console.log(`    Items: ${missing.length} missing/planned features`);
           }
         }
         if (exists && name === 'pullRequests') {
-          const prs = e.safeJson(filePath) || [];
+          const prs = safeJson(filePath) || [];
           const pending = prs.filter(p => p.status === 'active' && (p.reviewStatus === 'pending' || p.reviewStatus === 'waiting'));
           const needsFix = prs.filter(p => p.status === 'active' && p.reviewStatus === 'changes-requested');
           console.log(`    PRs: ${pending.length} pending review, ${needsFix.length} need fixes`);
         }
         if (exists && name === 'workItems') {
-          const items = e.safeJson(filePath) || [];
+          const items = safeJson(filePath) || [];
           const queued = items.filter(i => i.status === 'queued');
           console.log(`    Items: ${queued.length} queued`);
         }
         if (name === 'specs' || name === 'mergedDesignDocs') {
           const trackerFile = path.resolve(root, src.statePath || '.squad/spec-tracker.json');
-          const tracker = e.safeJson(trackerFile) || { processedPrs: {} };
+          const tracker = safeJson(trackerFile) || { processedPrs: {} };
           const processed = Object.keys(tracker.processedPrs).length;
           const matched = Object.values(tracker.processedPrs).filter(p => p.matched).length;
           console.log(`    Processed: ${processed} merged PRs (${matched} had specs)`);
@@ -637,15 +641,15 @@ const commands = {
   kill() {
     const e = engine();
     console.log('\n=== Kill All Active Work ===\n');
-    const config = e.getConfig();
-    const dispatch = e.getDispatch();
+    const config = getConfig();
+    const dispatch = getDispatch();
     const shared = require('./shared');
 
-    const pidFiles = fs.readdirSync(e.ENGINE_DIR).filter(f => f.startsWith('pid-'));
+    const pidFiles = fs.readdirSync(ENGINE_DIR).filter(f => f.startsWith('pid-'));
     for (const f of pidFiles) {
-      const pid = e.safeRead(path.join(e.ENGINE_DIR, f)).trim();
+      const pid = safeRead(path.join(ENGINE_DIR, f)).trim();
       try { process.kill(Number(pid)); console.log(`Killed process ${pid} (${f})`); } catch { console.log(`Process ${pid} already dead`); }
-      fs.unlinkSync(path.join(e.ENGINE_DIR, f));
+      fs.unlinkSync(path.join(ENGINE_DIR, f));
     }
 
     const killed = dispatch.active || [];
@@ -655,12 +659,12 @@ const commands = {
         const itemId = item.meta.item?.id;
         if (itemId) {
           const wiPath = (item.meta.source === 'central-work-item' || item.meta.source === 'central-work-item-fanout')
-            ? path.join(e.SQUAD_DIR, 'work-items.json')
+            ? path.join(SQUAD_DIR, 'work-items.json')
             : item.meta.project?.localPath
               ? shared.projectWorkItemsPath({ localPath: item.meta.project.localPath, name: item.meta.project.name, workSources: config.projects?.find(p => p.name === item.meta.project.name)?.workSources })
               : null;
           if (wiPath) {
-            const items = e.safeJson(wiPath) || [];
+            const items = safeJson(wiPath) || [];
             const target = items.find(i => i.id === itemId);
             if (target) {
               target.status = 'pending';
@@ -668,7 +672,7 @@ const commands = {
               delete target.dispatched_to;
               delete target.failReason;
               delete target.failedAt;
-              e.safeWrite(wiPath, items);
+              safeWrite(wiPath, items);
             }
           }
         }
@@ -677,12 +681,12 @@ const commands = {
       console.log(`Killed dispatch: ${item.id} (${item.agent}) — work item reset to pending`);
     }
     dispatch.active = [];
-    e.safeWrite(e.DISPATCH_PATH, dispatch);
+    safeWrite(DISPATCH_PATH, dispatch);
 
     for (const [agentId] of Object.entries(config.agents || {})) {
-      const status = e.getAgentStatus(agentId);
+      const status = getAgentStatus(agentId);
       if (status.status === 'working' || status.status === 'error') {
-        e.setAgentStatus(agentId, { status: 'idle', task: null, started_at: null, completed_at: e.ts() });
+        setAgentStatus(agentId, { status: 'idle', task: null, started_at: null, completed_at: e.ts() });
         console.log(`Reset ${agentId} to idle`);
       }
     }
@@ -692,7 +696,7 @@ const commands = {
 
   cleanup() {
     const e = engine();
-    const config = e.getConfig();
+    const config = getConfig();
     console.log('\n=== Cleanup ===\n');
     const result = e.runCleanup(config, true);
     console.log(`\nDone: ${result.tempFiles} temp files, ${result.liveOutputs} live outputs, ${result.worktrees} worktrees, ${result.zombies} zombies cleaned.`);
@@ -704,7 +708,7 @@ const commands = {
 
   discover() {
     const e = engine();
-    const config = e.getConfig();
+    const config = getConfig();
     console.log('\n=== Work Discovery (dry run) ===\n');
 
     e.materializePlansAsWorkItems(config);

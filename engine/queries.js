@@ -20,6 +20,7 @@ const INBOX_DIR = path.join(SQUAD_DIR, 'notes', 'inbox');
 const PLANS_DIR = path.join(SQUAD_DIR, 'plans');
 const SKILLS_DIR = path.join(SQUAD_DIR, 'skills');
 const KNOWLEDGE_DIR = path.join(SQUAD_DIR, 'knowledge');
+const ARCHIVE_DIR = path.join(SQUAD_DIR, 'notes', 'archive');
 
 const CONFIG_PATH = path.join(SQUAD_DIR, 'config.json');
 const CONTROL_PATH = path.join(ENGINE_DIR, 'control.json');
@@ -510,7 +511,7 @@ function getPrdInfo(config) {
 
 module.exports = {
   // Paths (for modules that need direct access)
-  SQUAD_DIR, AGENTS_DIR, ENGINE_DIR, INBOX_DIR, PLANS_DIR, SKILLS_DIR, KNOWLEDGE_DIR,
+  SQUAD_DIR, AGENTS_DIR, ENGINE_DIR, INBOX_DIR, PLANS_DIR, SKILLS_DIR, KNOWLEDGE_DIR, ARCHIVE_DIR,
   CONFIG_PATH, CONTROL_PATH, DISPATCH_PATH, LOG_PATH, NOTES_PATH,
 
   // Helpers

@@ -5,6 +5,7 @@
 
 const shared = require('./shared');
 const { exec, getAdoOrgBase } = shared;
+const { getPrs } = require('./queries');
 
 // Lazy require to avoid circular dependency
 let _engine = null;
@@ -61,14 +62,13 @@ async function adoFetch(url, token, _retried = false) {
  * for each active PR. If callback returns truthy, the PR file is saved after the project loop.
  */
 async function forEachActivePr(config, token, callback) {
-  const e = engine();
   const projects = shared.getProjects(config);
   let totalUpdated = 0;
 
   for (const project of projects) {
     if (!project.adoOrg || !project.adoProject || !project.repositoryId) continue;
 
-    const prs = e.getPrs(project);
+    const prs = getPrs(project);
     const activePrs = prs.filter(pr => pr.status === 'active');
     if (activePrs.length === 0) continue;
 
