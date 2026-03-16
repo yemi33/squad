@@ -1801,46 +1801,48 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       const notes = safeRead(path.join(SQUAD_DIR, 'notes.md')) || '';
       const notesTail = notes.length > 3000 ? notes.slice(-3000) : notes;
 
-      // Build plan contents (source .md plans + PRD JSON summaries)
+      // Build plan contents (source .md plans in plans/ + PRD JSONs in prd/)
       let planContents = '';
-      const prdDir = path.join(SQUAD_DIR, 'plans');
-      try {
-        const planFiles = fs.readdirSync(prdDir).filter(f => f.endsWith('.md') || f.endsWith('.json'));
-        for (const f of planFiles) {
-          try {
-            const raw = fs.readFileSync(path.join(prdDir, f), 'utf8');
-            if (f.endsWith('.md')) {
-              // Source plans — include full content (typically 1-5KB)
-              const truncated = raw.length > 4000 ? raw.slice(0, 4000) + '\n...(truncated)' : raw;
-              planContents += `\n#### ${f}\n${truncated}\n`;
-            } else {
-              // PRD JSON — include summary + item list, not full descriptions
-              const plan = JSON.parse(raw);
-              planContents += `\n#### ${f} (PRD)\n`;
-              planContents += `Status: ${plan.status || 'unknown'} | By: ${plan.generated_by || 'unknown'} | Project: ${plan.project || ''}\n`;
-              planContents += `Summary: ${plan.plan_summary || ''}\n`;
-              if (plan.missing_features) {
-                planContents += `Items (${plan.missing_features.length}):\n`;
-                for (const item of plan.missing_features) {
-                  planContents += `- ${item.id}: ${(item.name || '').slice(0, 60)} [${item.status}] ${item.priority || ''}\n`;
+      const scanDirs = [
+        { dir: PLANS_DIR, label: 'plan' },
+        { dir: PRD_DIR, label: 'prd' },
+      ];
+      for (const { dir, label } of scanDirs) {
+        try {
+          const files = fs.readdirSync(dir).filter(f => f.endsWith('.md') || f.endsWith('.json'));
+          for (const f of files) {
+            try {
+              const raw = fs.readFileSync(path.join(dir, f), 'utf8');
+              if (f.endsWith('.md')) {
+                const truncated = raw.length > 4000 ? raw.slice(0, 4000) + '\n...(truncated)' : raw;
+                planContents += `\n#### ${f} (${label})\n${truncated}\n`;
+              } else {
+                const plan = JSON.parse(raw);
+                planContents += `\n#### ${f} (${label})\n`;
+                planContents += `Status: ${plan.status || 'unknown'} | By: ${plan.generated_by || 'unknown'} | Project: ${plan.project || ''}\n`;
+                planContents += `Summary: ${plan.plan_summary || ''}\n`;
+                if (plan.missing_features) {
+                  planContents += `Items (${plan.missing_features.length}):\n`;
+                  for (const item of plan.missing_features) {
+                    planContents += `- ${item.id}: ${(item.name || '').slice(0, 60)} [${item.status}] ${item.priority || ''}\n`;
+                  }
                 }
               }
-            }
-          } catch {}
-        }
-        // Also check archive
-        const archiveDir = path.join(prdDir, 'archive');
-        try {
-          const archived = fs.readdirSync(archiveDir).filter(f => f.endsWith('.md') || f.endsWith('.json')).slice(-3);
-          for (const f of archived) {
-            try {
-              const raw = fs.readFileSync(path.join(archiveDir, f), 'utf8');
-              const truncated = raw.length > 2000 ? raw.slice(0, 2000) + '\n...(truncated)' : raw;
-              planContents += `\n#### [archived] ${f}\n${truncated}\n`;
             } catch {}
           }
+          // Also check archive subdirectory
+          try {
+            const archived = fs.readdirSync(path.join(dir, 'archive')).filter(f => f.endsWith('.md') || f.endsWith('.json')).slice(-3);
+            for (const f of archived) {
+              try {
+                const raw = fs.readFileSync(path.join(dir, 'archive', f), 'utf8');
+                const truncated = raw.length > 2000 ? raw.slice(0, 2000) + '\n...(truncated)' : raw;
+                planContents += `\n#### [archived] ${f}\n${truncated}\n`;
+              } catch {}
+            }
+          } catch {}
         } catch {}
-      } catch {}
+      }
 
       // Build extra context: charters, routing, skills, KB, PRs, config
       const config = queries.getConfig();
@@ -1964,7 +1966,7 @@ You have read-only access to the filesystem. Use these tools when the squad stat
 Key paths:
 - Squad root: \`${SQUAD_DIR}\`
 - Agent outputs: \`${SQUAD_DIR}/agents/{id}/output.log\` (latest) or \`output-{dispatch-id}.log\` (archived)
-- Plans: \`${SQUAD_DIR}/plans/\` (.md source plans + .json PRDs)
+- Plans: \`${SQUAD_DIR}/plans/\` (.md source plans) and \`${SQUAD_DIR}/prd/\` (.json PRDs)
 - Work items: \`${SQUAD_DIR}/work-items.json\` (central) or \`{project}/.squad/work-items.json\`
 - Knowledge: \`${SQUAD_DIR}/knowledge/{category}/*.md\`
 - Config: \`${SQUAD_DIR}/config.json\`
