@@ -1813,20 +1813,65 @@ What would you like to discuss or change? When you're happy, say "approve" and I
         } catch {}
       } catch {}
 
+      // Build extra context: charters, routing, skills, KB, PRs, config
+      const config = queries.getConfig();
+
+      const agentCharters = Object.keys(config.agents || {}).map(id => {
+        const charter = safeRead(path.join(SQUAD_DIR, 'agents', id, 'charter.md'));
+        return charter ? `#### ${id}\n${charter.slice(0, 1500)}` : '';
+      }).filter(Boolean).join('\n\n');
+
+      const routing = safeRead(path.join(SQUAD_DIR, 'routing.md')) || '(no routing.md)';
+
+      const skillsList = getSkills().map(s =>
+        `- **${s.name}**: ${s.description || ''} (trigger: ${s.trigger || 'manual'})`
+      ).join('\n') || '(no skills)';
+
+      const kbEntries = getKnowledgeBaseEntries().slice(-20).map(e =>
+        `- [${e.cat}] ${e.title} (${e.file})`
+      ).join('\n') || '(empty)';
+
+      const allPrs = getPullRequests().map(pr =>
+        `- **${pr.id}** (${pr._project}): ${(pr.title || '').slice(0, 60)} | status: ${pr.status} | review: ${pr.reviewStatus || '?'} | build: ${pr.buildStatus || '?'}${pr.branch ? ' | branch: `' + pr.branch + '`' : ''}${pr.url ? ' | ' + pr.url : ''}`
+      ).join('\n') || '(no PRs)';
+
+      const engineConfig = config.engine || {};
+
+      const dispatchHistory = (() => {
+        try {
+          const d = JSON.parse(safeRead(path.join(SQUAD_DIR, 'engine', 'dispatch.json')) || '{}');
+          return (d.completed || []).slice(-15).reverse().map(c =>
+            `- ${c.agent} ${c.result}: ${(c.task || '').slice(0, 80)}${c.resultSummary ? ' — ' + c.resultSummary.slice(0, 120) : ''}${c.reason ? ' [' + c.reason.slice(0, 60) + ']' : ''} (${(c.completed_at || '').slice(0, 16)})`
+          ).join('\n') || '(none)';
+        } catch { return '(unavailable)'; }
+      })();
+
       // Build comprehensive system prompt with full squad state
       const sysPrompt = `You are the Command Center AI for a software engineering squad called "Squad."
 You have complete visibility into the squad's state and can answer questions AND take actions.
 
 ## Squad State
 
-### Agents
+### Agents & Statuses
 ${ctx.agents}
+
+### Agent Charters (expertise & roles)
+${agentCharters}
+
+### Routing Rules (who handles what)
+${routing}
 
 ### Projects
 ${ctx.projects}
 
+### Engine Configuration
+Tick: ${engineConfig.tickInterval || 60000}ms | Max concurrent: ${engineConfig.maxConcurrent || 3} | Consolidation threshold: ${engineConfig.inboxConsolidateThreshold || 5} notes | Agent timeout: ${Math.round((engineConfig.agentTimeout || 18000000) / 60000)}min | Max turns: ${engineConfig.maxTurns || 100}
+
 ### Work Items (active/pending/failed)
 ${ctx.workItems}
+
+### Pull Requests
+${allPrs}
 
 ### Plans & PRDs (metadata)
 ${ctx.plans}
@@ -1840,15 +1885,14 @@ ${ctx.prdItems}
 ### Currently Active
 ${ctx.activeDispatch}
 
-### Recent Dispatch History (last 15 completed)
-${(() => {
-  try {
-    const d = JSON.parse(safeRead(path.join(SQUAD_DIR, 'engine', 'dispatch.json')) || '{}');
-    return (d.completed || []).slice(-15).reverse().map(c =>
-      `- ${c.agent} ${c.result}: ${(c.task || '').slice(0, 80)}${c.resultSummary ? ' — ' + c.resultSummary.slice(0, 120) : ''}${c.reason ? ' [' + c.reason.slice(0, 60) + ']' : ''} (${(c.completed_at || '').slice(0, 16)})`
-    ).join('\n') || '(none)';
-  } catch { return '(unavailable)'; }
-})()}
+### Recent Dispatch History
+${dispatchHistory}
+
+### Skills (reusable agent workflows)
+${skillsList}
+
+### Knowledge Base (recent entries)
+${kbEntries}
 
 ### Team Notes (recent)
 ${notesTail.slice(-1500)}
@@ -1863,24 +1907,28 @@ Format: a JSON code block tagged with \`action\`:
 \`\`\`
 
 Available action types:
-- **dispatch**: Create a work item. Fields: title, workType (ask/explore/fix/review/test/implement), priority (low/medium/high), agents (array, optional), project, description
-- **note**: Save a note. Fields: title, content
-- **plan**: Create a plan. Fields: title, description, project, branchStrategy (parallel/shared-branch)
-- **cancel**: Cancel an agent. Fields: agent (id), reason
-- **retry**: Retry work items. Fields: ids (array of work item IDs)
-- **pause-plan**: Pause a PRD. Fields: file (plan filename)
-- **approve-plan**: Approve a PRD. Fields: file (plan filename)
+- **dispatch**: Create a work item. Fields: title, workType (ask/explore/fix/review/test/implement), priority (low/medium/high), agents (array of IDs, optional), project, description
+- **note**: Save a note/decision. Fields: title, content
+- **plan**: Create a multi-step plan. Fields: title, description, project, branchStrategy (parallel/shared-branch)
+- **cancel**: Cancel a running agent. Fields: agent (agent ID), reason
+- **retry**: Retry failed work items. Fields: ids (array of work item IDs)
+- **pause-plan**: Pause a PRD (stop materializing items). Fields: file (PRD .json filename)
+- **approve-plan**: Approve a PRD (start materializing items). Fields: file (PRD .json filename)
+- **edit-prd-item**: Edit a PRD item. Fields: source (PRD filename), itemId, name, description, priority, complexity
+- **remove-prd-item**: Remove a PRD item. Fields: source (PRD filename), itemId
+- **delete-work-item**: Delete a work item. Fields: id, source (project name or "central")
 
-You can include MULTIPLE action blocks in one response if the user asks for several things.
+You can include MULTIPLE action blocks in one response.
 
 ## Rules
 
-1. Answer questions conversationally using the squad state above. Be specific — cite IDs, agent names, statuses.
-2. When the user wants action, include the action block AND explain what you're doing.
-3. You can reference "the plan", "ripley's plan", "the failing PR" — resolve these to specific items from the context.
-4. If something is ambiguous, ask for clarification rather than guessing.
-5. Keep responses concise but informative. Use markdown formatting.
-6. Never modify engine source code or config files — only dispatch work and manage plans/items.`;
+1. Answer questions conversationally using the squad state above. Be specific — cite IDs, agent names, statuses, filenames.
+2. When the user wants action, include the action block AND explain what you're doing in plain text.
+3. Resolve references like "ripley's plan", "the failing PR", "the old plan" to specific items from the context above.
+4. When recommending which agent to assign, consult the charters and routing rules.
+5. If something is ambiguous, ask for clarification rather than guessing.
+6. Keep responses concise but informative. Use markdown.
+7. Never modify engine source code or config files directly.`;
 
       // Build conversation prompt with history
       let prompt = '';

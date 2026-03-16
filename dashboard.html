@@ -4123,6 +4123,33 @@ async function ccExecuteAction(action) {
         status.style.color = 'var(--green)';
         break;
       }
+      case 'edit-prd-item': {
+        await fetch('/api/prd-items/update', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: action.source, itemId: action.itemId, name: action.name, description: action.description, priority: action.priority, estimated_complexity: action.complexity })
+        });
+        status.innerHTML = '&#10003; Updated PRD item: <strong>' + escHtml(action.itemId) + '</strong>';
+        status.style.color = 'var(--green)';
+        break;
+      }
+      case 'remove-prd-item': {
+        await fetch('/api/prd-items/remove', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: action.source, itemId: action.itemId })
+        });
+        status.innerHTML = '&#10003; Removed PRD item: <strong>' + escHtml(action.itemId) + '</strong>';
+        status.style.color = 'var(--orange)';
+        break;
+      }
+      case 'delete-work-item': {
+        await fetch('/api/work-items/delete', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: action.id, source: action.source || '' })
+        });
+        status.innerHTML = '&#10003; Deleted work item: <strong>' + escHtml(action.id) + '</strong>';
+        status.style.color = 'var(--orange)';
+        break;
+      }
       default:
         status.innerHTML = '? Unknown action: ' + escHtml(action.type);
         status.style.color = 'var(--muted)';
