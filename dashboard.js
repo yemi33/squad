@@ -1772,6 +1772,47 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       const notes = safeRead(path.join(SQUAD_DIR, 'notes.md')) || '';
       const notesTail = notes.length > 3000 ? notes.slice(-3000) : notes;
 
+      // Build plan contents (source .md plans + PRD JSON summaries)
+      let planContents = '';
+      const prdDir = path.join(SQUAD_DIR, 'plans');
+      try {
+        const planFiles = fs.readdirSync(prdDir).filter(f => f.endsWith('.md') || f.endsWith('.json'));
+        for (const f of planFiles) {
+          try {
+            const raw = fs.readFileSync(path.join(prdDir, f), 'utf8');
+            if (f.endsWith('.md')) {
+              // Source plans — include full content (typically 1-5KB)
+              const truncated = raw.length > 4000 ? raw.slice(0, 4000) + '\n...(truncated)' : raw;
+              planContents += `\n#### ${f}\n${truncated}\n`;
+            } else {
+              // PRD JSON — include summary + item list, not full descriptions
+              const plan = JSON.parse(raw);
+              planContents += `\n#### ${f} (PRD)\n`;
+              planContents += `Status: ${plan.status || 'unknown'} | By: ${plan.generated_by || 'unknown'} | Project: ${plan.project || ''}\n`;
+              planContents += `Summary: ${plan.plan_summary || ''}\n`;
+              if (plan.missing_features) {
+                planContents += `Items (${plan.missing_features.length}):\n`;
+                for (const item of plan.missing_features) {
+                  planContents += `- ${item.id}: ${(item.name || '').slice(0, 60)} [${item.status}] ${item.priority || ''}\n`;
+                }
+              }
+            }
+          } catch {}
+        }
+        // Also check archive
+        const archiveDir = path.join(prdDir, 'archive');
+        try {
+          const archived = fs.readdirSync(archiveDir).filter(f => f.endsWith('.md') || f.endsWith('.json')).slice(-3);
+          for (const f of archived) {
+            try {
+              const raw = fs.readFileSync(path.join(archiveDir, f), 'utf8');
+              const truncated = raw.length > 2000 ? raw.slice(0, 2000) + '\n...(truncated)' : raw;
+              planContents += `\n#### [archived] ${f}\n${truncated}\n`;
+            } catch {}
+          }
+        } catch {}
+      } catch {}
+
       // Build comprehensive system prompt with full squad state
       const sysPrompt = `You are the Command Center AI for a software engineering squad called "Squad."
 You have complete visibility into the squad's state and can answer questions AND take actions.
@@ -1787,14 +1828,27 @@ ${ctx.projects}
 ### Work Items (active/pending/failed)
 ${ctx.workItems}
 
-### Plans & PRDs
+### Plans & PRDs (metadata)
 ${ctx.plans}
+
+### Plan Contents
+${planContents || '(no plans on disk)'}
 
 ### PRD Items
 ${ctx.prdItems}
 
 ### Currently Active
 ${ctx.activeDispatch}
+
+### Recent Dispatch History (last 15 completed)
+${(() => {
+  try {
+    const d = JSON.parse(safeRead(path.join(SQUAD_DIR, 'engine', 'dispatch.json')) || '{}');
+    return (d.completed || []).slice(-15).reverse().map(c =>
+      `- ${c.agent} ${c.result}: ${(c.task || '').slice(0, 80)}${c.resultSummary ? ' — ' + c.resultSummary.slice(0, 120) : ''}${c.reason ? ' [' + c.reason.slice(0, 60) + ']' : ''} (${(c.completed_at || '').slice(0, 16)})`
+    ).join('\n') || '(none)';
+  } catch { return '(unavailable)'; }
+})()}
 
 ### Team Notes (recent)
 ${notesTail.slice(-1500)}
