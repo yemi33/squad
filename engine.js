@@ -289,7 +289,11 @@ function getAgentErrorRate(agentId) {
 
 function isAgentIdle(agentId) {
   const status = getAgentStatus(agentId);
-  return ['idle', 'done', 'completed'].includes(status.status);
+  if (!['idle', 'done', 'completed'].includes(status.status)) return false;
+  // Also check dispatch queue — agent may have been assigned but status.json not yet updated
+  const dispatch = safeJson(DISPATCH_PATH) || {};
+  const hasActive = (dispatch.active || []).some(d => d.agent === agentId);
+  return !hasActive;
 }
 
 // Track agents claimed during a single discovery pass to distribute work
@@ -1673,7 +1677,7 @@ function selectPlaybook(workType, item) {
   if (workType === 'review' && !item?._pr && !item?.pr_id) {
     return 'work-item';
   }
-  const typeSpecificPlaybooks = ['explore', 'review', 'test', 'plan-to-prd', 'plan', 'ask'];
+  const typeSpecificPlaybooks = ['explore', 'review', 'test', 'plan-to-prd', 'plan', 'ask', 'verify'];
   return typeSpecificPlaybooks.includes(workType) ? workType : 'work-item';
 }
 
