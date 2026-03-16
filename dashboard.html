@@ -435,6 +435,14 @@
   }
   .cmd-history-resubmit:hover { background: rgba(88,166,255,0.1); border-color: var(--blue); }
   .cmd-history-empty { color: var(--muted); font-size: var(--text-md); padding: var(--space-8) 0; text-align: center; }
+  .cmd-progress { display: none; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 12px; background: var(--surface2); border: 1px solid var(--border); border-left: 3px solid var(--blue); border-radius: var(--radius-sm); font-size: 12px; color: var(--muted); }
+  .cmd-progress.active { display: flex; }
+  .cmd-progress .dot-pulse { display: inline-flex; gap: 3px; }
+  .cmd-progress .dot-pulse span { width: 5px; height: 5px; background: var(--blue); border-radius: 50%; animation: dotPulse 1.2s infinite; }
+  .cmd-progress .dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
+  .cmd-progress .dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
+  .cmd-progress-text { color: var(--text); }
+  .cmd-progress-sub { font-size: 10px; color: var(--muted); margin-left: auto; }
   .cmd-toast {
     display: none; padding: var(--space-4) var(--space-7); border-radius: var(--radius-sm); font-size: var(--text-md);
     margin-top: var(--space-5); animation: fadeIn 0.3s;
@@ -602,6 +610,11 @@
       <span><code>/note</code> team note</span>
       <span>or just type a task</span>
       <button class="cmd-history-btn" onclick="cmdShowHistory()">Past Commands</button>
+    </div>
+    <div class="cmd-progress" id="cmd-progress">
+      <div class="dot-pulse"><span></span><span></span><span></span></div>
+      <span class="cmd-progress-text" id="cmd-progress-text">Thinking...</span>
+      <span class="cmd-progress-sub" id="cmd-progress-sub"></span>
     </div>
     <div class="cmd-toast" id="cmd-toast"></div>
     <div id="cmd-answer" style="display:none;margin-top:8px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:var(--radius-sm);font-size:12px;color:var(--text);line-height:1.5;white-space:pre-wrap;cursor:pointer;position:relative" onclick="this.style.display='none'">
@@ -2594,6 +2607,19 @@ async function cmdTriageAndSubmit(raw) {
 }
 
 // Unified submit
+function cmdProgress(text, sub) {
+  const el = document.getElementById('cmd-progress');
+  const textEl = document.getElementById('cmd-progress-text');
+  const subEl = document.getElementById('cmd-progress-sub');
+  if (text) {
+    textEl.textContent = text;
+    subEl.textContent = sub || '';
+    el.classList.add('active');
+  } else {
+    el.classList.remove('active');
+  }
+}
+
 async function cmdSubmit() {
   cmdDismissAnswer();
   const input = document.getElementById('cmd-input');
@@ -2602,11 +2628,31 @@ async function cmdSubmit() {
 
   const btn = document.getElementById('cmd-send-btn');
   btn.disabled = true;
-  btn.textContent = 'Thinking...';
-  const triageTimer = setTimeout(() => { btn.textContent = 'Still thinking...'; }, 8000);
-  const parsed = await cmdTriageAndSubmit(raw);
-  clearTimeout(triageTimer);
-  btn.textContent = 'Sending...';
+  const startTime = Date.now();
+  cmdProgress('Understanding your request...', '');
+  const elapsed = () => { const s = Math.floor((Date.now() - startTime) / 1000); return s > 0 ? s + 's' : ''; };
+  const elapsedTimer = setInterval(() => {
+    const sub = document.getElementById('cmd-progress-sub');
+    if (sub) sub.textContent = elapsed();
+  }, 1000);
+  const slowTimer = setTimeout(() => cmdProgress('Still thinking...', elapsed()), 8000);
+
+  let parsed;
+  try {
+    parsed = await cmdTriageAndSubmit(raw);
+  } catch (e) {
+    clearTimeout(slowTimer);
+    clearInterval(elapsedTimer);
+    cmdProgress(null);
+    btn.disabled = false;
+    btn.innerHTML = 'Send <kbd>Ctrl+Enter</kbd>';
+    showToast('cmd-toast', 'Error: ' + e.message, false);
+    return;
+  }
+  clearTimeout(slowTimer);
+
+  const intentLabels = { 'work-item': 'Creating work item...', note: 'Saving note...', plan: 'Creating plan...', prd: 'Creating PRD item...', retry: 'Retrying work items...', answer: 'Got it!' };
+  cmdProgress(intentLabels[parsed.intent] || 'Processing...', elapsed());
 
   try {
     if (parsed.intent === 'answer') {
@@ -2620,17 +2666,17 @@ async function cmdSubmit() {
     } else {
       await cmdSubmitWorkItem(parsed);
     }
-    // Save to history on success
     cmdSaveHistory(raw, parsed.intent);
     _cmdHistoryIdx = -1;
     _cmdHistoryDraft = '';
-    // Clear on success
     input.value = '';
     cmdAutoResize();
     cmdRenderMeta();
   } catch (e) {
     showToast('cmd-toast', 'Error: ' + e.message, false);
   } finally {
+    clearInterval(elapsedTimer);
+    cmdProgress(null);
     btn.disabled = false;
     btn.innerHTML = 'Send <kbd>Ctrl+Enter</kbd>';
   }
