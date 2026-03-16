@@ -57,6 +57,29 @@ function safeUnlink(p) {
   try { fs.unlinkSync(p); } catch {}
 }
 
+/**
+ * Generate a unique ID suffix: timestamp + 4 random chars.
+ * Use for filenames that could collide (dispatch IDs, temp files, etc.)
+ */
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+/**
+ * Return a unique filepath by appending -2, -3, etc. if the file already exists.
+ * E.g. uniquePath('/plans/foo.json') → '/plans/foo-2.json' if foo.json exists.
+ */
+function uniquePath(filePath) {
+  if (!fs.existsSync(filePath)) return filePath;
+  const ext = path.extname(filePath);
+  const base = filePath.slice(0, -ext.length);
+  for (let i = 2; i < 100; i++) {
+    const candidate = `${base}-${i}${ext}`;
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+  return `${base}-${Date.now()}${ext}`;
+}
+
 // ── Process Spawning ────────────────────────────────────────────────────────
 // All child process calls go through these to ensure windowsHide: true
 
@@ -253,6 +276,8 @@ module.exports = {
   safeJson,
   safeWrite,
   safeUnlink,
+  uid,
+  uniquePath,
   exec,
   execSilent,
   run,

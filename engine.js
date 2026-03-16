@@ -803,7 +803,7 @@ function spawnAgent(dispatchItem, config) {
 
 function addToDispatch(item) {
   const dispatch = getDispatch();
-  item.id = item.id || `${item.agent}-${item.type}-${Date.now()}`;
+  item.id = item.id || `${item.agent}-${item.type}-${shared.uid()}`;
   item.created_at = ts();
   dispatch.pending.push(item);
   safeWrite(DISPATCH_PATH, dispatch);

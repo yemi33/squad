@@ -513,7 +513,7 @@ const server = http.createServer(async (req, res) => {
       const slug = (body.title || 'note').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
       const filename = `${author}-${slug}-${today}.md`;
       const content = `# ${body.title}\n\n**By:** ${author}\n**Date:** ${today}\n\n${body.what}\n${body.why ? '\n**Why:** ' + body.why + '\n' : ''}`;
-      safeWrite(path.join(inboxDir, filename), content);
+      safeWrite(shared.uniquePath(path.join(inboxDir, filename)), content);
       return jsonReply(res, 200, { ok: true });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }
@@ -558,7 +558,7 @@ const server = http.createServer(async (req, res) => {
       if (!fs.existsSync(plansDir)) fs.mkdirSync(plansDir, { recursive: true });
 
       const id = body.id || ('M' + String(Date.now()).slice(-4));
-      const planFile = 'manual-' + Date.now() + '.json';
+      const planFile = 'manual-' + shared.uid() + '.json';
       const plan = {
         version: 'manual-' + new Date().toISOString().slice(0, 10),
         project: body.project || (PROJECTS[0]?.name || 'Unknown'),
@@ -1329,8 +1329,9 @@ What would you like to discuss or change? When you're happy, say "approve" and I
 
       // Write session files
       const sessionDir = path.join(SQUAD_DIR, 'engine');
-      const sysFile = path.join(sessionDir, `plan-discuss-sys-${Date.now()}.md`);
-      const promptFile = path.join(sessionDir, `plan-discuss-prompt-${Date.now()}.md`);
+      const id = shared.uid();
+      const sysFile = path.join(sessionDir, `plan-discuss-sys-${id}.md`);
+      const promptFile = path.join(sessionDir, `plan-discuss-prompt-${id}.md`);
       safeWrite(sysFile, sysPrompt);
       safeWrite(promptFile, initialPrompt);
 

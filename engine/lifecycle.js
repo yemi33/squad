@@ -101,7 +101,7 @@ function checkPlanCompletion(meta, config) {
 
   // Write summary to notes/inbox
   const summaryFile = `prd-completion-${planFile.replace('.json', '')}-${e.ts().slice(0, 10)}.md`;
-  shared.safeWrite(path.join(SQUAD_DIR, 'notes', 'inbox', summaryFile), summary);
+  shared.safeWrite(shared.uniquePath(path.join(SQUAD_DIR, 'notes', 'inbox', summaryFile)), summary);
   e.log('info', `PRD completion summary written to notes/inbox/${summaryFile}`);
 
   // 3. For shared-branch plans, create PR work item
@@ -726,7 +726,7 @@ function createReviewFeedbackForAuthor(reviewerAgentId, pr, config) {
   if (reviewFiles.length === 0) return;
   const reviewContent = reviewFiles.map(f => safeRead(path.join(INBOX_DIR, f))).join('\n\n');
   const feedbackFile = `feedback-${authorAgentId}-from-${reviewerAgentId}-${pr.id}-${today}.md`;
-  const feedbackPath = path.join(INBOX_DIR, feedbackFile);
+  const feedbackPath = shared.uniquePath(path.join(INBOX_DIR, feedbackFile));
   const content = `# Review Feedback for ${config.agents[authorAgentId]?.name || authorAgentId}\n\n` +
     `**PR:** ${pr.id} — ${pr.title || ''}\n` +
     `**Reviewer:** ${config.agents[reviewerAgentId]?.name || reviewerAgentId}\n` +

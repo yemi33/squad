@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const shared = require('./shared');
-const { safeRead, safeWrite, safeUnlink, runFile, cleanChildEnv, parseStreamJsonOutput } = shared;
+const { safeRead, safeWrite, safeUnlink, uid, runFile, cleanChildEnv, parseStreamJsonOutput } = shared;
 
 const SQUAD_DIR = path.resolve(__dirname, '..');
 const ENGINE_DIR = __dirname;
@@ -48,7 +48,7 @@ function trackEngineUsage(category, usage) {
 
 function callHaiku(promptText, sysPromptText, { timeout = 60000, label = 'llm' } = {}) {
   return new Promise((resolve) => {
-    const id = Date.now();
+    const id = uid();
     const promptPath = path.join(ENGINE_DIR, `${label}-prompt-${id}.md`);
     const sysPath = path.join(ENGINE_DIR, `${label}-sys-${id}.md`);
     safeWrite(promptPath, promptText);

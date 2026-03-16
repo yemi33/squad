@@ -347,7 +347,7 @@ function classifyToKnowledgeBase(items) {
       ? titleMatch[1].toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50)
       : item.name.replace(/\.md$/, '');
     const kbFilename = `${e.dateStamp()}-${agent}-${titleSlug}.md`;
-    const kbPath = path.join(categoryDirs[category], kbFilename);
+    const kbPath = shared.uniquePath(path.join(categoryDirs[category], kbFilename));
 
     const frontmatter = `---\nsource: ${item.name}\nagent: ${agent}\ncategory: ${category}\ndate: ${e.dateStamp()}\n---\n\n`;
     try {
@@ -367,7 +367,7 @@ function archiveInboxFiles(files) {
   const e = engine();
   if (!fs.existsSync(ARCHIVE_DIR)) fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
   for (const f of files) {
-    try { fs.renameSync(path.join(INBOX_DIR, f), path.join(ARCHIVE_DIR, `${e.dateStamp()}-${f}`)); } catch {}
+    try { fs.renameSync(path.join(INBOX_DIR, f), shared.uniquePath(path.join(ARCHIVE_DIR, `${e.dateStamp()}-${f}`))); } catch {}
   }
 }
 
