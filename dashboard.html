@@ -2544,21 +2544,29 @@ function cmdKeyDown(e) {
 }
 
 // Triage via Haiku LLM, fallback to regex parser
+let _lastTriageExchange = null; // { userMessage, response } for follow-up context
+
 async function cmdTriageAndSubmit(raw) {
   try {
+    const body = { message: raw };
+    if (_lastTriageExchange) body.previousExchange = _lastTriageExchange;
     const resp = await fetch('/api/triage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: raw }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(50000),
     });
     if (resp.ok) {
       const parsed = await resp.json();
-      if (parsed.intent && parsed.title) return parsed;
+      if (parsed.intent && (parsed.title || parsed.answer)) {
+        _lastTriageExchange = { userMessage: raw, response: parsed };
+        return parsed;
+      }
     }
   } catch (e) {
     console.warn('Triage failed, using regex fallback:', e.message);
   }
+  _lastTriageExchange = null;
   return cmdParseInput(raw);
 }
 

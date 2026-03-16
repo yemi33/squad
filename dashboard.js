@@ -1072,7 +1072,13 @@ const server = http.createServer(async (req, res) => {
     if (!body.message) return jsonReply(res, 400, { error: 'message required' });
     const ctx = getTriageContext();
     const sysPrompt = buildTriageSysPrompt(ctx);
-    llm.triageCommand(body.message, sysPrompt)
+    // Include previous exchange for follow-up context
+    let message = body.message;
+    if (body.previousExchange) {
+      const prev = body.previousExchange;
+      message = `Previous user message: ${prev.userMessage}\nPrevious response: ${JSON.stringify(prev.response)}\n\nCurrent user message: ${body.message}`;
+    }
+    llm.triageCommand(message, sysPrompt)
       .then(result => jsonReply(res, 200, result))
       .catch(e => jsonReply(res, 500, { error: e.message }));
     return;
