@@ -699,26 +699,26 @@ function spawnAgent(dispatchItem, config) {
         if (isSharedBranch) {
           // Shared branch: fetch and checkout existing branch (no -b)
           log('info', `Creating worktree for shared branch: ${worktreePath} on ${branchName}`);
-          try { execSync(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe' }); } catch {}
-          execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe' });
+          try { execSync(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe', windowsHide: true }); } catch {}
+          execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe', windowsHide: true });
         } else {
           // Parallel: create new branch (reuse if exists from a previous attempt)
           log('info', `Creating worktree: ${worktreePath} on branch ${branchName}`);
           try {
             execSync(`git worktree add "${worktreePath}" -b "${branchName}" ${sanitizeBranch(project.mainBranch || 'main')}`, {
-              cwd: rootDir, stdio: 'pipe'
+              cwd: rootDir, stdio: 'pipe', windowsHide: true
             });
           } catch {
             // Branch already exists — use it without -b
-            try { execSync(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe' }); } catch {}
-            execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe' });
+            try { execSync(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe', windowsHide: true }); } catch {}
+            execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe', windowsHide: true });
             log('info', `Reusing existing branch: ${branchName}`);
           }
         }
       } else if (meta?.branchStrategy === 'shared-branch') {
         // Worktree exists — pull latest from prior plan item
         log('info', `Pulling latest on shared branch ${branchName}`);
-        try { execSync(`git pull origin "${branchName}"`, { cwd: worktreePath, stdio: 'pipe' }); } catch {}
+        try { execSync(`git pull origin "${branchName}"`, { cwd: worktreePath, stdio: 'pipe', windowsHide: true }); } catch {}
       }
       // Merge dependency PR branches into worktree if this item has depends_on
       const depIds = meta?.item?.depends_on || [];
@@ -727,8 +727,8 @@ function spawnAgent(dispatchItem, config) {
           const depBranches = resolveDependencyBranches(depIds, meta?.item?.sourcePlan, project, config);
           for (const { branch: depBranch, prId } of depBranches) {
             try {
-              execSync(`git fetch origin "${depBranch}"`, { cwd: rootDir, stdio: 'pipe' });
-              execSync(`git merge "origin/${depBranch}" --no-edit`, { cwd: worktreePath, stdio: 'pipe' });
+              execSync(`git fetch origin "${depBranch}"`, { cwd: rootDir, stdio: 'pipe', windowsHide: true });
+              execSync(`git merge "origin/${depBranch}" --no-edit`, { cwd: worktreePath, stdio: 'pipe', windowsHide: true });
               log('info', `Merged dependency branch ${depBranch} (${prId}) into worktree ${branchName}`);
             } catch (mergeErr) {
               log('warn', `Failed to merge dependency ${depBranch} into ${branchName}: ${mergeErr.message}`);
@@ -1421,7 +1421,7 @@ function runCleanup(config, verbose = false) {
 
         if (shouldClean) {
           try {
-            execSync(`git worktree remove "${wtPath}" --force`, { cwd: root, stdio: 'pipe' });
+            execSync(`git worktree remove "${wtPath}" --force`, { cwd: root, stdio: 'pipe', windowsHide: true });
             cleaned.worktrees++;
             if (verbose) console.log(`  Removed worktree: ${wtPath}`);
           } catch (e) {
@@ -1678,8 +1678,8 @@ function materializePlansAsWorkItems(config) {
           const mainBranch = project.mainBranch || 'main';
           const branch = sanitizeBranch(plan.feature_branch);
           // Create branch from main (idempotent — ignores if exists)
-          execSync(`git branch "${branch}" "${mainBranch}" 2>/dev/null || true`, { cwd: root, stdio: 'pipe' });
-          execSync(`git push -u origin "${branch}" 2>/dev/null || true`, { cwd: root, stdio: 'pipe' });
+          execSync(`git branch "${branch}" "${mainBranch}" 2>/dev/null || true`, { cwd: root, stdio: 'pipe', windowsHide: true });
+          execSync(`git push -u origin "${branch}" 2>/dev/null || true`, { cwd: root, stdio: 'pipe', windowsHide: true });
           log('info', `Shared branch pre-created: ${branch} for plan ${file}`);
         } catch (err) {
           log('warn', `Failed to pre-create shared branch for ${file}: ${err.message}`);
@@ -2029,7 +2029,7 @@ function materializeSpecsAsWorkItems(config, project) {
     try {
       const result = execSync(
         `git log --diff-filter=AM --name-only --pretty=format:"COMMIT:%H|%s" --since="${sinceDate}" -- "${pattern}"`,
-        { cwd: root, encoding: 'utf8', timeout: 10000 }
+        { cwd: root, encoding: 'utf8', timeout: 10000, windowsHide: true }
       ).trim();
       if (!result) continue;
 
@@ -2346,7 +2346,7 @@ function discoverCentralWorkItems(config) {
 function discoverWork(config) {
   resetClaimedAgents(); // Reset per-tick agent claims for fair distribution
   const projects = getProjects(config);
-  let allFixes = [], allReviews = [], allImplements = [], allWorkItems = [];
+  let allFixes = [], allReviews = [], allWorkItems = [];
 
   // Side-effect passes: materialize plans and design docs into work-items.json
   // These write to project work queues — picked up by discoverFromWorkItems below.
@@ -2375,14 +2375,14 @@ function discoverWork(config) {
   // Central work items (project-agnostic — agent decides where to work)
   const centralWork = discoverCentralWorkItems(config);
 
-  const allWork = [...allFixes, ...allReviews, ...allImplements, ...allWorkItems, ...centralWork];
+  const allWork = [...allFixes, ...allReviews, ...allWorkItems, ...centralWork];
 
   for (const item of allWork) {
     addToDispatch(item);
   }
 
   if (allWork.length > 0) {
-    log('info', `Discovered ${allWork.length} new work items: ${allFixes.length} fixes, ${allReviews.length} reviews, ${allImplements.length} implements, ${allWorkItems.length} work-items`);
+    log('info', `Discovered ${allWork.length} new work items: ${allFixes.length} fixes, ${allReviews.length} reviews, ${allWorkItems.length} work-items`);
   }
 
   return allWork.length;

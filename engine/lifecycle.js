@@ -557,7 +557,7 @@ async function handlePostMerge(pr, project, config, newStatus) {
     for (const p of [wtPath, btPath]) {
       if (fs.existsSync(p)) {
         try {
-          execSync(`git worktree remove "${p}" --force`, { cwd: root, stdio: 'pipe', timeout: 15000 });
+          execSync(`git worktree remove "${p}" --force`, { cwd: root, stdio: 'pipe', timeout: 15000, windowsHide: true });
           e.log('info', `Cleaned up worktree: ${p}`);
         } catch (err) { e.log('warn', `Failed to remove worktree ${p}: ${err.message}`); }
       }
@@ -816,6 +816,7 @@ function parseAgentOutput(stdout) {
 }
 
 function runPostCompletionHooks(dispatchItem, agentId, code, stdout, config) {
+  const e = engine();
   const type = dispatchItem.type;
   const meta = dispatchItem.meta;
   const isSuccess = code === 0;

@@ -111,7 +111,7 @@ const commands = {
         if (agentPid && agentPid > 0) {
           try {
             if (process.platform === 'win32') {
-              const out = execSync(`tasklist /FI "PID eq ${agentPid}" /NH`, { encoding: 'utf8', timeout: 3000 });
+              const out = execSync(`tasklist /FI "PID eq ${agentPid}" /NH`, { encoding: 'utf8', timeout: 3000, windowsHide: true });
               if (!out.includes(String(agentPid))) agentPid = null;
             } else {
               process.kill(agentPid, 0);
