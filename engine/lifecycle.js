@@ -829,6 +829,38 @@ function runPostCompletionHooks(dispatchItem, agentId, code, stdout, config) {
   let prsCreatedCount = 0;
   if (isSuccess) prsCreatedCount = syncPrsFromOutput(stdout, agentId, meta, config) || 0;
 
+  // Detect implement tasks that completed without creating a PR
+  if (isSuccess && (type === 'implement' || type === 'implement:large') && prsCreatedCount === 0 && meta?.item?.id) {
+    // Check if a PR already exists linked to this work item (from a previous attempt)
+    const projects = shared.getProjects(config);
+    let existingPrFound = false;
+    for (const p of projects) {
+      const prs = safeJson(projectPrPath(p)) || [];
+      if (prs.some(pr => (pr.prdItems || []).includes(meta.item.id))) {
+        existingPrFound = true;
+        break;
+      }
+    }
+    if (!existingPrFound) {
+      e.log('warn', `Agent completed implement task ${meta.item.id} but no PR was created`);
+      // Set noPr flag on the work item so the dashboard can surface this
+      let wiPath;
+      if (meta.source === 'central-work-item' || meta.source === 'central-work-item-fanout') {
+        wiPath = path.join(SQUAD_DIR, 'work-items.json');
+      } else if (meta.project?.localPath) {
+        wiPath = shared.projectWorkItemsPath(meta.project);
+      }
+      if (wiPath) {
+        const items = safeJson(wiPath) || [];
+        const wi = items.find(i => i.id === meta.item.id);
+        if (wi) {
+          wi.noPr = true;
+          shared.safeWrite(wiPath, items);
+        }
+      }
+    }
+  }
+
   if (type === 'review') updatePrAfterReview(agentId, meta?.pr, meta?.project);
   if (type === 'fix') updatePrAfterFix(meta?.pr, meta?.project);
   checkForLearnings(agentId, config.agents[agentId], dispatchItem.task);

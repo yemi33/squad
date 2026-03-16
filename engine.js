@@ -896,7 +896,7 @@ function detectDependencyCycles(items) {
 // ─── Inbox Consolidation (extracted to engine/consolidation.js) ──────────────
 
 const { consolidateInbox } = require('./engine/consolidation');
-const { pollPrStatus, pollPrHumanComments } = require('./engine/ado');
+const { pollPrStatus, pollPrHumanComments, reconcilePrs } = require('./engine/ado');
 
 // ─── State Snapshot ─────────────────────────────────────────────────────────
 
@@ -2302,6 +2302,7 @@ async function tickInner() {
   // 2.7. Poll PR threads for human @squad comments (every 12 ticks = ~6 minutes)
   if (tickCount % 12 === 0) {
     try { await pollPrHumanComments(config); } catch (e) { log('warn', `PR comment poll error: ${e.message}`); }
+    try { await reconcilePrs(config); } catch (e) { log('warn', `PR reconciliation error: ${e.message}`); }
   }
 
   // 3. Discover new work from sources

@@ -261,9 +261,101 @@ async function pollPrHumanComments(config) {
   }
 }
 
+// ─── PR Reconciliation Sweep ─────────────────────────────────────────────────
+
+/**
+ * Reconcile PRs: find active ADO PRs created by the squad that aren't tracked
+ * in pull-requests.json, and add them. Matches PRs to work items by branch name.
+ */
+async function reconcilePrs(config) {
+  const e = engine();
+  const token = getAdoToken();
+  if (!token) {
+    e.log('warn', 'Skipping PR reconciliation — no ADO token available');
+    return;
+  }
+
+  const projects = shared.getProjects(config);
+  const branchPatterns = [/^refs\/heads\/work\/PL-W/i, /^refs\/heads\/feat\/PL-W/i, /^refs\/heads\/user\/yemishin\//i];
+  let totalAdded = 0;
+
+  for (const project of projects) {
+    if (!project.adoOrg || !project.adoProject || !project.repositoryId) continue;
+
+    const orgBase = shared.getAdoOrgBase(project);
+    const url = `${orgBase}/${project.adoProject}/_apis/git/repositories/${project.repositoryId}/pullrequests?searchCriteria.status=active&api-version=7.1`;
+
+    let prData;
+    try {
+      prData = await adoFetch(url, token);
+    } catch (err) {
+      e.log('warn', `PR reconciliation failed for ${project.name}: ${err.message}`);
+      continue;
+    }
+
+    const adoPrs = (prData.value || []).filter(pr => {
+      const ref = pr.sourceRefName || '';
+      return branchPatterns.some(pat => pat.test(ref));
+    });
+
+    if (adoPrs.length === 0) continue;
+
+    const prPath = shared.projectPrPath(project);
+    const existingPrs = shared.safeJson(prPath) || [];
+    const existingIds = new Set(existingPrs.map(p => p.id));
+    let projectAdded = 0;
+
+    // Load work items to match branches to work item IDs
+    const wiPath = shared.projectWorkItemsPath(project);
+    const workItems = shared.safeJson(wiPath) || [];
+    const centralWiPath = require('path').join(shared.SQUAD_DIR, 'work-items.json');
+    const centralItems = shared.safeJson(centralWiPath) || [];
+    const allItems = [...workItems, ...centralItems];
+
+    for (const adoPr of adoPrs) {
+      const prId = `PR-${adoPr.pullRequestId}`;
+      if (existingIds.has(prId)) continue;
+
+      const branch = (adoPr.sourceRefName || '').replace('refs/heads/', '');
+      // Try to extract work item ID from branch name (e.g., work/PL-W005 -> PL-W005)
+      const wiMatch = branch.match(/(PL-W\d+)/i);
+      const linkedItemId = wiMatch ? wiMatch[1].toUpperCase() : null;
+      const linkedItem = linkedItemId ? allItems.find(i => i.id === linkedItemId) : null;
+
+      const prUrl = project.prUrlBase ? project.prUrlBase + adoPr.pullRequestId : '';
+
+      existingPrs.push({
+        id: prId,
+        title: (adoPr.title || `PR #${adoPr.pullRequestId}`).slice(0, 120),
+        agent: (adoPr.createdBy?.displayName || 'unknown').toLowerCase(),
+        branch,
+        reviewStatus: 'pending',
+        status: 'active',
+        created: (adoPr.creationDate || '').slice(0, 10) || e.dateStamp(),
+        url: prUrl,
+        prdItems: linkedItemId ? [linkedItemId] : [],
+      });
+      existingIds.add(prId);
+      projectAdded++;
+
+      e.log('info', `PR reconciliation: added ${prId} (branch: ${branch}${linkedItemId ? ', linked to ' + linkedItemId : ''}) to ${project.name}`);
+    }
+
+    if (projectAdded > 0) {
+      shared.safeWrite(prPath, existingPrs);
+      totalAdded += projectAdded;
+    }
+  }
+
+  if (totalAdded > 0) {
+    e.log('info', `PR reconciliation: added ${totalAdded} missing PR(s) across projects`);
+  }
+}
+
 module.exports = {
   getAdoToken,
   adoFetch,
   pollPrStatus,
   pollPrHumanComments,
+  reconcilePrs,
 };
