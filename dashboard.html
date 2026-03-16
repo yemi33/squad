@@ -4140,12 +4140,36 @@ async function ccSend() {
   ccAddMessage('user', escHtml(message));
   _ccHistory.push({ role: 'user', text: message });
 
-  // Show thinking indicator
+  // Show thinking indicator with timer
   const thinking = document.createElement('div');
   thinking.id = 'cc-thinking';
-  thinking.style.cssText = 'padding:8px 12px;border-radius:8px;font-size:11px;color:var(--muted);align-self:flex-start;font-style:italic';
-  thinking.textContent = 'Thinking...';
+  thinking.style.cssText = 'padding:8px 12px;border-radius:8px;font-size:11px;color:var(--muted);align-self:flex-start;display:flex;align-items:center;gap:8px';
+  thinking.innerHTML = '<span class="dot-pulse" style="display:inline-flex;gap:3px"><span style="width:4px;height:4px;background:var(--blue);border-radius:50%;animation:dotPulse 1.2s infinite"></span><span style="width:4px;height:4px;background:var(--blue);border-radius:50%;animation:dotPulse 1.2s infinite;animation-delay:0.2s"></span><span style="width:4px;height:4px;background:var(--blue);border-radius:50%;animation:dotPulse 1.2s infinite;animation-delay:0.4s"></span></span> <span id="cc-thinking-text">Thinking...</span> <span id="cc-thinking-time" style="font-size:10px;color:var(--border)"></span>';
   document.getElementById('cc-messages').appendChild(thinking);
+  const ccMsgs = document.getElementById('cc-messages');
+  ccMsgs.scrollTop = ccMsgs.scrollHeight;
+
+  const ccStartTime = Date.now();
+  const phases = [
+    [0, 'Thinking...'],
+    [3000, 'Reading squad context...'],
+    [8000, 'Analyzing...'],
+    [15000, 'Using tools to dig deeper...'],
+    [30000, 'Still working (multi-turn)...'],
+    [60000, 'Deep research in progress...'],
+  ];
+  const ccTimer = setInterval(() => {
+    const elapsed = Date.now() - ccStartTime;
+    const secs = Math.floor(elapsed / 1000);
+    const timeEl = document.getElementById('cc-thinking-time');
+    const textEl = document.getElementById('cc-thinking-text');
+    if (timeEl) timeEl.textContent = secs + 's';
+    if (textEl) {
+      for (let i = phases.length - 1; i >= 0; i--) {
+        if (elapsed >= phases[i][0]) { textEl.textContent = phases[i][1]; break; }
+      }
+    }
+  }, 500);
 
   try {
     const res = await fetch('/api/command-center', {
@@ -4154,7 +4178,8 @@ async function ccSend() {
     });
     const data = await res.json();
 
-    // Remove thinking indicator
+    // Remove thinking indicator and stop timer
+    clearInterval(ccTimer);
     thinking.remove();
 
     if (data.error) {
@@ -4176,6 +4201,7 @@ async function ccSend() {
       }
     }
   } catch (e) {
+    clearInterval(ccTimer);
     thinking.remove();
     ccAddMessage('assistant', '<span style="color:var(--red)">Error: ' + escHtml(e.message) + '</span>');
   }
