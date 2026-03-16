@@ -28,8 +28,18 @@ const PLANS_DIR = path.join(SQUAD_DIR, 'plans');
 
 // Resolve a plan/PRD file path: .json files live in prd/, .md files in plans/
 function resolvePlanPath(file) {
-  if (file.endsWith('.json')) return path.join(PRD_DIR, file);
-  return path.join(PLANS_DIR, file);
+  if (file.endsWith('.json')) {
+    const active = path.join(PRD_DIR, file);
+    if (fs.existsSync(active)) return active;
+    const archived = path.join(PRD_DIR, 'archive', file);
+    if (fs.existsSync(archived)) return archived;
+    return active;
+  }
+  const active = path.join(PLANS_DIR, file);
+  if (fs.existsSync(active)) return active;
+  const archived = path.join(PLANS_DIR, 'archive', file);
+  if (fs.existsSync(archived)) return archived;
+  return active;
 }
 
 const HTML_RAW = fs.readFileSync(path.join(SQUAD_DIR, 'dashboard.html'), 'utf8');
@@ -311,6 +321,53 @@ const server = http.createServer(async (req, res) => {
     res.statusCode = 204;
     res.end();
     return;
+  }
+
+  // POST /api/plans/trigger-verify — manually trigger verification for a completed plan
+  if (req.method === 'POST' && req.url === '/api/plans/trigger-verify') {
+    try {
+      const body = await readBody(req);
+      if (!body.file) return jsonReply(res, 400, { error: 'file required' });
+
+      // Find the PRD — check active and archive
+      const prdDir = path.join(SQUAD_DIR, 'prd');
+      let prdPath = path.join(prdDir, body.file);
+      let fromArchive = false;
+      if (!fs.existsSync(prdPath)) {
+        prdPath = path.join(prdDir, 'archive', body.file);
+        fromArchive = true;
+      }
+      if (!fs.existsSync(prdPath)) return jsonReply(res, 404, { error: 'PRD not found' });
+
+      // If archived, temporarily restore to active so checkPlanCompletion can find it
+      const activePath = path.join(prdDir, body.file);
+      if (fromArchive) {
+        const plan = JSON.parse(safeRead(prdPath));
+        plan.status = 'approved';
+        delete plan.completedAt;
+        safeWrite(activePath, plan);
+      }
+
+      // Trigger completion check
+      const lifecycle = require('./engine/lifecycle');
+      const config = queries.getConfig();
+      lifecycle.checkPlanCompletion({ item: { sourcePlan: body.file, id: 'manual' } }, config);
+
+      // Check if verify was created
+      const project = PROJECTS.find(p => {
+        const plan = JSON.parse(safeRead(activePath) || safeRead(prdPath) || '{}');
+        return p.name?.toLowerCase() === (plan.project || '').toLowerCase();
+      }) || PROJECTS[0];
+      if (project) {
+        const wiPath = path.join(project.localPath, '.squad', 'work-items.json');
+        const items = JSON.parse(safeRead(wiPath) || '[]');
+        const verify = items.find(w => w.sourcePlan === body.file && w.planItemId === 'VERIFY');
+        if (verify) {
+          return jsonReply(res, 200, { ok: true, verifyId: verify.id });
+        }
+      }
+      return jsonReply(res, 200, { ok: true, message: 'Completion check ran but no verify task was needed' });
+    } catch (e) { return jsonReply(res, 500, { error: e.message }); }
   }
 
   // POST /api/work-items/retry — reset a failed/dispatched item to pending

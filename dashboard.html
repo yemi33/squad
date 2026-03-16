@@ -1252,7 +1252,8 @@ function showArchivedPrdDetail(idx) {
   const toggleHtml = '<div style="display:flex;gap:4px;margin-bottom:8px">' +
     '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;' + (isGraph ? 'background:var(--blue);color:#fff;border-color:var(--blue)' : '') + '" onclick="window._archivedPrdViewMode=\'graph\';showArchivedPrdDetail(' + idx + ')">Graph</button>' +
     '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;' + (!isGraph ? 'background:var(--blue);color:#fff;border-color:var(--blue)' : '') + '" onclick="window._archivedPrdViewMode=\'list\';showArchivedPrdDetail(' + idx + ')">List</button>' +
-    '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;margin-left:auto" onclick="openArchivedPrdModal()">Back</button>' +
+    '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green);margin-left:auto" onclick="triggerVerify(\'' + escHtml(g.file) + '\')">Trigger Verify</button>' +
+    '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px" onclick="openArchivedPrdModal()">Back</button>' +
   '</div>';
 
   // Reuse the renderGroup logic — temporarily swap view mode
@@ -1264,6 +1265,23 @@ function showArchivedPrdDetail(idx) {
 
   document.getElementById('modal-title').textContent = g.summary || g.file;
   document.getElementById('modal-body').innerHTML = toggleHtml + content;
+}
+
+async function triggerVerify(file) {
+  try {
+    const res = await fetch('/api/plans/trigger-verify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file })
+    });
+    const d = await res.json();
+    if (res.ok && d.ok) {
+      closeModal();
+      refresh();
+      showToast('cmd-toast', d.verifyId ? 'Verify task ' + d.verifyId + ' created' : (d.message || 'Done'), true);
+    } else {
+      alert('Failed: ' + (d.error || 'unknown'));
+    }
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function prdItemEdit(source, itemId) {
