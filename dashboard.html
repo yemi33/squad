@@ -1193,7 +1193,44 @@ async function prdItemEdit(source, itemId) {
   const item = _prdItems.find(i => i.source === source && i.id === itemId);
   if (!item) return;
 
+  // Look up work item and dispatch completion info
+  const wi = (window._lastWorkItems || []).find(w => w.sourcePlanItem === itemId && w.sourcePlan === source);
+  const dispatch = window._lastStatus?.dispatch || {};
+  const completedEntry = (dispatch.completed || []).find(d =>
+    d.meta?.item?.sourcePlanItem === itemId && d.meta?.item?.sourcePlan === source
+  );
+
+  // Build completion summary section
+  let completionHtml = '';
+  const isDone = item.status === 'implemented' || item.status === 'complete' || item.status === 'pr-created';
+  const isFailed = item.status === 'failed';
+  const isActive = item.status === 'in-progress' || item.status === 'dispatched';
+
+  if (isDone || isFailed || isActive) {
+    const agent = wi?.dispatched_to || completedEntry?.agent || '';
+    const completedAt = wi?.completedAt || completedEntry?.completed_at || '';
+    const summary = completedEntry?.resultSummary || '';
+    const prLinks = (item.prs || []).map(function(pr) {
+      return '<a href="' + escHtml(pr.url || '#') + '" target="_blank" rel="noopener" style="color:var(--green);text-decoration:underline">' + escHtml(pr.id) + '</a>';
+    }).join(', ');
+
+    const statusColor = isDone ? 'var(--green)' : isFailed ? 'var(--red)' : 'var(--blue)';
+    const statusLabel = isDone ? 'Completed' : isFailed ? 'Failed' : 'In Progress';
+
+    completionHtml = '<div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ' + statusColor + ';border-radius:4px;padding:10px 12px;margin-bottom:12px">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+        '<span style="font-size:11px;font-weight:700;color:' + statusColor + '">' + statusLabel + '</span>' +
+        (agent ? '<span style="font-size:11px;color:var(--muted)">by ' + escHtml(agent) + '</span>' : '') +
+        (completedAt ? '<span style="font-size:10px;color:var(--muted)">' + escHtml(completedAt.slice(0, 16).replace('T', ' ')) + '</span>' : '') +
+      '</div>' +
+      (prLinks ? '<div style="font-size:11px;margin-bottom:6px">PR: ' + prLinks + '</div>' : '') +
+      (summary ? '<div style="font-size:12px;color:var(--text);line-height:1.5;white-space:pre-wrap;max-height:300px;overflow-y:auto">' + escHtml(summary) + '</div>' : '') +
+      (isFailed && completedEntry?.reason ? '<div style="font-size:11px;color:var(--red);margin-top:4px">' + escHtml(completedEntry.reason) + '</div>' : '') +
+    '</div>';
+  }
+
   const html = '<div style="padding:8px 0">' +
+    completionHtml +
     '<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Name</label>' +
     '<input id="prd-edit-name" value="' + escHtml(item.name || '') + '" style="width:100%;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:13px;margin-bottom:10px">' +
     '<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Description</label>' +
@@ -1219,7 +1256,7 @@ async function prdItemEdit(source, itemId) {
     '</div>' +
   '</div>';
 
-  document.getElementById('modal-title').textContent = 'Edit: ' + item.id + ' — ' + (item.name || '').slice(0, 60);
+  document.getElementById('modal-title').textContent = item.id + ' — ' + (item.name || '').slice(0, 60);
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('modal-body').style.fontFamily = '';
   document.getElementById('modal-body').style.whiteSpace = '';

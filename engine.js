@@ -729,7 +729,7 @@ function spawnAgent(dispatchItem, config) {
     });
 
     // Move from active to completed in dispatch
-    completeDispatch(id, code === 0 ? 'success' : 'error');
+    completeDispatch(id, code === 0 ? 'success' : 'error', '', resultSummary);
 
     // Cleanup temp files (including PID file now that dispatch is complete)
     try { fs.unlinkSync(sysPromptPath); } catch {}
@@ -811,7 +811,7 @@ function addToDispatch(item) {
   return item.id;
 }
 
-function completeDispatch(id, result = 'success', reason = '') {
+function completeDispatch(id, result = 'success', reason = '', resultSummary = '') {
   const dispatch = getDispatch();
 
   // Check active list first
@@ -831,6 +831,7 @@ function completeDispatch(id, result = 'success', reason = '') {
     item.completed_at = ts();
     item.result = result;
     if (reason) item.reason = reason;
+    if (resultSummary) item.resultSummary = resultSummary;
     // Strip prompt from completed items (saves ~10KB per item, reduces file lock contention)
     delete item.prompt;
     dispatch.completed = dispatch.completed || [];
