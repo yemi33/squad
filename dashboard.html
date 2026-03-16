@@ -3124,6 +3124,21 @@ async function _processQaMessage(message, selection) {
         const display = data.content.replace(/^---[\s\S]*?---\n*/m, '');
         document.getElementById('modal-body').textContent = display;
         _modalDocContext.content = display;
+
+        // If this is a plan .md file, show "Generate PRD" button
+        if (_modalFilePath && _modalFilePath.match(/^plans\/.*\.md$/)) {
+          const planFile = _modalFilePath.replace('plans/', '');
+          const existingBtn = document.getElementById('qa-generate-prd-btn');
+          if (!existingBtn) {
+            const btn = document.createElement('div');
+            btn.id = 'qa-generate-prd-btn';
+            btn.style.cssText = 'margin:8px 0;padding:8px 12px;background:rgba(63,185,80,0.1);border:1px solid rgba(63,185,80,0.3);border-radius:6px;display:flex;align-items:center;gap:8px;cursor:pointer';
+            btn.innerHTML = '<span style="color:var(--green);font-weight:600;font-size:12px">Plan updated</span>' +
+              '<button onclick="qaGeneratePrd(\'' + planFile.replace(/'/g, "\\'") + '\')" style="background:var(--green);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer">Generate PRD from this</button>' +
+              '<span style="color:var(--muted);font-size:10px">Dispatches an agent to create/update PRD items</span>';
+            thread.appendChild(btn);
+          }
+        }
       }
     } else {
       thread.innerHTML += '<div class="modal-qa-a" style="color:var(--red)">Error: ' + escHtml(data.error || 'Failed') + '</div>';
@@ -3325,8 +3340,7 @@ function renderPlans(plans) {
     const isApproved = status === 'approved' || status === 'active';
     const executeBtn = isDraft && !isWorking ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green);font-weight:600" ' +
       'onclick="event.stopPropagation();planExecute(\'' + escHtml(p.file) + '\',\'' + escHtml(p.project) + '\',this)">Execute</button>' : '';
-    const reviseBtn = isDraft ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:#a855f7" ' +
-      'onclick="event.stopPropagation();planReviseSource(\'' + escHtml(p.file) + '\',\'' + escHtml(p.project) + '\')">Revise</button>' : '';
+    const reviseBtn = '';
     const pauseBtn = (isApproved || isWorking) && !isDraft ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--yellow)" ' +
       'onclick="event.stopPropagation();planPause(\'' + escHtml(p.file) + '\')">Pause</button>' : '';
     const resumeBtn = isPaused ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green)" ' +
@@ -3408,6 +3422,38 @@ async function planReviseSource(planFile, project) {
       alert('Failed: ' + (d.error || 'unknown'));
     }
   } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function qaGeneratePrd(planFile) {
+  // Find if there's an existing PRD for this plan's project
+  const allPlans = window._lastStatus?.plans || [];
+  const mdPlan = allPlans.find(p => p.file === planFile);
+  const project = mdPlan?.project || '';
+  const existingPrd = allPlans.find(p => p.file.endsWith('.json') && p.project === project);
+
+  // If PRD exists, regenerate (clean up pending/failed items first)
+  if (existingPrd) {
+    try {
+      await fetch('/api/plans/regenerate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: existingPrd.file })
+      });
+    } catch {}
+    // Pause the old PRD
+    try {
+      await fetch('/api/plans/pause', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: existingPrd.file })
+      });
+    } catch {}
+  }
+
+  // Dispatch plan-to-prd
+  planExecute(planFile, project, null);
+
+  // Remove the button
+  const btn = document.getElementById('qa-generate-prd-btn');
+  if (btn) btn.innerHTML = '<span style="color:var(--green);font-size:12px">PRD generation dispatched — agent will create items from the revised plan.</span>';
 }
 
 async function planExecute(file, project, btn) {
