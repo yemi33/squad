@@ -591,7 +591,7 @@ const server = http.createServer(async (req, res) => {
       const today = new Date().toISOString().slice(0, 10);
       const author = body.author || os.userInfo().username;
       const slug = (body.title || 'note').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
-      const filename = `${author}-${slug}-${today}.md`;
+      const filename = `${author}-${slug}-${today}-${shared.uid().slice(-4)}.md`;
       const content = `# ${body.title}\n\n**By:** ${author}\n**Date:** ${today}\n\n${body.what}\n${body.why ? '\n**Why:** ' + body.why + '\n' : ''}`;
       safeWrite(shared.uniquePath(path.join(inboxDir, filename)), content);
       return jsonReply(res, 200, { ok: true });
