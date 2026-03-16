@@ -1193,6 +1193,34 @@ function renderPrdProgress(prog) {
     '</div>';
   };
 
+  // E2E aggregate PRs — group by sourcePlan so each PRD group shows its own
+  const allPrs = window._lastStatus?.pullRequests || [];
+  const e2ePrs = allPrs.filter(pr => pr.e2e || pr.title?.startsWith('[E2E]'));
+  const e2eByPlan = {};
+  for (const pr of e2ePrs) {
+    // Match to a PRD group by sourcePlan or by branch name containing plan slug
+    const planKey = pr.sourcePlan || keys.find(k => pr.branch?.includes(k.replace('.json', ''))) || '_unlinked';
+    if (!e2eByPlan[planKey]) e2eByPlan[planKey] = [];
+    e2eByPlan[planKey].push(pr);
+  }
+
+  function renderE2eSection(planFile) {
+    const prs = e2eByPlan[planFile] || e2eByPlan['_unlinked'] || [];
+    if (prs.length === 0) return '';
+    return '<div style="margin:6px 0 10px;padding:6px 10px;background:rgba(56,139,253,0.08);border:1px solid rgba(56,139,253,0.25);border-radius:4px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--blue);margin-bottom:4px">E2E Aggregate PRs</div>' +
+      prs.map(pr => {
+        const statusColor = pr.status === 'active' ? 'var(--green)' : pr.status === 'merged' ? 'var(--purple)' : 'var(--muted)';
+        return '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px">' +
+          '<span style="color:' + statusColor + ';font-size:8px;font-weight:600;padding:1px 4px;border:1px solid;border-radius:3px">' + escHtml(pr.status || 'active') + '</span>' +
+          '<a href="' + escHtml(pr.url || '#') + '" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:500">' + escHtml(pr.id) + '</a>' +
+          '<span style="color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml(pr.title || '') + '</span>' +
+          '<span style="color:var(--muted);font-size:9px">' + escHtml(pr._project || '') + '</span>' +
+        '</div>';
+      }).join('') +
+    '</div>';
+  }
+
   const activeKeys = keys.filter(k => !grouped[k].archived);
   const archivedKeys = keys.filter(k => grouped[k].archived);
 
@@ -1203,31 +1231,13 @@ function renderPrdProgress(prog) {
       : '<div class="prd-items-list">' + g.items.map(renderItem).join('') + '</div>';
     return '<div style="margin-bottom:16px">' +
       renderGroupHeader(g) +
+      renderE2eSection(g.file) +
       renderGroupStats(g.items) +
       viewContent +
     '</div>';
   }
 
-  // E2E aggregate PRs — show prominently at the top
-  const allPrs = window._lastStatus?.pullRequests || [];
-  const e2ePrs = allPrs.filter(pr => pr.e2e || pr.title?.startsWith('[E2E]'));
-  let e2eHtml = '';
-  if (e2ePrs.length > 0) {
-    e2eHtml = '<div style="margin-bottom:12px;padding:8px 12px;background:rgba(56,139,253,0.08);border:1px solid rgba(56,139,253,0.25);border-radius:6px">' +
-      '<div style="font-size:11px;font-weight:600;color:var(--blue);margin-bottom:6px">E2E Aggregate PRs</div>' +
-      e2ePrs.map(pr => {
-        const statusColor = pr.status === 'active' ? 'var(--green)' : pr.status === 'merged' ? 'var(--purple)' : 'var(--muted)';
-        return '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px">' +
-          '<span style="color:' + statusColor + ';font-size:9px;font-weight:600;padding:1px 5px;border:1px solid;border-radius:3px">' + escHtml(pr.status || 'active') + '</span>' +
-          '<a href="' + escHtml(pr.url || '#') + '" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:500">' + escHtml(pr.id) + '</a>' +
-          '<span style="color:var(--text)">' + escHtml(pr.title || '') + '</span>' +
-          '<span style="color:var(--muted);font-size:10px;margin-left:auto">' + escHtml(pr._project || '') + '</span>' +
-        '</div>';
-      }).join('') +
-    '</div>';
-  }
-
-  let html = renderViewToggle() + e2eHtml + activeKeys.map(renderGroup).join('');
+  let html = renderViewToggle() + activeKeys.map(renderGroup).join('');
 
   if (archivedKeys.length > 0) {
     // Store archived data for the modal
