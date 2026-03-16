@@ -165,8 +165,8 @@
   .prd-legend-dot.in-progress { background: var(--yellow); }
   .prd-legend-dot.planned { background: var(--blue); opacity: 0.4; }
   .prd-legend-dot.missing { background: var(--border); }
-  .prd-items-list { display: flex; flex-direction: column; gap: var(--space-2); max-height: 200px; overflow-y: auto; }
-  .prd-item-row { display: flex; align-items: center; gap: var(--space-4); padding: 5px var(--space-4); border-radius: var(--radius-sm); font-size: var(--text-base); background: var(--surface2); border: 1px solid var(--border); }
+  .prd-items-list { display: flex; flex-direction: column; gap: 3px; max-height: 400px; overflow-y: auto; padding: 0 8px; }
+  .prd-item-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius-sm); font-size: var(--text-base); background: var(--surface2); border: 1px solid var(--border); }
   .prd-item-id { font-family: Consolas, monospace; color: var(--blue); min-width: 36px; }
   .prd-item-name { flex: 1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .prd-item-priority { font-size: var(--text-sm); padding: var(--space-1) var(--space-3); border-radius: var(--radius-lg); }
@@ -947,7 +947,7 @@ function renderPrdProgress(prog) {
       '<div class="seg missing" style="width:' + pct(missing) + '%"></div>' +
     '</div>';
 
-    return '<div style="margin:8px 0">' + stats + bar + '</div>';
+    return '<div style="margin:6px 0 8px 0;padding:0 8px">' + stats + bar + '</div>';
   }
 
   const statusBadge = (s) => {
@@ -1004,7 +1004,7 @@ function renderPrdProgress(prog) {
       (prLinks ? '<span>' + prLinks + '</span>' : '') +
       '<span class="prd-item-priority ' + (i.priority || '') + '">' + escHtml(i.priority || '') + '</span>' +
       '<span onclick="event.stopPropagation();prdItemRemove(\'' + src + '\',\'' + iid + '\')" style="color:var(--red);cursor:pointer;font-size:10px;padding:0 4px" title="Remove item">x</span>' +
-      (i.description ? '<div style="width:100%;font-size:11px;color:var(--muted);padding:2px 0 2px 52px;line-height:1.4">' + escHtml(i.description) + '</div>' : '') +
+      (i.description ? '<div style="width:100%;font-size:11px;color:var(--muted);padding:2px 0 2px 42px;line-height:1.4">' + escHtml(i.description) + '</div>' : '') +
     '</div>';
   };
 
