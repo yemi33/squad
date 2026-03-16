@@ -53,10 +53,15 @@ jobs:
           const changed = fs.readFileSync('/tmp/changed_files.txt', 'utf8').trim().split('\n').filter(Boolean);
           if (changed.length === 0) process.exit(0);
 
+          // Skip runtime artifacts
+          const skip = /\.(pid|log|tmp)$|cooldowns\.json|engine-stdout|consolidate-prompt|triage-/;
+          const filtered = changed.filter(f => !skip.test(f));
+          if (filtered.length === 0) process.exit(0);
+
           const cats = { Engine: [], Dashboard: [], Playbooks: [], Agents: [], Documentation: [], Other: [] };
-          for (const f of changed) {
+          for (const f of filtered) {
             const name = f.split('/').pop();
-            if (f.startsWith('engine') || f === 'engine.js') cats.Engine.push(f);
+            if (f === 'engine.js' || (f.startsWith('engine/') && f.endsWith('.js'))) cats.Engine.push(f);
             else if (f.startsWith('dashboard')) cats.Dashboard.push(f);
             else if (f.startsWith('playbooks/')) cats.Playbooks.push(name);
             else if (/^agents\/.*\/charter\.md$/.test(f)) cats.Agents.push(f);
