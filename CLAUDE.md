@@ -36,19 +36,20 @@ No dependencies — uses only Node.js built-ins.
 
 ## Engine Module Structure
 
-`engine.js` is the core orchestrator (~2,450 lines). It imports from these modules in `engine/`:
+`engine.js` is the core orchestrator (~2,100 lines). It imports from these modules in `engine/`:
 
 | Module | Purpose |
 |--------|---------|
+| `queries.js` | **Single source of truth** for all read-only state queries — used by both engine.js and dashboard.js. Agents, PRs, work items, PRD progress, skills, KB, dispatch, metrics. |
+| `shared.js` | Low-level utilities: IO (`safeRead`/`safeWrite` with EPERM retry), process spawning (`exec`/`runFile` with `windowsHide`), `cleanChildEnv`, `parseStreamJsonOutput`, `classifyInboxItem`, `KB_CATEGORIES`, `ENGINE_DEFAULTS`, path resolvers |
 | `cli.js` | All CLI commands (start, stop, status, plan, discover, spawn, queue, etc.) |
 | `lifecycle.js` | Post-completion hooks, plan→PRD chaining, PR sync, metrics, post-merge cleanup |
 | `consolidation.js` | Haiku-powered inbox consolidation, regex fallback, knowledge base classification |
 | `ado.js` | ADO token management (`azureauth`), PR status polling, human `@squad` comment polling |
 | `llm.js` | Shared Haiku call wrapper used by both engine and dashboard (triage, doc-chat, steer, ask-about) |
-| `shared.js` | IO helpers (`safeRead`/`safeWrite` with Windows EPERM retry), path resolvers, config loading |
 | `spawn-agent.js` | Spawns `claude` CLI with prompt files piped via stdin |
 
-Circular dependencies between modules are handled with lazy `require()` inside functions.
+Module dependency flow: `shared.js` ← `queries.js` ← `engine.js` / `dashboard.js`. Circular dependencies between engine.js and lifecycle/consolidation/cli/ado are handled with lazy `require()` inside functions.
 
 ## Core Loop
 
@@ -73,6 +74,13 @@ Circular dependencies between modules are handled with lazy `require()` inside f
 ## Important Conventions
 
 - All file I/O must use `safeRead`/`safeWrite` from `engine/shared.js` (Windows EPERM retry)
+- All child process spawning must use `exec`/`runFile` from `engine/shared.js` (ensures `windowsHide: true`)
+- All read-only state queries (agents, PRs, work items, dispatch, etc.) live in `engine/queries.js` — never reimplement in dashboard or engine
+- Config defaults live in `ENGINE_DEFAULTS`/`DEFAULT_AGENTS`/`DEFAULT_CLAUDE` in `engine/shared.js` — never hardcode defaults elsewhere
+- KB categories use `shared.KB_CATEGORIES` constant — never hardcode the category list
+- Claude output parsing uses `shared.parseStreamJsonOutput()` — never reimplement the JSON extraction loop
+- Environment cleanup uses `shared.cleanChildEnv()` — never inline CLAUDE_CODE env var deletion
+- Config uses `projects` array only (no legacy singular `project` key)
 - Dashboard caches HTML at startup — restart requires killing PID on port 7331 with `taskkill //PID <pid> //F`
 - ADO API calls go through `adoFetch()` in `engine/ado.js` (auto-refreshes tokens)
 - `engine.js` exports internals via `module.exports`; CLI entrypoint guarded with `require.main === module`
