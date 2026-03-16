@@ -25,24 +25,19 @@ const fs = require('fs');
 const path = require('path');
 const shared = require('./engine/shared');
 const { exec, execSilent, runFile } = shared;
+const queries = require('./engine/queries');
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
 const SQUAD_DIR = __dirname;
-const CONFIG_PATH = path.join(SQUAD_DIR, 'config.json');
 const ROUTING_PATH = path.join(SQUAD_DIR, 'routing.md');
-const NOTES_PATH = path.join(SQUAD_DIR, 'notes.md');
-const AGENTS_DIR = path.join(SQUAD_DIR, 'agents');
 const PLAYBOOKS_DIR = path.join(SQUAD_DIR, 'playbooks');
-const ENGINE_DIR = path.join(SQUAD_DIR, 'engine');
-const CONTROL_PATH = path.join(ENGINE_DIR, 'control.json');
-const DISPATCH_PATH = path.join(ENGINE_DIR, 'dispatch.json');
-const LOG_PATH = path.join(ENGINE_DIR, 'log.json');
-const INBOX_DIR = path.join(SQUAD_DIR, 'notes', 'inbox');
-const KNOWLEDGE_DIR = path.join(SQUAD_DIR, 'knowledge');
 const ARCHIVE_DIR = path.join(SQUAD_DIR, 'notes', 'archive');
-const PLANS_DIR = path.join(SQUAD_DIR, 'plans');
 const IDENTITY_DIR = path.join(SQUAD_DIR, 'identity');
+
+// Re-export from queries for internal use (avoid changing every call site)
+const { CONFIG_PATH, NOTES_PATH, AGENTS_DIR, ENGINE_DIR, CONTROL_PATH,
+  DISPATCH_PATH, LOG_PATH, INBOX_DIR, KNOWLEDGE_DIR, PLANS_DIR } = queries;
 
 // ─── Multi-Project Support ──────────────────────────────────────────────────
 // Config can have either:
@@ -111,143 +106,15 @@ function log(level, msg, meta = {}) {
   safeWrite(LOG_PATH, logData);
 }
 
-// ─── State Readers ──────────────────────────────────────────────────────────
+// ─── State Readers (delegated to engine/queries.js) ─────────────────────────
 
-function getConfig() {
-  return safeJson(CONFIG_PATH) || {};
-}
-
-function getControl() {
-  return safeJson(CONTROL_PATH) || { state: 'stopped', pid: null };
-}
-
-function getDispatch() {
-  return safeJson(DISPATCH_PATH) || { pending: [], active: [], completed: [] };
-}
+const { getConfig, getControl, getDispatch, getNotes,
+  getAgentStatus, setAgentStatus, getAgentCharter, getInboxFiles,
+  collectSkillFiles, getSkillIndex, getKnowledgeBaseIndex,
+  getPrs, SKILLS_DIR } = queries;
 
 function getRouting() {
   return safeRead(ROUTING_PATH);
-}
-
-function getNotes() {
-  return safeRead(NOTES_PATH);
-}
-
-function getAgentStatus(agentId) {
-  return safeJson(path.join(AGENTS_DIR, agentId, 'status.json')) || {
-    status: 'idle', task: null, started_at: null, completed_at: null
-  };
-}
-
-function setAgentStatus(agentId, status) {
-  // Sanitize: truncate task field and reject stream-json fragments
-  if (status.task && typeof status.task === 'string') {
-    if (status.task.includes('"session_id"') || status.task.includes('"is_error"') || status.task.includes('"uuid"')) {
-      // Corrupted — extract just the beginning before the JSON garbage
-      const cleanEnd = status.task.search(/[{"\[].*session_id|[{"\[].*is_error|[{"\[].*uuid/);
-      status.task = cleanEnd > 10 ? status.task.slice(0, cleanEnd).trim() : status.task.slice(0, 80);
-    }
-    if (status.task.length > 200) status.task = status.task.slice(0, 200);
-  }
-  safeWrite(path.join(AGENTS_DIR, agentId, 'status.json'), status);
-}
-
-function getAgentCharter(agentId) {
-  return safeRead(path.join(AGENTS_DIR, agentId, 'charter.md'));
-}
-
-function getInboxFiles() {
-  try { return fs.readdirSync(INBOX_DIR).filter(f => f.endsWith('.md')); } catch { return []; }
-}
-
-// ─── Skills ──────────────────────────────────────────────────────────────────
-
-const SKILLS_DIR = path.join(SQUAD_DIR, 'skills');
-function collectSkillFiles() {
-  const skillFiles = [];
-  // Squad-level skills (shared across all agents)
-  for (const dir of [SKILLS_DIR]) {
-    try {
-      const files = fs.readdirSync(dir).filter(f => f.endsWith('.md') && f !== 'README.md');
-      for (const f of files) skillFiles.push({ file: f, dir, scope: 'squad' });
-    } catch {}
-  }
-  // Project-level skills (<project>/.claude/skills/)
-  const config = getConfig();
-  for (const project of getProjects(config)) {
-    const projectSkillsDir = path.resolve(project.localPath, '.claude', 'skills');
-    try {
-      const files = fs.readdirSync(projectSkillsDir).filter(f => f.endsWith('.md') && f !== 'README.md');
-      for (const f of files) skillFiles.push({ file: f, dir: projectSkillsDir, scope: 'project', projectName: project.name });
-    } catch {}
-  }
-  return skillFiles;
-}
-
-// parseSkillFrontmatter imported from shared.js
-
-function getSkillIndex() {
-  try {
-    const skillFiles = collectSkillFiles();
-    if (skillFiles.length === 0) return '';
-
-    let index = '## Available Squad Skills\n\n';
-    index += 'These are reusable workflows discovered by agents. Follow them when the trigger matches your task.\n\n';
-
-    for (const { file: f, dir, scope, projectName } of skillFiles) {
-      const content = safeRead(path.join(dir, f));
-      const meta = parseSkillFrontmatter(content, f);
-
-      index += `### ${meta.name}`;
-      if (scope === 'project') index += ` (${projectName})`;
-      index += '\n';
-      if (meta.description) index += `${meta.description}\n`;
-      if (meta.trigger) index += `**When:** ${meta.trigger}\n`;
-      if (meta.project !== 'any') index += `**Project:** ${meta.project}\n`;
-      index += `**File:** \`${dir}/${f}\`\n`;
-      index += `Read the full skill file before following the steps.\n\n`;
-    }
-
-    return index;
-  } catch { return ''; }
-}
-
-function getKnowledgeBaseIndex() {
-  try {
-    const kbDir = path.join(SQUAD_DIR, 'knowledge');
-    if (!fs.existsSync(kbDir)) return '';
-    const categories = ['architecture', 'conventions', 'project-notes', 'build-reports', 'reviews'];
-    let entries = [];
-    for (const cat of categories) {
-      const catDir = path.join(kbDir, cat);
-      const files = safeReadDir(catDir).filter(f => f.endsWith('.md'));
-      for (const f of files) {
-        const content = safeRead(path.join(catDir, f)) || '';
-        const titleMatch = content.match(/^#\s+(.+)/m);
-        const title = titleMatch ? titleMatch[1].trim() : f.replace(/\.md$/, '');
-        entries.push({ cat, file: f, title });
-      }
-    }
-    if (entries.length === 0) return '';
-    let index = '## Knowledge Base Reference\n\n';
-    index += 'Deep-reference docs from past work. Read the file if you need detail.\n\n';
-    for (const e of entries) {
-      index += `- \`knowledge/${e.cat}/${e.file}\` — ${e.title}\n`;
-    }
-    return index + '\n';
-  } catch { return ''; }
-}
-
-function getPrs(project) {
-  if (project) {
-    return safeJson(shared.projectPrPath(project)) || [];
-  }
-  // Fallback: try all projects
-  const config = getConfig();
-  const projects = getProjects(config);
-  const all = [];
-  for (const p of projects) all.push(...getPrs(p));
-  return all;
 }
 
 // ─── Routing Parser ─────────────────────────────────────────────────────────
