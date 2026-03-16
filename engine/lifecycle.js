@@ -20,9 +20,11 @@ function checkPlanCompletion(meta, config) {
   const e = engine();
   const planFile = meta.item?.sourcePlan;
   if (!planFile) return;
-  const plan = e.safeJson(path.join(e.PLANS_DIR, planFile));
-  if (!plan?.missing_features || plan.branch_strategy !== 'shared-branch') return;
+  const planPath = path.join(e.PLANS_DIR, planFile);
+  const plan = e.safeJson(planPath);
+  if (!plan?.missing_features) return;
   if (plan.status === 'completed') return;
+
   const projectName = plan.project;
   const projects = shared.getProjects(config);
   const project = projectName
@@ -32,30 +34,106 @@ function checkPlanCompletion(meta, config) {
   const workItems = e.safeJson(wiPath) || [];
   const planItems = workItems.filter(w => w.sourcePlan === planFile && w.planItemId !== 'PR');
   if (planItems.length === 0) return;
-  if (!planItems.every(w => w.status === 'done')) return;
+  if (!planItems.every(w => w.status === 'done' || w.status === 'failed')) return;
 
-  const existingPrItem = workItems.find(w => w.sourcePlan === planFile && w.planItemId === 'PR');
-  if (existingPrItem) {
-    e.log('debug', `Plan ${planFile} already has PR item ${existingPrItem.id} — skipping`);
-    if (plan.status !== 'completed') { plan.status = 'completed'; plan.completedAt = e.ts(); shared.safeWrite(path.join(e.PLANS_DIR, planFile), plan); }
-    return;
+  const doneItems = planItems.filter(w => w.status === 'done');
+  const failedItems = planItems.filter(w => w.status === 'failed');
+  const allDone = failedItems.length === 0;
+
+  // 1. Mark plan as completed
+  plan.status = 'completed';
+  plan.completedAt = e.ts();
+
+  // Compute timing
+  let firstDispatched = null, lastCompleted = null;
+  for (const wi of planItems) {
+    if (wi.dispatched_at) {
+      const d = new Date(wi.dispatched_at).getTime();
+      if (!firstDispatched || d < firstDispatched) firstDispatched = d;
+    }
+    if (wi.completedAt) {
+      const c = new Date(wi.completedAt).getTime();
+      if (!lastCompleted || c > lastCompleted) lastCompleted = c;
+    }
   }
-  e.log('info', `All ${planItems.length} items in plan ${planFile} completed — creating PR work item`);
-  const id = shared.nextWorkItemId(workItems, 'PL-W');
-  const featureBranch = plan.feature_branch;
-  const mainBranch = project.mainBranch || 'main';
-  const itemSummary = planItems.map(w => '- ' + w.planItemId + ': ' + w.title.replace('Implement: ', '')).join('\n');
-  workItems.push({
-    id, title: `Create PR for plan: ${plan.plan_summary || planFile}`,
-    type: 'implement', priority: 'high',
-    description: `All plan items from \`${planFile}\` are complete on branch \`${featureBranch}\`.\nCreate a pull request and clean up the worktree.\n\n**Branch:** \`${featureBranch}\`\n**Target:** \`${mainBranch}\`\n\n## Completed Items\n${itemSummary}\n\n## Instructions\n1. Rebase onto ${mainBranch} if needed (abort if conflicts — PR as-is is fine)\n2. Push: git push origin ${featureBranch} --force-with-lease\n3. Create the PR targeting ${mainBranch}\n4. Cleanup: git worktree remove ../worktrees/${featureBranch} --force`,
-    status: 'pending', created: e.ts(), createdBy: 'engine:plan-completion',
-    sourcePlan: planFile, planItemId: 'PR',
-    branch: featureBranch, branchStrategy: 'shared-branch', project: projectName,
-  });
-  shared.safeWrite(wiPath, workItems);
-  plan.status = 'completed'; plan.completedAt = e.ts();
-  shared.safeWrite(path.join(e.PLANS_DIR, planFile), plan);
+  const runtimeMs = firstDispatched && lastCompleted ? lastCompleted - firstDispatched : 0;
+  const runtimeMin = Math.round(runtimeMs / 60000);
+
+  // 2. Generate completion summary
+  // Collect PRs from all projects
+  const prsCreated = [];
+  for (const p of projects) {
+    try {
+      const prPath = path.join(p.localPath, '.squad', 'pull-requests.json');
+      const prs = e.safeJson(prPath) || [];
+      for (const pr of prs) {
+        if ((pr.prdItems || []).some(id => doneItems.find(w => w.sourcePlanItem === id || w.id === id))) {
+          prsCreated.push(pr);
+        }
+      }
+    } catch {}
+  }
+  const uniquePrs = [...new Map(prsCreated.map(pr => [pr.id || pr.url, pr])).values()];
+
+  const summary = [
+    `# PRD Completed: ${plan.plan_summary || planFile}`,
+    ``,
+    `**Project:** ${plan.project || 'Unknown'}`,
+    `**Strategy:** ${plan.branch_strategy || 'parallel'}`,
+    `**Completed:** ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
+    `**Runtime:** ${runtimeMin >= 60 ? Math.floor(runtimeMin / 60) + 'h ' + (runtimeMin % 60) + 'm' : runtimeMin + 'm'}`,
+    ``,
+    `## Results`,
+    `- **${doneItems.length}** items completed`,
+    failedItems.length ? `- **${failedItems.length}** items failed` : '',
+    uniquePrs.length ? `- **${uniquePrs.length}** PR(s) created` : '',
+    ``,
+    `## Items`,
+    ...doneItems.map(w => `- [done] ${w.sourcePlanItem}: ${w.title.replace('Implement: ', '')}`),
+    ...failedItems.map(w => `- [failed] ${w.sourcePlanItem}: ${w.title.replace('Implement: ', '')}${w.failReason ? ' — ' + w.failReason : ''}`),
+    uniquePrs.length ? `\n## Pull Requests` : '',
+    ...uniquePrs.map(pr => `- ${pr.id}: ${pr.title || ''} ${pr.url || ''}`),
+  ].filter(Boolean).join('\n');
+
+  // Write summary to notes/inbox
+  const summaryFile = `prd-completion-${planFile.replace('.json', '')}-${e.ts().slice(0, 10)}.md`;
+  shared.safeWrite(path.join(e.SQUAD_DIR, 'notes', 'inbox', summaryFile), summary);
+  e.log('info', `PRD completion summary written to notes/inbox/${summaryFile}`);
+
+  // 3. For shared-branch plans, create PR work item
+  if (plan.branch_strategy === 'shared-branch' && plan.feature_branch) {
+    const existingPrItem = workItems.find(w => w.sourcePlan === planFile && w.planItemId === 'PR');
+    if (!existingPrItem) {
+      const id = shared.nextWorkItemId(workItems, 'PL-W');
+      const featureBranch = plan.feature_branch;
+      const mainBranch = project.mainBranch || 'main';
+      const itemSummary = doneItems.map(w => '- ' + w.planItemId + ': ' + w.title.replace('Implement: ', '')).join('\n');
+      workItems.push({
+        id, title: `Create PR for plan: ${plan.plan_summary || planFile}`,
+        type: 'implement', priority: 'high',
+        description: `All plan items from \`${planFile}\` are complete on branch \`${featureBranch}\`.\n\n**Branch:** \`${featureBranch}\`\n**Target:** \`${mainBranch}\`\n\n## Completed Items\n${itemSummary}`,
+        status: 'pending', created: e.ts(), createdBy: 'engine:plan-completion',
+        sourcePlan: planFile, planItemId: 'PR',
+        branch: featureBranch, branchStrategy: 'shared-branch', project: projectName,
+      });
+      shared.safeWrite(wiPath, workItems);
+    }
+  }
+
+  // 4. Archive: move PRD to plans/archive/
+  const archiveDir = path.join(e.PLANS_DIR, 'archive');
+  if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+  shared.safeWrite(planPath, plan); // save completed status first
+  try {
+    fs.renameSync(planPath, path.join(archiveDir, planFile));
+    e.log('info', `Archived completed PRD: plans/archive/${planFile}`);
+  } catch (err) {
+    e.log('warn', `Failed to archive PRD ${planFile}: ${err.message}`);
+    // Still save the completed status even if archive fails
+    shared.safeWrite(planPath, plan);
+  }
+
+  e.log('info', `PRD ${planFile} completed: ${doneItems.length} done, ${failedItems.length} failed, runtime ${runtimeMin}m`);
 }
 
 // ─── Plan → PRD Chaining ─────────────────────────────────────────────────────
@@ -680,7 +758,7 @@ function runPostCompletionHooks(dispatchItem, agentId, code, stdout, config) {
 
   if (isSuccess && meta?.item?.id) updateWorkItemStatus(meta, 'done', '');
   if (isSuccess && type === 'plan' && meta?.item?.chain === 'plan-to-prd') chainPlanToPrd(dispatchItem, meta, config);
-  if (isSuccess && meta?.item?.branchStrategy === 'shared-branch') checkPlanCompletion(meta, config);
+  if (isSuccess && meta?.item?.sourcePlan) checkPlanCompletion(meta, config);
 
   let prsCreatedCount = 0;
   if (isSuccess) prsCreatedCount = syncPrsFromOutput(stdout, agentId, meta, config) || 0;
