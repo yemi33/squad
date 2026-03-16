@@ -36,9 +36,16 @@ function checkPlanCompletion(meta, config) {
   if (!project) return;
   const wiPath = shared.projectWorkItemsPath(project);
   const workItems = safeJson(wiPath) || [];
-  const planItems = workItems.filter(w => w.sourcePlan === planFile && w.planItemId !== 'PR');
+  const planItems = workItems.filter(w => w.sourcePlan === planFile && w.planItemId !== 'PR' && w.planItemId !== 'VERIFY');
   if (planItems.length === 0) return;
   if (!planItems.every(w => w.status === 'done' || w.status === 'failed')) return;
+
+  // Don't mark complete if not all plan features have been materialized as work items
+  const totalPlanFeatures = (plan.missing_features || []).length;
+  if (planItems.length < totalPlanFeatures) {
+    e.log('info', `Plan ${planFile}: ${planItems.length}/${totalPlanFeatures} items materialized — not complete yet`);
+    return;
+  }
 
   const doneItems = planItems.filter(w => w.status === 'done');
   const failedItems = planItems.filter(w => w.status === 'failed');
