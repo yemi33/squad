@@ -17,8 +17,9 @@ A user has provided a plan. Analyze it against the codebase and produce a struct
 2. **Explore the codebase** at `{{project_path}}` — identify what already exists vs what's missing
 3. **Break the plan into discrete, implementable items** — each should be a single PR's worth of work
 4. **Estimate complexity** — `small` (< 1 file), `medium` (2-5 files), `large` (6+ files or cross-cutting)
-5. **Order by dependency** — items that others depend on come first (lower ID = higher priority)
-6. **Identify open questions** — flag anything ambiguous in the plan that needs user input
+5. **Order by dependency** — items that others depend on come first
+6. **Use descriptive item IDs** — e.g. `P-cot-ws`, `P-auth-shell`, `P-e2e-tests`. NEVER use sequential `P001`/`P002` — IDs must be unique across all PRDs to avoid collisions with previous plans
+7. **Identify open questions** — flag anything ambiguous in the plan that needs user input
 
 ## Output
 
@@ -42,7 +43,7 @@ This file is NOT checked into the repo. The engine reads it on every tick and di
   "feature_branch": "feat/plan-short-name",
   "missing_features": [
     {
-      "id": "P001",
+      "id": "P-short-slug",
       "name": "Short feature name",
       "description": "What needs to be built and why",
       "project": "ProjectName",
