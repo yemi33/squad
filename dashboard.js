@@ -1027,6 +1027,8 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/knowledge/sweep — deduplicate, consolidate, and reorganize knowledge base
   if (req.method === 'POST' && req.url === '/api/knowledge/sweep') {
+    if (global._kbSweepInFlight) return jsonReply(res, 409, { error: 'sweep already in progress' });
+    global._kbSweepInFlight = true;
     try {
       const entries = getKnowledgeBaseEntries();
       if (entries.length < 2) return jsonReply(res, 200, { ok: true, summary: 'nothing to sweep (< 2 entries)' });
@@ -1130,7 +1132,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
 
       const summary = `${merged} duplicates merged, ${removed} stale removed, ${reclassified} reclassified`;
       return jsonReply(res, 200, { ok: true, summary, plan });
-    } catch (e) { return jsonReply(res, 500, { error: e.message }); }
+    } catch (e) { return jsonReply(res, 500, { error: e.message }); } finally { global._kbSweepInFlight = false; }
   }
 
   // GET /api/plans — list plan files (.md drafts from plans/ + .json PRDs from prd/)
