@@ -1797,6 +1797,7 @@ function closeModal() {
   // Clear edit/steer state
   _modalEditable = null;
   _modalFilePath = null;
+  _modalOriginalPlan = null;
   // steer btn removed — unified send
   const body = document.getElementById('modal-body');
   body.contentEditable = 'false';
@@ -3080,6 +3081,10 @@ async function _processQaMessage(message, selection) {
   const btn = document.getElementById('modal-send-btn');
   _qaProcessing = true;
 
+  // Capture state now — closeModal may null these while we're awaiting
+  const capturedFilePath = _modalFilePath;
+  const capturedDocContext = { ..._modalDocContext };
+
   const loadingId = 'chat-loading-' + Date.now();
   const qaQueueBadge = _qaQueue.length > 0 ? ' <span style="font-size:9px;color:var(--muted);background:var(--surface);padding:1px 5px;border-radius:8px;border:1px solid var(--border)">+' + _qaQueue.length + ' queued</span>' : '';
   thread.innerHTML += '<div class="modal-qa-loading" id="' + loadingId + '">' +
@@ -3142,13 +3147,14 @@ async function _processQaMessage(message, selection) {
         _modalDocContext.content = display;
 
         // Plan edit: show action prompt
+        const effectiveFilePath = _modalFilePath || capturedFilePath;
         if (isVersion) {
           _modalFilePath = 'plans/' + data.versionedFile;
           _modalOriginalPlan = data.originalFile; // track original for PRD lookups on subsequent edits
           refreshPlans();
           showPlanVersionActions(thread, data.versionedFile, data.originalFile);
-        } else if (_modalFilePath && _modalFilePath.match(/^plans\/.*\.md$/)) {
-          const planFile = _modalFilePath.replace('plans/', '');
+        } else if (effectiveFilePath && effectiveFilePath.match(/^plans\/.*\.md$/)) {
+          const planFile = effectiveFilePath.replace('plans/', '');
           const origFile = _modalOriginalPlan || planFile;
           showPlanVersionActions(thread, planFile, origFile);
         }
@@ -3169,11 +3175,14 @@ async function _processQaMessage(message, selection) {
   // Save session (persists even if modal was closed during processing)
   const modalIsOpen = document.getElementById('modal').classList.contains('open');
   if (_qaSessionKey) {
+    // Use captured values if closeModal nulled the globals during processing
+    const sessionFilePath = _modalFilePath || capturedFilePath;
+    const sessionDocContext = _modalDocContext.title ? { ..._modalDocContext } : { ...capturedDocContext, ..._modalDocContext, title: capturedDocContext.title };
     _qaSessions.set(_qaSessionKey, {
       history: _qaHistory,
       threadHtml: thread.innerHTML,
-      docContext: { ..._modalDocContext },
-      filePath: _modalFilePath,
+      docContext: sessionDocContext,
+      filePath: sessionFilePath,
     });
     // If modal was closed while processing, clean up session key now
     if (!modalIsOpen) _qaSessionKey = '';
@@ -3192,93 +3201,7 @@ async function _processQaMessage(message, selection) {
   }
 }
 
-// Override closeModal to clear Q&A state
-const _origCloseModal = typeof closeModal === 'function' ? closeModal : null;
 
-async function modalSteerSubmit() {
-  const input = document.getElementById('modal-qa-input');
-  const instruction = input.value.trim();
-  if (!instruction) return;
-  if (!_modalFilePath) {
-    showToast('cmd-toast', 'This document is read-only (no file path)', false);
-    return;
-  }
-
-  const thread = document.getElementById('modal-qa-thread');
-  const btn = document.getElementById('modal-steer-btn');
-
-  // Show instruction
-  let qHtml = '<div class="modal-qa-q" style="color:var(--green)">Edit: ' + escHtml(instruction);
-  if (_modalDocContext.selection) {
-    qHtml += '<span class="selection-ref">On: "' + escHtml(_modalDocContext.selection.slice(0, 100)) + '"</span>';
-  }
-  qHtml += '</div>';
-  thread.innerHTML += qHtml;
-
-  // Show loading
-  const loadingId = 'steer-loading-' + Date.now();
-  thread.innerHTML += '<div class="modal-qa-loading" id="' + loadingId + '"><div class="dot-pulse"><span></span><span></span><span></span></div> Editing...</div>';
-  thread.scrollTop = thread.scrollHeight;
-
-  input.value = '';
-  btn.disabled = true;
-  document.getElementById('modal-qa-btn').disabled = true;
-
-  try {
-    const res = await fetch('/api/doc-chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: instruction,
-        document: _modalDocContext.content || '',
-        title: _modalFilePath ? _modalFilePath.split('/').pop() : '',
-        filePath: _modalFilePath,
-        selection: _modalDocContext.selection || '',
-      }),
-    });
-    const data = await res.json();
-    const loadingEl = document.getElementById(loadingId);
-    if (loadingEl) loadingEl.remove();
-
-    if (data.ok) {
-      const isVersion = data.isNewVersion;
-      const saveMsg = isVersion ? '\n\n✓ New version saved: ' + data.versionedFile
-        : data.edited ? '\n\n✓ Document saved.' : '';
-      thread.innerHTML += '<div class="modal-qa-a" style="border-left-color:var(--green)">' + escHtml(data.answer + saveMsg) + '</div>';
-
-      // Refresh the modal body with updated content
-      if (data.edited && data.content) {
-        const display = data.content.replace(/^---[\s\S]*?---\n*/m, '');
-        document.getElementById('modal-body').textContent = display;
-        _modalDocContext.content = display;
-
-        if (isVersion) {
-          _modalFilePath = 'plans/' + data.versionedFile;
-          _modalOriginalPlan = data.originalFile;
-          refreshPlans();
-          showPlanVersionActions(thread, data.versionedFile, data.originalFile);
-        } else if (_modalFilePath && _modalFilePath.match(/^plans\/.*\.md$/)) {
-          const planFile = _modalFilePath.replace('plans/', '');
-          const origFile = _modalOriginalPlan || planFile;
-          showPlanVersionActions(thread, planFile, origFile);
-        }
-      }
-    } else {
-      thread.innerHTML += '<div class="modal-qa-a" style="color:var(--red)">Error: ' + escHtml(data.error || 'Failed') + '</div>';
-    }
-  } catch (e) {
-    const loadingEl = document.getElementById(loadingId);
-    if (loadingEl) loadingEl.remove();
-    thread.innerHTML += '<div class="modal-qa-a" style="color:var(--red)">Error: ' + escHtml(e.message) + '</div>';
-  }
-
-  _modalDocContext.selection = '';
-  document.getElementById('modal-qa-pill').style.display = 'none';
-  btn.disabled = false;
-  document.getElementById('modal-qa-btn').disabled = false;
-  thread.scrollTop = thread.scrollHeight;
-  input.focus();
-}
 
 // ─── Plans (Approval Gate) ────────────────────────────────────────────────────
 
