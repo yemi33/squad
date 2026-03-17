@@ -501,36 +501,48 @@ function getPrdInfo(config) {
 
   // PR-to-PRD linking (scoped by source plan to avoid cross-PRD contamination)
   const allPrs = getPullRequests(config);
-  // Build work-item-id → sourcePlan lookup
-  const wiToSourcePlan = {};
+  // Build work-item-id → sourcePlan lookup (per-project to handle duplicate IDs)
+  const wiByProject = {}; // projectName → { wiId → { sourcePlan, sourcePlanItem } }
   for (const project of projects) {
     try {
       const workItems = safeJson(projectWorkItemsPath(project)) || [];
-      for (const wi of workItems) { if (wi.sourcePlan) wiToSourcePlan[wi.id] = wi.sourcePlan; }
+      const lookup = {};
+      for (const wi of workItems) {
+        if (wi.sourcePlan) lookup[wi.id] = { sourcePlan: wi.sourcePlan, sourcePlanItem: wi.sourcePlanItem };
+      }
+      wiByProject[project.name] = lookup;
     } catch {}
   }
-  const prdToPr = {}; // key: "sourcePlan:itemId" or plain "itemId" (legacy fallback)
+  const prdToPr = {}; // key: "sourcePlan:prdItemId"
   for (const pr of allPrs) {
     for (const itemId of (pr.prdItems || [])) {
       const prData = { id: pr.id, url: pr.url, title: pr.title, status: pr.status, _project: pr._project };
-      // Scope by source plan if we can resolve it
-      const sourcePlan = wiToSourcePlan[itemId];
-      if (sourcePlan) {
-        const scopedKey = sourcePlan + ':' + itemId;
+      // Resolve via the PR's project context to get the right sourcePlan
+      const prProject = pr._project || '';
+      const wiLookup = wiByProject[prProject] || {};
+      const wiInfo = wiLookup[itemId];
+      if (wiInfo?.sourcePlan && wiInfo?.sourcePlanItem) {
+        const scopedKey = wiInfo.sourcePlan + ':' + wiInfo.sourcePlanItem;
         if (!prdToPr[scopedKey]) prdToPr[scopedKey] = [];
         prdToPr[scopedKey].push(prData);
-      }
-      // Also add by prdItemId (the plan-level ID like P001)
-      const prdItemId = wiToPlanItem[itemId];
-      if (prdItemId) {
-        const scopedKey2 = sourcePlan ? sourcePlan + ':' + prdItemId : prdItemId;
-        if (!prdToPr[scopedKey2]) prdToPr[scopedKey2] = [];
-        prdToPr[scopedKey2].push(prData);
-      }
-      // Legacy fallback: plain itemId (for PRs without source plan resolution)
-      if (!sourcePlan) {
-        if (!prdToPr[itemId]) prdToPr[itemId] = [];
-        prdToPr[itemId].push(prData);
+      } else {
+        // Fallback: try all projects
+        let found = false;
+        for (const lookup of Object.values(wiByProject)) {
+          const info = lookup[itemId];
+          if (info?.sourcePlan && info?.sourcePlanItem) {
+            const scopedKey = info.sourcePlan + ':' + info.sourcePlanItem;
+            if (!prdToPr[scopedKey]) prdToPr[scopedKey] = [];
+            prdToPr[scopedKey].push(prData);
+            found = true;
+            break;
+          }
+        }
+        // Legacy: unresolvable
+        if (!found) {
+          if (!prdToPr[itemId]) prdToPr[itemId] = [];
+          prdToPr[itemId].push(prData);
+        }
       }
     }
   }

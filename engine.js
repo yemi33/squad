@@ -1660,11 +1660,11 @@ function materializePlansAsWorkItems(config) {
         // Skip items involved in dependency cycles
         if (cycleSet.has(item.id)) continue;
 
-        const id = nextWorkItemId(existingItems, 'PL-W');
+        const id = 'PL-' + shared.uid();
         const complexity = item.estimated_complexity || 'medium';
         const criteria = (item.acceptance_criteria || []).map(c => `- ${c}`).join('\n');
 
-        existingItems.push({
+        const newItem = {
           id,
           title: `Implement: ${item.name}`,
           type: complexity === 'large' ? 'implement:large' : 'implement',
@@ -1679,7 +1679,8 @@ function materializePlansAsWorkItems(config) {
           branchStrategy: plan.branch_strategy || 'parallel',
           featureBranch: plan.feature_branch || null,
           project: item.project || plan.project || null,
-        });
+        };
+        existingItems.push(newItem);
         created++;
       }
 
