@@ -3372,7 +3372,7 @@ function renderPlans(plans) {
     }
   }
 
-  const activePlans = plans.filter(p => !p.archived);
+  const activePlans = plans.filter(p => !p.archived && p.format !== 'prd');
   const archivedPlans = plans.filter(p => p.archived && p.format !== 'prd');
   countEl.textContent = activePlans.length + (archivedPlans.length ? ' + ' + archivedPlans.length + ' archived' : '');
 
