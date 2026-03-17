@@ -3900,11 +3900,37 @@ function ccAddMessage(role, html, skipSave) {
   }
 }
 
+let _ccSending = false;
+let _ccQueue = [];
+
 async function ccSend() {
   const input = document.getElementById('cc-input');
   const message = input.value.trim();
   if (!message) return;
   input.value = '';
+
+  // If already processing, queue the message and show it — it'll send when current finishes
+  if (_ccSending) {
+    _ccQueue.push(message);
+    ccAddMessage('user', escHtml(message));
+    ccAddMessage('assistant', '<span style="color:var(--muted);font-size:10px">Queued — will send after current request</span>');
+    return;
+  }
+  await _ccDoSend(message);
+
+  // Drain queue
+  while (_ccQueue.length > 0) {
+    const next = _ccQueue.shift();
+    // Remove the "Queued" placeholder
+    const msgs = document.getElementById('cc-messages');
+    const lastChild = msgs.lastElementChild;
+    if (lastChild?.textContent?.includes('Queued')) lastChild.remove();
+    await _ccDoSend(next);
+  }
+}
+
+async function _ccDoSend(message) {
+  _ccSending = true;
 
   ccAddMessage('user', escHtml(message));
 
@@ -3990,6 +4016,8 @@ async function ccSend() {
     clearInterval(ccTimer);
     thinking.remove();
     ccAddMessage('assistant', '<span style="color:var(--red)">Error: ' + escHtml(e.message) + '</span>');
+  } finally {
+    _ccSending = false;
   }
 }
 
