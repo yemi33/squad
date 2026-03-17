@@ -335,7 +335,7 @@ function chainPlanToPrd(dispatchItem, meta, config) {
   let items = [];
   try { items = JSON.parse(fs.readFileSync(wiPath, 'utf8')); } catch {}
   items.push({
-    id: shared.nextWorkItemId(items, 'W'),
+    id: 'W-' + shared.uid(),
     title: `Convert plan to PRD: ${meta?.item?.title || planFile.name}`,
     type: 'plan-to-prd',
     priority: meta?.item?.priority || 'high',

@@ -2079,8 +2079,7 @@ function materializeSpecsAsWorkItems(config, project) {
       const info = extractSpecInfo(doc.file, root);
       if (!info) continue;
 
-      const spItems = existingItems.filter(i => i.id?.startsWith('SP'));
-      const newId = nextWorkItemId(spItems, 'SP');
+      const newId = 'SP-' + shared.uid();
 
       existingItems.push({
         id: newId,

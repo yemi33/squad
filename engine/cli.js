@@ -196,7 +196,7 @@ const commands = {
             const mdExists = expectedMd ? fs.existsSync(path.join(planDir, expectedMd)) : mdFiles.length > 0;
             if (mdExists && jsonFiles.length === 0) {
               centralItems.push({
-                id: shared.nextWorkItemId(centralItems, 'W'),
+                id: 'W-' + shared.uid(),
                 title: 'Convert plan to PRD: ' + (planItem.title || planFile),
                 type: 'plan-to-prd',
                 priority: 'high',
@@ -238,7 +238,7 @@ const commands = {
                 );
                 if (!alreadyDone && wasPreviouslyQueued) {
                   centralItems.push({
-                    id: shared.nextWorkItemId(centralItems, 'W'),
+                    id: 'W-' + shared.uid(),
                     title: 'Convert plan to PRD: ' + md,
                     type: 'plan-to-prd',
                     priority: 'high',

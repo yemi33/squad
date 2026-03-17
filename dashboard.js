@@ -735,13 +735,7 @@ const server = http.createServer(async (req, res) => {
       let items = [];
       const existing = safeRead(wiPath);
       if (existing) { try { items = JSON.parse(existing); } catch {} }
-      // Generate unique ID with project prefix to avoid collisions across sources
-      const prefix = body.project ? body.project.slice(0, 3).toUpperCase() + '-' : '';
-      const maxNum = items.reduce(function(max, i) {
-        const m = (i.id || '').match(/(\d+)$/);
-        return m ? Math.max(max, parseInt(m[1])) : max;
-      }, 0);
-      const id = prefix + 'W' + String(maxNum + 1).padStart(3, '0');
+      const id = 'W-' + shared.uid();
       const item = {
         id, title: body.title, type: body.type || 'implement',
         priority: body.priority || 'medium', description: body.description || '',
@@ -783,11 +777,7 @@ const server = http.createServer(async (req, res) => {
       let items = [];
       const existing = safeRead(wiPath);
       if (existing) { try { items = JSON.parse(existing); } catch {} }
-      const maxNum = items.reduce(function(max, i) {
-        const m = (i.id || '').match(/(\d+)$/);
-        return m ? Math.max(max, parseInt(m[1])) : max;
-      }, 0);
-      const id = 'W' + String(maxNum + 1).padStart(3, '0');
+      const id = 'W-' + shared.uid();
       const item = {
         id, title: body.title, type: 'plan',
         priority: body.priority || 'high', description: body.description || '',
@@ -1399,8 +1389,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       const existing = items.find(w => w.type === 'plan-to-prd' && w.planFile === body.file && (w.status === 'pending' || w.status === 'dispatched'));
       if (existing) return jsonReply(res, 200, { ok: true, id: existing.id, alreadyQueued: true });
 
-      const maxNum = items.reduce((max, i) => { const m = (i.id || '').match(/(\d+)$/); return m ? Math.max(max, parseInt(m[1])) : max; }, 0);
-      const id = 'W' + String(maxNum + 1).padStart(3, '0');
+      const id = 'W-' + shared.uid();
       items.push({
         id, title: 'Convert plan to PRD: ' + body.file.replace('.md', ''),
         type: 'plan-to-prd', priority: 'high',
@@ -1576,11 +1565,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       let items = [];
       const existing = safeRead(wiPath);
       if (existing) { try { items = JSON.parse(existing); } catch {} }
-      const maxNum = items.reduce(function(max, i) {
-        const m = (i.id || '').match(/(\d+)$/);
-        return m ? Math.max(max, parseInt(m[1])) : max;
-      }, 0);
-      const id = 'W' + String(maxNum + 1).padStart(3, '0');
+      const id = 'W-' + shared.uid();
       items.push({
         id, title: 'Revise plan: ' + (plan.plan_summary || body.file),
         type: 'plan-to-prd', priority: 'high',
@@ -1708,11 +1693,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       const centralWiPath = path.join(SQUAD_DIR, 'work-items.json');
       let centralItems = [];
       try { centralItems = JSON.parse(safeRead(centralWiPath) || '[]'); } catch {}
-      const maxNum = centralItems.reduce(function(max, i) {
-        const m = (i.id || '').match(/(\d+)$/);
-        return m ? Math.max(max, parseInt(m[1])) : max;
-      }, 0);
-      const wiId = 'W' + String(maxNum + 1).padStart(3, '0');
+      const wiId = 'W-' + shared.uid();
       centralItems.push({
         id: wiId,
         title: 'Regenerate PRD from revised plan: ' + sourcePlanFile,
