@@ -1446,6 +1446,24 @@ function runCleanup(config, verbose = false) {
     log('info', `Cleanup: ${cleaned.tempFiles} temp, ${cleaned.liveOutputs} live outputs, ${cleaned.worktrees} worktrees, ${cleaned.zombies} zombies, ${cleaned.files || 0} archives, ${cleaned.orphanedDispatches} orphaned dispatches`);
   }
 
+  // 6. Clean swept KB files older than 7 days
+  try {
+    const sweptDir = path.join(SQUAD_DIR, 'knowledge', '_swept');
+    if (fs.existsSync(sweptDir)) {
+      const sevenDaysAgo = Date.now() - 7 * 86400000;
+      for (const f of fs.readdirSync(sweptDir)) {
+        try {
+          const fp = path.join(sweptDir, f);
+          if (fs.statSync(fp).mtimeMs < sevenDaysAgo) {
+            fs.unlinkSync(fp);
+            if (!cleaned.sweptKb) cleaned.sweptKb = 0;
+            cleaned.sweptKb++;
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+
   return cleaned;
 }
 
