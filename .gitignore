@@ -14,6 +14,14 @@ engine/test-results.json
 engine/kb-checkpoint.json
 # All transient temp files (prompts, pids, logs) go in engine/tmp/
 engine/tmp/
+# Legacy locations (pre-tmp/ migration) — keep until engine restart clears them
+engine/prompt-*.md
+engine/sysprompt-*.md
+engine/command-center-*.pid
+engine/command-center-*.md
+engine/doc-chat-*.pid
+engine/doc-chat-*.md
+engine/doc-chat-*.pid
 agents/*/status.json
 agents/*/output.log
 agents/*/output-*
