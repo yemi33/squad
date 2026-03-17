@@ -1495,6 +1495,11 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       }
       const planPath = resolvePlanPath(body.file);
       if (!fs.existsSync(planPath)) return jsonReply(res, 404, { error: 'plan not found' });
+      // Read PRD content before deleting to get source_plan for cleanup
+      let prdSourcePlan = null;
+      if (body.file.endsWith('.json')) {
+        try { prdSourcePlan = JSON.parse(safeRead(planPath) || '{}').source_plan || null; } catch {}
+      }
       safeUnlink(planPath);
 
       // Clean up materialized work items from all projects + central
@@ -1520,6 +1525,23 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
         d.meta?.planFile === body.file ||
         (d.task && d.task.includes(body.file))
       );
+
+      // If deleting a PRD .json, reset the plan-to-prd work item so the source .md reverts to draft
+      if (prdSourcePlan) {
+        try {
+          const centralPath = path.join(SQUAD_DIR, 'work-items.json');
+          const centralItems = safeJson(centralPath) || [];
+          let changed = false;
+          for (const w of centralItems) {
+            if (w.type === 'plan-to-prd' && w.status === 'done' && w.planFile === prdSourcePlan) {
+              w.status = 'cancelled';
+              w._cancelledBy = 'prd-deleted';
+              changed = true;
+            }
+          }
+          if (changed) safeWrite(centralPath, centralItems);
+        } catch {}
+      }
 
       return jsonReply(res, 200, { ok: true, cleanedWorkItems: cleaned, cleanedDispatches: dispatchCleaned });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
