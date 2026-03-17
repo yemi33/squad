@@ -3214,11 +3214,13 @@ async function modalSteerSubmit() {
   document.getElementById('modal-qa-btn').disabled = true;
 
   try {
-    const res = await fetch('/api/steer-document', {
+    const res = await fetch('/api/doc-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        instruction,
+        message: instruction,
+        document: _modalDocContext.content || '',
+        title: _modalFilePath ? _modalFilePath.split('/').pop() : '',
         filePath: _modalFilePath,
         selection: _modalDocContext.selection || '',
       }),
@@ -3228,10 +3230,10 @@ async function modalSteerSubmit() {
     if (loadingEl) loadingEl.remove();
 
     if (data.ok) {
-      thread.innerHTML += '<div class="modal-qa-a" style="border-left-color:var(--green)">' + escHtml(data.answer) + (data.updated ? '\n\n✓ Document saved.' : '') + '</div>';
+      thread.innerHTML += '<div class="modal-qa-a" style="border-left-color:var(--green)">' + escHtml(data.answer) + (data.edited ? '\n\n✓ Document saved.' : '') + '</div>';
 
       // Refresh the modal body with updated content
-      if (data.updated && data.content) {
+      if (data.edited && data.content) {
         const display = data.content.replace(/^---[\s\S]*?---\n*/m, '');
         document.getElementById('modal-body').textContent = display;
         _modalDocContext.content = display;

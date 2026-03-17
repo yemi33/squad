@@ -1588,34 +1588,6 @@ What would you like to discuss or change? When you're happy, say "approve" and I
     } catch (e) { return jsonReply(res, 500, { error: e.message }); }
   }
 
-  // POST /api/steer-document — routes through CC session for squad-aware doc editing
-  if (req.method === 'POST' && req.url === '/api/steer-document') {
-    try {
-      const body = await readBody(req);
-      if (!body.instruction) return jsonReply(res, 400, { error: 'instruction required' });
-      if (!body.filePath) return jsonReply(res, 400, { error: 'filePath required' });
-      const fullPath = path.resolve(SQUAD_DIR, body.filePath);
-      if (!fullPath.startsWith(path.resolve(SQUAD_DIR))) return jsonReply(res, 400, { error: 'path must be under squad directory' });
-      const currentContent = safeRead(fullPath);
-      if (currentContent === null) return jsonReply(res, 404, { error: 'file not found' });
-      const isJson = body.filePath.endsWith('.json');
-
-      const { answer, content } = await ccDocCall({
-        message: body.instruction, document: currentContent, title: path.basename(body.filePath),
-        filePath: body.filePath, selection: body.selection, canEdit: true, isJson,
-      });
-
-      if (!content) return jsonReply(res, 200, { ok: true, answer, updated: false });
-      if (isJson) {
-        try { JSON.parse(content); } catch (e) {
-          return jsonReply(res, 200, { ok: true, answer: answer + '\n\n(JSON validation failed — not saved: ' + e.message + ')', updated: false });
-        }
-      }
-      safeWrite(fullPath, content);
-      return jsonReply(res, 200, { ok: true, answer, updated: true, content });
-    } catch (e) { return jsonReply(res, 500, { error: e.message }); }
-  }
-
   // POST /api/inbox/persist — promote an inbox item to team notes
   if (req.method === 'POST' && req.url === '/api/inbox/persist') {
     try {
