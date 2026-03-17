@@ -256,7 +256,7 @@ async function testPlanFlow() {
     // Seed a work item referencing this plan
     const wiPath = path.join(SQUAD_DIR, 'work-items.json');
     const items = readJson(wiPath);
-    items.push({ id: 'TEST-W001', sourcePlan: testFile, sourcePlanItem: 'T001', status: 'pending', title: 'Test' });
+    items.push({ id: 'T001', sourcePlan: testFile, status: 'pending', title: 'Test' });
     writeJson(wiPath, items);
 
     const r = await POST('/api/plans/delete', { file: testFile });
@@ -279,7 +279,7 @@ async function testPrdFlow() {
     // Verify items have statuses derived from work items
     const wi = r.json.workItems || [];
     for (const item of r.json.prdProgress.items) {
-      const workItem = wi.find(w => w.sourcePlanItem === item.id);
+      const workItem = wi.find(w => w.id === item.id);
       if (workItem) {
         const expectedStatus =
           workItem.status === 'done' ? 'implemented' :
@@ -464,7 +464,7 @@ async function testDataIntegrity() {
       } catch {}
     }
     for (const prdItem of r.json.prdProgress.items) {
-      const wi = projectWi.find(w => w.sourcePlanItem === prdItem.id && w.sourcePlan === prdItem.source);
+      const wi = projectWi.find(w => w.id === prdItem.id && w.sourcePlan === prdItem.source);
       if (wi) {
         const expected = statusMap[wi.status] || prdItem.status;
         assert.strictEqual(prdItem.status, expected,

@@ -116,7 +116,7 @@ priority: high
 ...
 ```
 
-**Plans** (`materializePlansAsWorkItems`): Scans `~/.squad/plans/*.json` for plan files with `missing`/`planned` items. Creates work items in the target project's queue with `createdBy: 'engine:plan-discovery'`. Deduped via `sourcePlan` + `sourcePlanItem` fields.
+**Plans** (`materializePlansAsWorkItems`): Scans `~/.squad/prd/*.json` for PRD files with `missing`/`planned` items. Creates work items in the target project's queue with `createdBy: 'engine:plan-discovery'`. Work item ID = PRD item ID (e.g. `P-43e5ac28`). Deduped by `id`.
 
 Both write to `work-items.json` and are picked up by Source 3 on the same or next tick.
 

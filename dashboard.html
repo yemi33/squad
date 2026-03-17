@@ -1019,9 +1019,9 @@ function renderPrdProgress(prog) {
   };
 
   // Build work item lookup: PRD item ID → work item info
-  const wiByPlanItem = {};
+  const wiById = {};
   for (const w of (window._lastWorkItems || [])) {
-    if (w.sourcePlanItem) wiByPlanItem[w.sourcePlanItem] = w;
+    if (w.id) wiById[w.id] = w;
   }
 
   // Group items by source plan
@@ -1043,7 +1043,7 @@ function renderPrdProgress(prog) {
     const iid = escHtml(i.id || '');
 
     // Linked work item info
-    const wi = wiByPlanItem[i.id];
+    const wi = wiById[i.id];
     const wiLabel = wi ? '<span style="font-size:9px;color:var(--muted);background:var(--surface);padding:1px 5px;border-radius:3px;border:1px solid var(--border)" title="Work item: ' + escHtml(wi.id) + '">' +
       escHtml(wi.id) + (wi.dispatched_to ? ' → ' + escHtml(wi.dispatched_to) : '') + '</span>' : '';
 
@@ -1162,7 +1162,7 @@ function renderPrdProgress(prog) {
       return 'var(--border)';
     };
 
-    const wi = wiByPlanItem;
+    const wi = wiById;
     let html = '<div style="display:flex;gap:8px;padding:8px;min-height:120px">';
     for (let d = 0; d <= maxDepth; d++) {
       const col = columns[d] || [];
@@ -1217,7 +1217,7 @@ function renderPrdProgress(prog) {
   const e2eByPlan = {};
   for (const pr of allPrs) {
     // Match by explicit sourcePlan (robust), or fall back to title/branch heuristic (legacy)
-    const isE2e = pr.sourcePlanItem === 'VERIFY' || pr.sourcePlanItem === 'PR' || pr.e2e || pr.title?.startsWith('[E2E]');
+    const isE2e = pr.itemType === 'verify' || pr.itemType === 'pr' || pr.e2e || pr.title?.startsWith('[E2E]');
     if (!isE2e) continue;
     const planKey = pr.sourcePlan || keys.find(k => pr.branch?.includes(k.replace('.json', ''))) || '_unlinked';
     if (!e2eByPlan[planKey]) e2eByPlan[planKey] = [];
@@ -1397,10 +1397,10 @@ async function prdItemEdit(source, itemId) {
   if (!item) return;
 
   // Look up work item and dispatch completion info
-  const wi = (window._lastWorkItems || []).find(w => w.sourcePlanItem === itemId && w.sourcePlan === source);
+  const wi = (window._lastWorkItems || []).find(w => w.id === itemId && w.sourcePlan === source);
   const dispatch = window._lastStatus?.dispatch || {};
   const completedEntry = (dispatch.completed || []).find(d =>
-    d.meta?.item?.sourcePlanItem === itemId && d.meta?.item?.sourcePlan === source
+    d.meta?.item?.id === itemId && d.meta?.item?.sourcePlan === source
   );
 
   // Build completion summary section

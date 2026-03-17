@@ -52,9 +52,9 @@ If a merge conflict occurs, it's logged as a warning. The agent will see conflic
 ### Resolution Chain
 
 ```
-depends_on: ["P006"]
-  → find work items where sourcePlanItem = "P006" (across all projects)
-  → find PRs where prdItems includes that work item's ID
+depends_on: ["P-43e5ac28"]
+  → find work items where id = "P-43e5ac28" (across all projects)
+  → find PRs where prdItems includes "P-43e5ac28"
   → extract branch names from those PRs
   → fetch + merge into worktree
 ```

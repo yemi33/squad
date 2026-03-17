@@ -552,7 +552,7 @@ const server = http.createServer(async (req, res) => {
       if (project) {
         const wiPath = path.join(project.localPath, '.squad', 'work-items.json');
         const items = JSON.parse(safeRead(wiPath) || '[]');
-        const verify = items.find(w => w.sourcePlan === body.file && w.sourcePlanItem === 'VERIFY');
+        const verify = items.find(w => w.sourcePlan === body.file && w.itemType === 'verify');
         if (verify) {
           return jsonReply(res, 200, { ok: true, verifyId: verify.id });
         }
@@ -863,7 +863,7 @@ const server = http.createServer(async (req, res) => {
       for (const wiPath of wiSyncPaths) {
         try {
           const items = safeJson(wiPath);
-          const wi = items.find(w => w.sourcePlan === body.source && w.sourcePlanItem === body.itemId);
+          const wi = items.find(w => w.sourcePlan === body.source && w.id === body.itemId);
           if (wi && wi.status === 'pending') {
             if (body.name !== undefined) wi.title = 'Implement: ' + body.name;
             if (body.description !== undefined) wi.description = body.description;
@@ -902,7 +902,7 @@ const server = http.createServer(async (req, res) => {
         try {
           const items = safeJson(wiPath);
           const before = items.length;
-          const filtered = items.filter(w => !(w.sourcePlan === body.source && w.sourcePlanItem === body.itemId));
+          const filtered = items.filter(w => !(w.sourcePlan === body.source && w.id === body.itemId));
           if (filtered.length < before) {
             safeWrite(wiPath, filtered);
             cancelled = true;
@@ -914,13 +914,13 @@ const server = http.createServer(async (req, res) => {
       try {
         const items = safeJson(centralPath);
         const before = items.length;
-        const filtered = items.filter(w => !(w.sourcePlan === body.source && w.sourcePlanItem === body.itemId));
+        const filtered = items.filter(w => !(w.sourcePlan === body.source && w.id === body.itemId));
         if (filtered.length < before) { safeWrite(centralPath, filtered); cancelled = true; }
       } catch {}
 
       // Clean dispatch entries for this item
       cleanDispatchEntries(d =>
-        d.meta?.item?.sourcePlan === body.source && d.meta?.item?.sourcePlanItem === body.itemId
+        d.meta?.item?.sourcePlan === body.source && d.meta?.item?.id === body.itemId
       );
 
       return jsonReply(res, 200, { ok: true, cancelled });
@@ -1448,11 +1448,11 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
           const filtered = [];
           for (const w of items) {
             if (w.sourcePlan === body.source) {
-              materializedPlanItemIds.add(w.sourcePlanItem);
+              materializedPlanItemIds.add(w.id);
               if (w.status === 'pending' || w.status === 'failed') {
                 // Delete — will re-materialize on next tick with updated plan data
                 reset++;
-                deletedItemIds.push(w.sourcePlanItem);
+                deletedItemIds.push(w.id);
               } else {
                 // dispatched or done — leave alone
                 kept++;
@@ -1476,7 +1476,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       // Clean dispatch entries for deleted items
       for (const itemId of deletedItemIds) {
         cleanDispatchEntries(d =>
-          d.meta?.item?.sourcePlan === body.source && d.meta?.item?.sourcePlanItem === itemId
+          d.meta?.item?.sourcePlan === body.source && d.meta?.item?.id === itemId
         );
       }
 
@@ -1671,7 +1671,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
             if (w.sourcePlan === body.source) {
               if (w.status === 'pending' || w.status === 'failed') {
                 reset++;
-                deletedItemIds.push(w.sourcePlanItem);
+                deletedItemIds.push(w.id);
               } else {
                 kept++;
                 filtered.push(w);
@@ -1685,7 +1685,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       }
       for (const itemId of deletedItemIds) {
         cleanDispatchEntries(d =>
-          d.meta?.item?.sourcePlan === body.source && d.meta?.item?.sourcePlanItem === itemId
+          d.meta?.item?.sourcePlan === body.source && d.meta?.item?.id === itemId
         );
       }
 

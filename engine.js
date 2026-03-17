@@ -1670,7 +1670,6 @@ function materializePlansAsWorkItems(config) {
           created: ts(),
           createdBy: 'engine:plan-discovery',
           sourcePlan: file,
-          sourcePlanItem: item.id,
           depends_on: item.depends_on || [],
           branchStrategy: plan.branch_strategy || 'parallel',
           featureBranch: plan.feature_branch || null,

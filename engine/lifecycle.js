@@ -39,7 +39,7 @@ function checkPlanCompletion(meta, config) {
       allWorkItems = allWorkItems.concat(wi);
     } catch {}
   }
-  const planItems = allWorkItems.filter(w => w.sourcePlan === planFile && w.sourcePlanItem !== 'PR' && w.sourcePlanItem !== 'VERIFY');
+  const planItems = allWorkItems.filter(w => w.sourcePlan === planFile && w.itemType !== 'pr' && w.itemType !== 'verify');
   if (planItems.length === 0) return;
   if (!planItems.every(w => w.status === 'done' || w.status === 'failed')) return;
 
@@ -81,7 +81,7 @@ function checkPlanCompletion(meta, config) {
       const prPath = shared.projectPrPath(p);
       const prs = safeJson(prPath) || [];
       for (const pr of prs) {
-        if ((pr.prdItems || []).some(id => doneItems.find(w => w.sourcePlanItem === id || w.id === id))) {
+        if ((pr.prdItems || []).some(id => doneItems.find(w => w.id === id))) {
           prsCreated.push(pr);
         }
       }
@@ -103,8 +103,8 @@ function checkPlanCompletion(meta, config) {
     uniquePrs.length ? `- **${uniquePrs.length}** PR(s) created` : '',
     ``,
     `## Items`,
-    ...doneItems.map(w => `- [done] ${w.sourcePlanItem}: ${w.title.replace('Implement: ', '')}`),
-    ...failedItems.map(w => `- [failed] ${w.sourcePlanItem}: ${w.title.replace('Implement: ', '')}${w.failReason ? ' — ' + w.failReason : ''}`),
+    ...doneItems.map(w => `- [done] ${w.id}: ${w.title.replace('Implement: ', '')}`),
+    ...failedItems.map(w => `- [failed] ${w.id}: ${w.title.replace('Implement: ', '')}${w.failReason ? ' — ' + w.failReason : ''}`),
     uniquePrs.length ? `\n## Pull Requests` : '',
     ...uniquePrs.map(pr => `- ${pr.id}: ${pr.title || ''} ${pr.url || ''}`),
   ].filter(Boolean).join('\n');
@@ -123,18 +123,18 @@ function checkPlanCompletion(meta, config) {
 
   // 3. For shared-branch plans, create PR work item
   if (plan.branch_strategy === 'shared-branch' && plan.feature_branch && wiPath) {
-    const existingPrItem = allWorkItems.find(w => w.sourcePlan === planFile && w.sourcePlanItem === 'PR');
+    const existingPrItem = allWorkItems.find(w => w.sourcePlan === planFile && w.itemType === 'pr');
     if (!existingPrItem) {
       const id = 'PL-' + shared.uid();
       const featureBranch = plan.feature_branch;
       const mainBranch = primaryProject.mainBranch || 'main';
-      const itemSummary = doneItems.map(w => '- ' + w.sourcePlanItem + ': ' + w.title.replace('Implement: ', '')).join('\n');
+      const itemSummary = doneItems.map(w => '- ' + w.id + ': ' + w.title.replace('Implement: ', '')).join('\n');
       workItems.push({
         id, title: `Create PR for plan: ${plan.plan_summary || planFile}`,
         type: 'implement', priority: 'high',
         description: `All plan items from \`${planFile}\` are complete on branch \`${featureBranch}\`.\n\n**Branch:** \`${featureBranch}\`\n**Target:** \`${mainBranch}\`\n\n## Completed Items\n${itemSummary}`,
         status: 'pending', created: e.ts(), createdBy: 'engine:plan-completion',
-        sourcePlan: planFile, sourcePlanItem: 'PR',
+        sourcePlan: planFile, itemType: 'pr',
         branch: featureBranch, branchStrategy: 'shared-branch', project: projectName,
       });
       shared.safeWrite(wiPath, workItems);
@@ -142,7 +142,7 @@ function checkPlanCompletion(meta, config) {
   }
 
   // 4. Create verification work item (build, test, start webapp, write testing guide)
-  const existingVerify = allWorkItems.find(w => w.sourcePlan === planFile && w.sourcePlanItem === 'VERIFY');
+  const existingVerify = allWorkItems.find(w => w.sourcePlan === planFile && w.itemType === 'verify');
   if (!existingVerify && doneItems.length > 0) {
     const verifyId = 'PL-' + shared.uid();
     const planSlug = planFile.replace('.json', '');
@@ -152,7 +152,7 @@ function checkPlanCompletion(meta, config) {
     for (const p of projects) {
       const prs = (safeJson(shared.projectPrPath(p)) || [])
         .filter(pr => pr.status === 'active' && (pr.prdItems || []).some(id =>
-          doneItems.find(w => w.sourcePlanItem === id || w.id === id)));
+          doneItems.find(w => w.id === id || w.id === id)));
       if (prs.length > 0) {
         projectPrs[p.name] = { project: p, prs, mainBranch: p.mainBranch || 'main' };
       }
@@ -175,9 +175,9 @@ function checkPlanCompletion(meta, config) {
 
     // Build completed items summary with acceptance criteria
     const itemsWithCriteria = doneItems.map(w => {
-      const planItem = plan.missing_features?.find(f => f.id === w.sourcePlanItem);
+      const planItem = plan.missing_features?.find(f => f.id === w.id);
       const criteria = (planItem?.acceptance_criteria || []).map(c => `  - ${c}`).join('\n');
-      return `### ${w.sourcePlanItem}: ${w.title.replace('Implement: ', '')}\n${criteria ? '**Acceptance Criteria:**\n' + criteria : ''}`;
+      return `### ${w.id}: ${w.title.replace('Implement: ', '')}\n${criteria ? '**Acceptance Criteria:**\n' + criteria : ''}`;
     }).join('\n\n');
 
     const prSummary = uniquePrs.map(pr =>
@@ -225,7 +225,7 @@ function checkPlanCompletion(meta, config) {
       created: e.ts(),
       createdBy: 'engine:plan-verification',
       sourcePlan: planFile,
-      sourcePlanItem: 'VERIFY',
+      itemType: 'verify',
       project: projectName,
     });
     shared.safeWrite(wiPath, workItems);
@@ -512,8 +512,7 @@ function syncPrsFromOutput(output, agentId, meta, config) {
       created: e.dateStamp(),
       url: targetProject.prUrlBase ? targetProject.prUrlBase + prId : '',
       prdItems: meta?.item?.id ? [meta.item.id] : [],
-      sourcePlan: meta?.item?.sourcePlan || '',
-      sourcePlanItem: meta?.item?.sourcePlanItem || ''
+      sourcePlan: meta?.item?.sourcePlan || ''
     });
     added++;
   }
