@@ -1410,6 +1410,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
         planFile: body.file,
       });
       safeWrite(centralPath, items);
+      invalidateStatusCache();
       return jsonReply(res, 200, { ok: true, id });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
   }

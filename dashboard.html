@@ -3628,9 +3628,15 @@ async function planExecute(file, project, btn) {
     });
     const data = await res.json();
     if (res.ok) {
+      // Inject into local work items so the next render immediately hides Execute
+      if (!data.alreadyQueued) {
+        (window._lastWorkItems = window._lastWorkItems || []).push({
+          id: data.id, type: 'plan-to-prd', status: 'pending', planFile: file
+        });
+      }
       closeModal();
       showToast('cmd-toast', data.alreadyQueued ? 'Already queued (' + data.id + ')' : 'Queued ' + data.id + ' — agent will convert plan to PRD', true);
-      refresh();
+      refreshPlans();
     } else {
       if (btn) { btn.textContent = 'Execute'; btn.disabled = false; btn.style.color = 'var(--green)'; }
       alert('Failed: ' + (data.error || 'unknown'));
