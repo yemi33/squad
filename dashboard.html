@@ -1350,6 +1350,8 @@ async function openVerifyGuide(file) {
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
     _modalDocContext = { title: 'Manual Testing Guide', content, selection: '' };
     _modalFilePath = 'prd/' + file; showModalQa();
+    const card = findCardForFile(_modalFilePath);
+    if (card) clearNotifBadge(card);
     document.getElementById('modal').classList.add('open');
   } catch (e) { alert('Failed to load guide: ' + e.message); }
 }
@@ -1518,6 +1520,8 @@ async function planOpenInDocChat(file) {
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
     _modalDocContext = { title: title, content: text, selection: '' };
     _modalFilePath = (file.endsWith('.json') ? 'prd/' : 'plans/') + file; showModalQa();
+    const card = findCardForFile(_modalFilePath);
+    if (card) clearNotifBadge(card);
     document.getElementById('modal').classList.add('open');
   } catch (e) { alert('Error opening plan: ' + e.message); }
 }
@@ -1531,7 +1535,7 @@ function renderInbox(inbox) {
   count.textContent = inbox.length;
   if (!inbox.length) { list.innerHTML = '<p class="empty">No messages yet.</p>'; return; }
   list.innerHTML = inbox.map((item, i) => `
-    <div class="inbox-item">
+    <div class="inbox-item" data-file="notes/inbox/${escHtml(item.name)}">
       <div class="inbox-name" onclick="openModal(${i})" style="cursor:pointer">
         <span>${escHtml(item.name)}</span><span>${item.age}</span>
       </div>
@@ -1543,6 +1547,7 @@ function renderInbox(inbox) {
       </div>
     </div>
   `).join('');
+  restoreNotifBadges();
 }
 
 function promoteToKB(name) {
@@ -1789,6 +1794,9 @@ function openModal(i) {
     '<pre style="white-space:pre-wrap;word-wrap:break-word;margin:0;font-family:Consolas,monospace;font-size:12px;line-height:1.7;color:var(--muted)">' + escHtml(item.content) + '</pre>';
   _modalDocContext = { title: item.name, content: item.content, selection: '' };
   _modalFilePath = 'notes/inbox/' + item.name; showModalQa();
+  // Clear notification badge when opening this document
+  const card = findCardForFile(_modalFilePath);
+  if (card) clearNotifBadge(card);
   document.getElementById('modal').classList.add('open');
 }
 function closeModal() {
@@ -2944,6 +2952,9 @@ let _modalOriginalPlan = null; // tracks original plan file when editing a forke
 
 // ─── Notification Badges ──────────────────────────────────────────────────────
 // Show a red dot on a card/button when a background response arrives
+// _activeBadges tracks badges by filePath so they survive DOM re-renders
+const _activeBadges = new Map(); // filePath → state ('done' | 'processing')
+
 function showNotifBadge(targetEl, state) {
   if (!targetEl) return;
   clearNotifBadge(targetEl);
@@ -2954,30 +2965,42 @@ function showNotifBadge(targetEl, state) {
     badge.innerHTML = '<span></span><span></span><span></span>';
   }
   targetEl.appendChild(badge);
+  // Track by data-file so badge can be restored after DOM re-render
+  const fileKey = targetEl.getAttribute('data-file');
+  if (fileKey) _activeBadges.set(fileKey, state || 'done');
 }
 function clearNotifBadge(targetEl) {
   if (!targetEl) return;
   const dot = targetEl.querySelector('.notif-badge');
   if (dot) dot.remove();
+  const fileKey = targetEl.getAttribute('data-file');
+  if (fileKey) _activeBadges.delete(fileKey);
 }
-// Find the plan/KB/skill card that matches a filePath
+// Re-apply tracked badges after DOM re-renders (called after renderInbox, renderPlans, renderKnowledgeBase)
+function restoreNotifBadges() {
+  for (const [filePath, state] of _activeBadges) {
+    const card = findCardForFile(filePath);
+    if (card && !card.querySelector('.notif-badge')) {
+      card.style.position = 'relative';
+      const badge = document.createElement('span');
+      badge.className = 'notif-badge ' + state;
+      if (state === 'processing') {
+        badge.innerHTML = '<span></span><span></span><span></span>';
+      }
+      card.appendChild(badge);
+    }
+  }
+}
+// Find the plan/KB/inbox card that matches a filePath
 function findCardForFile(filePath) {
   if (!filePath) return null;
-  const fileName = filePath.split('/').pop();
-  // Search plan cards
-  const planCards = document.querySelectorAll('.plan-card[onclick]');
-  for (const card of planCards) {
-    if (card.getAttribute('onclick')?.includes(fileName)) return card;
-  }
-  // Search KB items
-  const kbItems = document.querySelectorAll('.kb-item[onclick]');
-  for (const item of kbItems) {
-    if (item.getAttribute('onclick')?.includes(fileName)) return item;
-  }
-  // Search inbox items, skill items
-  const inboxItems = document.querySelectorAll('.inbox-item[onclick]');
-  for (const item of inboxItems) {
-    if (item.getAttribute('onclick')?.includes(fileName)) return item;
+  // Direct match by data-file attribute
+  var card = document.querySelector('[data-file="' + CSS.escape(filePath) + '"]');
+  if (card) return card;
+  // Plan cards may have data-file="plans/x.json" but filePath="prd/x.json" (PRD variant)
+  if (filePath.startsWith('prd/')) {
+    card = document.querySelector('[data-file="' + CSS.escape('plans/' + filePath.slice(4)) + '"]');
+    if (card) return card;
   }
   return null;
 }
@@ -3381,7 +3404,7 @@ function renderPlans(plans) {
     const deleteBtn = !isArchived ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--red)" ' +
       'onclick="event.stopPropagation();planDelete(\'' + escHtml(p.file) + '\')">Delete</button>' : '';
 
-    return '<div class="plan-card ' + statusClass(status) + (isWorking ? ' working' : '') + '" style="cursor:pointer' + (isArchived ? ';opacity:0.7' : '') + '" onclick="planView(\'' + escHtml(p.file) + '\')">' +
+    return '<div class="plan-card ' + statusClass(status) + (isWorking ? ' working' : '') + '" data-file="plans/' + escHtml(p.file) + '" style="cursor:pointer' + (isArchived ? ';opacity:0.7' : '') + '" onclick="planView(\'' + escHtml(p.file) + '\')">' +
       '<div class="plan-card-header">' +
         '<div><div class="plan-card-title">' + escHtml(p.summary || p.file) + '</div>' +
           '<div class="plan-card-meta">' +
@@ -3411,6 +3434,7 @@ function renderPlans(plans) {
   }
 
   el.innerHTML = html;
+  restoreNotifBadges();
 }
 
 function openArchivedPlansModal() {
@@ -3421,7 +3445,7 @@ function openArchivedPlansModal() {
   const html = plans.map(p => {
     const itemCount = p.itemCount || 0;
     const completed = p.completedAt ? p.completedAt.slice(0, 10) : '';
-    return '<div class="plan-card" style="cursor:pointer;opacity:0.8" onclick="planView(\'' + escHtml(p.file) + '\')">' +
+    return '<div class="plan-card" data-file="plans/' + escHtml(p.file) + '" style="cursor:pointer;opacity:0.8" onclick="planView(\'' + escHtml(p.file) + '\')">' +
       '<div class="plan-card-header">' +
         '<div><div class="plan-card-title" style="font-size:13px">' + escHtml(p.summary || p.file) + '</div>' +
           '<div class="plan-card-meta">' +
@@ -3708,6 +3732,9 @@ async function planView(file) {
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
     _modalDocContext = { title, content: text, selection: '' };
     _modalFilePath = (file.endsWith('.json') ? 'prd/' : 'plans/') + file; showModalQa();
+    // Clear notification badge when opening this document
+    const card = findCardForFile(_modalFilePath);
+    if (card) clearNotifBadge(card);
     // steer btn removed — unified send
     document.getElementById('modal').classList.add('open');
   } catch (e) { console.error(e); }
@@ -3783,7 +3810,7 @@ function renderKnowledgeBase() {
   listEl.innerHTML = items.slice(0, 50).map(item => {
     const icon = KB_CAT_ICONS[item.category] || '\u{1F4C4}';
     const label = KB_CAT_LABELS[item.category] || item.category;
-    return '<div class="kb-item" onclick="kbOpenItem(\'' + escHtml(item.category) + '\', \'' + escHtml(item.file) + '\')">' +
+    return '<div class="kb-item" data-file="knowledge/' + escHtml(item.category) + '/' + escHtml(item.file) + '" onclick="kbOpenItem(\'' + escHtml(item.category) + '\', \'' + escHtml(item.file) + '\')">' +
       '<div class="kb-item-body">' +
         '<div class="kb-item-title">' + icon + ' ' + escHtml(item.title) + '</div>' +
         '<div class="kb-item-meta">' +
@@ -3796,6 +3823,7 @@ function renderKnowledgeBase() {
       '</div>' +
     '</div>';
   }).join('');
+  restoreNotifBadges();
 }
 
 function kbSetTab(tab) {
@@ -3811,6 +3839,9 @@ async function kbOpenItem(category, file) {
     document.getElementById('modal-body').textContent = display;
     _modalDocContext = { title: file, content: display, selection: '' };
     _modalFilePath = 'knowledge/' + category + '/' + file; showModalQa();
+    // Clear notification badge when opening this document
+    const card = findCardForFile(_modalFilePath);
+    if (card) clearNotifBadge(card);
     // steer btn removed — unified send
     document.getElementById('modal').classList.add('open');
   } catch (e) {
