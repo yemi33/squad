@@ -83,7 +83,7 @@ function validateConfig(config) {
   }
 }
 
-const { getProjects, projectRoot, projectWorkItemsPath, projectPrPath, nextWorkItemId, getAdoOrgBase, sanitizeBranch, parseSkillFrontmatter, safeReadDir } = shared;
+const { getProjects, projectRoot, projectWorkItemsPath, projectPrPath, getAdoOrgBase, sanitizeBranch, parseSkillFrontmatter, safeReadDir } = shared;
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -555,7 +555,7 @@ function resolveDependencyBranches(depIds, sourcePlan, project, config) {
     const wiPath = shared.projectWorkItemsPath(p);
     const items = safeJson(wiPath) || [];
     for (const wi of items) {
-      if (wi.sourcePlan === sourcePlan && depIds.includes(wi.sourcePlanItem)) {
+      if (depIds.includes(wi.id)) {
         depWorkItems.push(wi);
       }
     }
@@ -568,7 +568,7 @@ function resolveDependencyBranches(depIds, sourcePlan, project, config) {
     for (const pr of prs) {
       if (!pr.branch || pr.status !== 'active') continue;
       const linked = (pr.prdItems || []).some(id =>
-        depWorkItems.find(w => w.id === id || w.sourcePlanItem === id)
+        depWorkItems.find(w => w.id === id)
       );
       if (linked && !results.find(r => r.branch === pr.branch)) {
         results.push({ branch: pr.branch, prId: pr.id });
@@ -940,7 +940,7 @@ function areDependenciesMet(item, config) {
     } catch {}
   }
   for (const depId of deps) {
-    const depItem = allWorkItems.find(w => w.sourcePlan === sourcePlan && w.sourcePlanItem === depId);
+    const depItem = allWorkItems.find(w => w.id === depId);
     if (!depItem) {
       log('warn', `Dependency ${depId} not found for ${item.id} (plan: ${sourcePlan}) — treating as unmet`);
       return false;

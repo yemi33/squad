@@ -82,7 +82,7 @@ When using `parallel`:
 - `depends_on` is still respected but items can dispatch concurrently if no deps
 
 Rules for items:
-- IDs are `P001`, `P002`, etc. (P for plan-derived)
+- IDs must be `P-<uuid>` format (e.g. `P-a3f9b2c1`) — globally unique, never sequential
 - All items start with `status: "missing"` — the engine picks these up automatically
 - **`project` field is REQUIRED** — set it to the project name where the code changes go (e.g., `"OfficeAgent"`, `"office-bohemia"`). Cross-repo plans must route each item to the correct project. The engine materializes items into that project's work queue.
 - `depends_on` lists IDs of items that must be done first

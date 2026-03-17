@@ -245,7 +245,7 @@ async function pollPrHumanComments(config) {
 async function reconcilePrs(config) {
   const e = engine();
   const projects = getProjects(config).filter(isGitHub);
-  const branchPatterns = [/^work\/PL-W/i, /^feat\/PL-W/i, /^user\/yemishin\//i];
+  const branchPatterns = [/^work\//i, /^feat\//i, /^user\/yemishin\//i];
   let totalAdded = 0;
 
   for (const project of projects) {
@@ -280,8 +280,8 @@ async function reconcilePrs(config) {
       if (existingIds.has(prId)) continue;
 
       const branch = ghPr.head?.ref || '';
-      const wiMatch = branch.match(/(PL-W\d+)/i);
-      const linkedItemId = wiMatch ? wiMatch[1].toUpperCase() : null;
+      const wiMatch = branch.match(/(P-[a-f0-9]{6,})/i) || branch.match(/(PL-W\d+)/i);
+      const linkedItemId = wiMatch ? wiMatch[1] : null;
       const linkedItem = linkedItemId ? allItems.find(i => i.id === linkedItemId) : null;
       const confirmedItemId = linkedItem ? linkedItemId : null;
 

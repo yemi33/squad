@@ -277,7 +277,7 @@ async function reconcilePrs(config) {
   }
 
   const projects = shared.getProjects(config);
-  const branchPatterns = [/^refs\/heads\/work\/PL-W/i, /^refs\/heads\/feat\/PL-W/i, /^refs\/heads\/user\/yemishin\//i];
+  const branchPatterns = [/^refs\/heads\/work\//i, /^refs\/heads\/feat\//i, /^refs\/heads\/user\/yemishin\//i];
   let totalAdded = 0;
 
   for (const project of projects) {
@@ -318,9 +318,9 @@ async function reconcilePrs(config) {
       if (existingIds.has(prId)) continue;
 
       const branch = (adoPr.sourceRefName || '').replace('refs/heads/', '');
-      // Try to extract work item ID from branch name (e.g., work/PL-W005 -> PL-W005)
-      const wiMatch = branch.match(/(PL-W\d+)/i);
-      const linkedItemId = wiMatch ? wiMatch[1].toUpperCase() : null;
+      // Try to extract work item ID from branch name (e.g., feat/P-43e5ac28-lazy-loading or work/PL-W005)
+      const wiMatch = branch.match(/(P-[a-f0-9]{6,})/i) || branch.match(/(PL-W\d+)/i);
+      const linkedItemId = wiMatch ? wiMatch[1] : null;
       // Validate work item exists — only link if confirmed
       const linkedItem = linkedItemId ? allItems.find(i => i.id === linkedItemId) : null;
       const confirmedItemId = linkedItem ? linkedItemId : null;
