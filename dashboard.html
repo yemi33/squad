@@ -1212,12 +1212,13 @@ function renderPrdProgress(prog) {
     '</div>';
   };
 
-  // E2E aggregate PRs — group by sourcePlan so each PRD group shows its own
+  // E2E / verification PRs — group by sourcePlan
   const allPrs = window._lastStatus?.pullRequests || [];
-  const e2ePrs = allPrs.filter(pr => pr.e2e || pr.title?.startsWith('[E2E]'));
   const e2eByPlan = {};
-  for (const pr of e2ePrs) {
-    // Match to a PRD group by sourcePlan or by branch name containing plan slug
+  for (const pr of allPrs) {
+    // Match by explicit sourcePlan (robust), or fall back to title/branch heuristic (legacy)
+    const isE2e = pr.sourcePlanItem === 'VERIFY' || pr.sourcePlanItem === 'PR' || pr.e2e || pr.title?.startsWith('[E2E]');
+    if (!isE2e) continue;
     const planKey = pr.sourcePlan || keys.find(k => pr.branch?.includes(k.replace('.json', ''))) || '_unlinked';
     if (!e2eByPlan[planKey]) e2eByPlan[planKey] = [];
     e2eByPlan[planKey].push(pr);

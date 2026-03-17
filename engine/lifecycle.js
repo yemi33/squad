@@ -511,7 +511,9 @@ function syncPrsFromOutput(output, agentId, meta, config) {
       status: 'active',
       created: e.dateStamp(),
       url: targetProject.prUrlBase ? targetProject.prUrlBase + prId : '',
-      prdItems: meta?.item?.id ? [meta.item.id] : []
+      prdItems: meta?.item?.id ? [meta.item.id] : [],
+      sourcePlan: meta?.item?.sourcePlan || '',
+      sourcePlanItem: meta?.item?.sourcePlanItem || ''
     });
     added++;
   }
