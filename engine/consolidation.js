@@ -133,11 +133,13 @@ function consolidateWithLLM(items, existingNotes, files, config) {
 
   const prompt = buildConsolidationPrompt(items, existingNotes, kbPaths);
 
-  const promptPath = path.join(ENGINE_DIR, 'consolidate-prompt.md');
+  const tmpDir = path.join(ENGINE_DIR, 'tmp');
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  const promptPath = path.join(tmpDir, 'consolidate-prompt.md');
   safeWrite(promptPath, prompt);
 
   const sysPrompt = 'You are a concise knowledge manager. Output only markdown. No preamble. No code fences around your output.';
-  const sysPromptPath = path.join(ENGINE_DIR, 'consolidate-sysprompt.md');
+  const sysPromptPath = path.join(tmpDir, 'consolidate-sysprompt.md');
   safeWrite(sysPromptPath, sysPrompt);
 
   const spawnScript = path.join(ENGINE_DIR, 'spawn-agent.js');

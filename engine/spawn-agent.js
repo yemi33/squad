@@ -49,7 +49,9 @@ if (!claudeBin) {
 }
 
 // Debug log
-const debugPath = path.join(__dirname, 'spawn-debug.log');
+const tmpDir = path.join(__dirname, 'tmp');
+if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+const debugPath = path.join(tmpDir, 'spawn-debug.log');
 fs.writeFileSync(debugPath, `spawn-agent.js at ${new Date().toISOString()}\nclaudeBin=${claudeBin || 'not found'}\nprompt=${promptFile}\nsysPrompt=${sysPromptFile}\nextraArgs=${extraArgs.join(' ')}\n`);
 
 // When resuming a session, skip system prompt (it's baked into the session)

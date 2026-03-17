@@ -2,12 +2,6 @@
 engine/dispatch.json
 engine/log.json
 engine/control.json
-engine/prompt-*.md
-engine/sysprompt-*.md
-engine/command-center-*.pid
-engine/command-center-*.md
-engine/doc-chat-*.pid
-engine/doc-chat-*.md
 engine/doc-sessions.json
 engine/claude-caps.json
 engine/pid-*.pid
@@ -15,6 +9,11 @@ engine/pid-*-implement
 engine/kb-sweep-pid-*.pid
 engine/cc-session.json
 engine/metrics.json
+engine/cooldowns.json
+engine/test-results.json
+engine/kb-checkpoint.json
+# All transient temp files (prompts, pids, logs) go in engine/tmp/
+engine/tmp/
 agents/*/status.json
 agents/*/output.log
 agents/*/output-*
@@ -26,6 +25,11 @@ plans/
 
 # Machine-specific (synced from ~/.claude.json on engine start)
 mcp-servers.json
+
+# Squad-specific PRDs (project-specific, not for distribution)
+prd/*.json
+prd/archive/
+prd/guides/
 
 # Legacy
 agents/ralph/next-action.json

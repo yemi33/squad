@@ -47,8 +47,10 @@ function trackEngineUsage(category, usage) {
 function callLLM(promptText, sysPromptText, { timeout = 120000, label = 'llm', model = 'sonnet', maxTurns = 1, allowedTools = '', sessionId = null } = {}) {
   return new Promise((resolve) => {
     const id = uid();
-    const promptPath = path.join(ENGINE_DIR, `${label}-prompt-${id}.md`);
-    const sysPath = path.join(ENGINE_DIR, `${label}-sys-${id}.md`);
+    const tmpDir = path.join(ENGINE_DIR, 'tmp');
+    if (!require('fs').existsSync(tmpDir)) require('fs').mkdirSync(tmpDir, { recursive: true });
+    const promptPath = path.join(tmpDir, `${label}-prompt-${id}.md`);
+    const sysPath = path.join(tmpDir, `${label}-sys-${id}.md`);
     safeWrite(promptPath, promptText);
     safeWrite(sysPath, sysPromptText || '');
 

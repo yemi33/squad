@@ -539,7 +539,7 @@ function buildAgentContext(agentId, config, project) {
 
 const { runPostCompletionHooks, updateWorkItemStatus, handlePostMerge, checkPlanCompletion, chainPlanToPrd,
   syncPrsFromOutput, updatePrAfterReview, updatePrAfterFix, checkForLearnings, extractSkillsFromOutput,
-  updateAgentHistory, updateMetrics, createReviewFeedbackForAuthor, parseAgentOutput } = require('./engine/lifecycle');
+  updateAgentHistory, updateMetrics, createReviewFeedbackForAuthor, parseAgentOutput, syncPrdFromPrs } = require('./engine/lifecycle');
 
 // ─── Agent Spawner ──────────────────────────────────────────────────────────
 
@@ -753,10 +753,12 @@ function spawnAgent(dispatchItem, config) {
     : taskPrompt;
 
   // Write prompt and system prompt to temp files (avoids shell escaping issues)
-  const promptPath = path.join(ENGINE_DIR, `prompt-${id}.md`);
+  const tmpDir = path.join(ENGINE_DIR, 'tmp');
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  const promptPath = path.join(tmpDir, `prompt-${id}.md`);
   safeWrite(promptPath, fullTaskPrompt);
 
-  const sysPromptPath = path.join(ENGINE_DIR, `sysprompt-${id}.md`);
+  const sysPromptPath = path.join(tmpDir, `sysprompt-${id}.md`);
   safeWrite(sysPromptPath, systemPrompt);
 
   // Build claude CLI args
@@ -1328,17 +1330,20 @@ function runCleanup(config, verbose = false) {
   // 1. Clean stale temp prompt/sysprompt files (older than 1 hour)
   const oneHourAgo = Date.now() - 3600000;
   try {
-    const engineFiles = fs.readdirSync(ENGINE_DIR);
-    for (const f of engineFiles) {
-      if (f.startsWith('prompt-') || f.startsWith('sysprompt-') || f.startsWith('tmp-sysprompt-')) {
-        const fp = path.join(ENGINE_DIR, f);
-        try {
-          const stat = fs.statSync(fp);
-          if (stat.mtimeMs < oneHourAgo) {
-            fs.unlinkSync(fp);
-            cleaned.tempFiles++;
-          }
-        } catch {}
+    const tmpDir = path.join(ENGINE_DIR, 'tmp');
+    const scanDirs = [ENGINE_DIR, ...(fs.existsSync(tmpDir) ? [tmpDir] : [])];
+    for (const dir of scanDirs) {
+      for (const f of fs.readdirSync(dir)) {
+        if (f.startsWith('prompt-') || f.startsWith('sysprompt-') || f.startsWith('tmp-sysprompt-')) {
+          const fp = path.join(dir, f);
+          try {
+            const stat = fs.statSync(fp);
+            if (stat.mtimeMs < oneHourAgo) {
+              fs.unlinkSync(fp);
+              cleaned.tempFiles++;
+            }
+          } catch {}
+        }
       }
     }
   } catch {}
@@ -2561,6 +2566,8 @@ async function tickInner() {
   if (tickCount % 6 === 0) {
     try { await pollPrStatus(config); } catch (err) { log('warn', `ADO PR status poll error: ${err?.message || err}${err?.stack ? ' | ' + err.stack.split('\n')[1]?.trim() : ''}`); }
     try { await ghPollPrStatus(config); } catch (err) { log('warn', `GitHub PR status poll error: ${err?.message || err}${err?.stack ? ' | ' + err.stack.split('\n')[1]?.trim() : ''}`); }
+    // Sync PR status back to PRD items (missing → in-pr when active PR exists)
+    try { syncPrdFromPrs(config); } catch (err) { log('warn', `PRD sync error: ${err?.message || err}`); }
   }
 
   // 2.7. Poll PR threads for human comments (every 12 ticks = ~6 minutes)

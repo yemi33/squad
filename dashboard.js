@@ -1374,10 +1374,20 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       safeWrite(planPath, plan);
 
       // Propagate pause to materialized work items across all projects
+      // But skip items that already have active PRs — those are past the point of pausing
       let paused = 0;
       const wiPaths = [path.join(SQUAD_DIR, 'work-items.json')];
+      const allPrItemIds = new Set();
       for (const proj of PROJECTS) {
         wiPaths.push(path.join(proj.localPath, '.squad', 'work-items.json'));
+        try {
+          const prs = safeJson(path.join(proj.localPath, '.squad', 'pull-requests.json')) || [];
+          for (const pr of prs) {
+            if (pr.status === 'active' && pr.prdItems?.length) {
+              pr.prdItems.forEach(id => allPrItemIds.add(id));
+            }
+          }
+        } catch {}
       }
       for (const wiPath of wiPaths) {
         try {
@@ -1386,6 +1396,8 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
           let changed = false;
           for (const w of items) {
             if (w.sourcePlan === body.file && w.status === 'pending') {
+              // Don't pause if this item already has an active PR
+              if (allPrItemIds.has(w.id) || allPrItemIds.has(w.sourcePlanItem)) continue;
               w.status = 'paused';
               w._pausedBy = 'prd-pause';
               paused++;
