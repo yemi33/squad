@@ -673,7 +673,7 @@
   </section>
 
   <section>
-    <h2>Knowledge Base <span class="count" id="kb-count">0</span></h2>
+    <h2>Knowledge Base <span class="count" id="kb-count">0</span> <button id="kb-sweep-btn" onclick="kbSweep()" style="font-size:9px;padding:2px 8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:4px;cursor:pointer;margin-left:8px;vertical-align:middle">sweep</button></h2>
     <div class="kb-tabs" id="kb-tabs"></div>
     <div class="kb-list" id="kb-list"><p class="empty">No knowledge entries yet. Notes are classified here after consolidation.</p></div>
   </section>
@@ -3829,6 +3829,33 @@ function renderKnowledgeBase() {
 function kbSetTab(tab) {
   _kbActiveTab = tab;
   renderKnowledgeBase();
+}
+
+async function kbSweep() {
+  const btn = document.getElementById('kb-sweep-btn');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'sweeping...';
+  btn.style.color = 'var(--blue)';
+  try {
+    const res = await fetch('/api/knowledge/sweep', { method: 'POST', signal: AbortSignal.timeout(300000) });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = 'done';
+      btn.style.color = 'var(--green)';
+      showToast('cmd-toast', 'KB sweep: ' + (data.summary || 'complete'), true);
+      refreshKnowledgeBase();
+    } else {
+      btn.style.color = 'var(--red)';
+      btn.textContent = 'failed';
+      showToast('cmd-toast', 'Sweep failed: ' + (data.error || 'unknown'), false);
+    }
+  } catch (e) {
+    btn.style.color = 'var(--red)';
+    btn.textContent = 'failed';
+    showToast('cmd-toast', 'Sweep error: ' + e.message, false);
+  }
+  setTimeout(() => { btn.textContent = origText; btn.style.color = 'var(--muted)'; btn.disabled = false; }, 3000);
 }
 
 async function kbOpenItem(category, file) {

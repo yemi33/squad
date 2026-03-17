@@ -112,10 +112,12 @@ function getStatus() {
 
 // ── Command Center: session state + helpers ─────────────────────────────────
 
-const CC_SESSION_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
+const CC_SESSION_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours
 const CC_SESSION_MAX_TURNS = 50;
 let ccSession = { sessionId: null, createdAt: null, lastActiveAt: null, turnCount: 0 };
 let ccInFlight = false;
+let ccInFlightSince = 0; // timestamp — auto-release stuck guard
+const CC_INFLIGHT_TIMEOUT_MS = 6 * 60 * 1000; // 6 minutes (slightly > LLM timeout)
 
 function ccSessionValid() {
   if (!ccSession.sessionId) return false;
@@ -128,7 +130,7 @@ try {
   const saved = safeJson(path.join(ENGINE_DIR, 'cc-session.json'));
   if (saved && saved.sessionId) {
     const age = Date.now() - new Date(saved.lastActiveAt || 0).getTime();
-    if (age < 30 * 60 * 1000) ccSession = saved;
+    if (age < CC_SESSION_EXPIRY_MS) ccSession = saved;
   }
 } catch {}
 
@@ -318,32 +320,57 @@ async function ccCall(message, { store = 'cc', sessionKey, extraContext, label =
   const existing = resolveSession(store, sessionKey);
   let sessionId = existing ? existing.sessionId : null;
 
-  // For CC: also validate client-provided sessionId matches
   const parts = [`## Current Squad State (${new Date().toISOString().slice(0, 16)})\n\n${buildCCStatePreamble()}`];
   if (extraContext) parts.push(extraContext);
   parts.push(message);
   const prompt = parts.join('\n\n---\n\n');
 
-  let result = await llm.callLLM(prompt, sessionId ? '' : CC_STATIC_SYSTEM_PROMPT, {
-    timeout, label, model: 'sonnet', maxTurns, allowedTools, sessionId,
+  let result;
+
+  // Attempt 1: resume existing session (skip if we know it's expired)
+  if (sessionId) {
+    result = await llm.callLLM(prompt, '', {
+      timeout, label, model: 'sonnet', maxTurns, allowedTools, sessionId,
+    });
+    llm.trackEngineUsage(label, result.usage);
+
+    if (result.code === 0 && result.text) {
+      updateSession(store, sessionKey, result.sessionId || sessionId, true);
+      return result;
+    }
+    console.log(`[${label}] Resume failed (code=${result.code}, empty=${!result.text}), retrying fresh...`);
+    sessionId = null;
+    // Invalidate the dead session so future calls don't try to resume it
+    if (store === 'cc') {
+      ccSession = { sessionId: null, createdAt: null, lastActiveAt: null, turnCount: 0 };
+      safeWrite(path.join(ENGINE_DIR, 'cc-session.json'), ccSession);
+    } else if (sessionKey) {
+      docSessions.delete(sessionKey);
+    }
+  }
+
+  // Attempt 2: fresh session
+  result = await llm.callLLM(prompt, CC_STATIC_SYSTEM_PROMPT, {
+    timeout, label, model: 'sonnet', maxTurns, allowedTools,
   });
   llm.trackEngineUsage(label, result.usage);
 
-  // If resume failed, retry with a fresh session
-  if ((result.code !== 0 || !result.text) && sessionId) {
-    console.log(`[${label}] Resume failed, retrying with fresh session...`);
-    result = await llm.callLLM(prompt, CC_STATIC_SYSTEM_PROMPT, {
-      timeout, label, model: 'sonnet', maxTurns, allowedTools,
-    });
-    llm.trackEngineUsage(label, result.usage);
-    sessionId = null;
-  }
-
-  // Update session on success
   if (result.code === 0 && result.text) {
-    updateSession(store, sessionKey, result.sessionId || sessionId, !!sessionId);
+    updateSession(store, sessionKey, result.sessionId, false);
+    return result;
   }
 
+  // Attempt 3: one more retry after a brief pause (handles transient failures)
+  console.log(`[${label}] Fresh call also failed (code=${result.code}, empty=${!result.text}), retrying once more...`);
+  await new Promise(r => setTimeout(r, 2000));
+  result = await llm.callLLM(prompt, CC_STATIC_SYSTEM_PROMPT, {
+    timeout, label, model: 'sonnet', maxTurns, allowedTools,
+  });
+  llm.trackEngineUsage(label, result.usage);
+
+  if (result.code === 0 && result.text) {
+    updateSession(store, sessionKey, result.sessionId, false);
+  }
   return result;
 }
 
@@ -996,6 +1023,114 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.end(content);
     return;
+  }
+
+  // POST /api/knowledge/sweep — deduplicate, consolidate, and reorganize knowledge base
+  if (req.method === 'POST' && req.url === '/api/knowledge/sweep') {
+    try {
+      const entries = getKnowledgeBaseEntries();
+      if (entries.length < 2) return jsonReply(res, 200, { ok: true, summary: 'nothing to sweep (< 2 entries)' });
+
+      // Build a manifest of all KB entries with their content
+      const manifest = [];
+      for (const e of entries) {
+        const content = safeRead(path.join(SQUAD_DIR, 'knowledge', e.cat, e.file));
+        if (!content) continue;
+        manifest.push({ category: e.cat, file: e.file, title: e.title, agent: e.agent, date: e.date, content: content.slice(0, 3000) });
+      }
+
+      const prompt = `You are a knowledge base curator. Analyze these ${manifest.length} knowledge base entries and produce a cleanup plan.
+
+## Entries
+
+${manifest.map((m, i) => `<entry index="${i}" category="${m.category}" file="${m.file}" date="${m.date}" agent="${m.agent || 'unknown'}">
+${m.title}
+${m.content.slice(0, 1500)}
+</entry>`).join('\n\n')}
+
+## Instructions
+
+1. **Find duplicates**: entries with substantially the same content or insights (same findings from different agents or dispatch runs). List pairs/groups by index.
+
+2. **Find misclassified**: entries in the wrong category. Common: build reports in conventions, reviews in architecture.
+
+3. **Find stale/empty**: entries with no actionable content (boilerplate, "no changes needed", bail-out notes).
+
+## Output Format
+
+Respond with ONLY valid JSON (no markdown fences, no preamble):
+
+{
+  "duplicates": [
+    { "keep": 0, "remove": [1, 5], "reason": "same PR review findings" }
+  ],
+  "reclassify": [
+    { "index": 3, "from": "conventions", "to": "build-reports", "reason": "..." }
+  ],
+  "remove": [
+    { "index": 7, "reason": "empty bail-out note" }
+  ]
+}
+
+If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
+
+      const { callLLM, trackEngineUsage } = require('./engine/llm');
+      const result = await callLLM(prompt, 'You are a concise knowledge curator. Output only JSON.', {
+        timeout: 180000, label: 'kb-sweep', model: 'haiku', maxTurns: 1
+      });
+      trackEngineUsage('kb-sweep', result.usage);
+
+      let plan;
+      try {
+        let jsonStr = result.text.trim();
+        const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (fenceMatch) jsonStr = fenceMatch[1].trim();
+        plan = JSON.parse(jsonStr);
+      } catch {
+        return jsonReply(res, 200, { ok: false, error: 'LLM returned invalid JSON', raw: result.text.slice(0, 500) });
+      }
+
+      let removed = 0, reclassified = 0, merged = 0;
+      const kbDir = path.join(SQUAD_DIR, 'knowledge');
+
+      // Process removals (stale/empty)
+      for (const r of (plan.remove || [])) {
+        const entry = manifest[r.index];
+        if (!entry) continue;
+        const fp = path.join(kbDir, entry.category, entry.file);
+        if (fs.existsSync(fp)) { safeUnlink(fp); removed++; }
+      }
+
+      // Process duplicates
+      for (const d of (plan.duplicates || [])) {
+        for (const idx of (d.remove || [])) {
+          const entry = manifest[idx];
+          if (!entry) continue;
+          const fp = path.join(kbDir, entry.category, entry.file);
+          if (fs.existsSync(fp)) { safeUnlink(fp); merged++; }
+        }
+      }
+
+      // Process reclassifications
+      for (const r of (plan.reclassify || [])) {
+        const entry = manifest[r.index];
+        if (!entry || !shared.KB_CATEGORIES.includes(r.to)) continue;
+        const srcPath = path.join(kbDir, entry.category, entry.file);
+        const destDir = path.join(kbDir, r.to);
+        if (!fs.existsSync(srcPath)) continue;
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        try {
+          const content = safeRead(srcPath);
+          const updated = content.replace(/^(category:\s*).+$/m, `$1${r.to}`);
+          safeWrite(path.join(destDir, entry.file), updated);
+          safeUnlink(srcPath);
+          reclassified++;
+        } catch {}
+      }
+
+      const summary = `${merged} duplicates merged, ${removed} stale removed, ${reclassified} reclassified`;
+      return jsonReply(res, 200, { ok: true, summary, plan });
+    } catch (e) { return jsonReply(res, 500, { error: e.message }); }
   }
 
   // GET /api/plans — list plan files (.md drafts from plans/ + .json PRDs from prd/)
@@ -1924,9 +2059,13 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       const body = await readBody(req);
       if (!body.message) return jsonReply(res, 400, { error: 'message required' });
 
-      // Concurrency guard — only one CC call at a time
-      if (ccInFlight) return jsonReply(res, 429, { error: 'Command Center is busy — wait for the current request to finish.' });
+      // Concurrency guard — only one CC call at a time, with auto-release for stuck requests
+      if (ccInFlight && (Date.now() - ccInFlightSince) < CC_INFLIGHT_TIMEOUT_MS) {
+        return jsonReply(res, 429, { error: 'Command Center is busy — wait for the current request to finish.' });
+      }
+      if (ccInFlight) console.log('[CC] Auto-releasing stuck in-flight guard after timeout');
       ccInFlight = true;
+      ccInFlightSince = Date.now();
 
       try {
         if (body.sessionId && body.sessionId !== ccSession.sessionId) {
@@ -1938,10 +2077,10 @@ What would you like to discuss or change? When you're happy, say "approve" and I
 
         if (result.code !== 0 || !result.text) {
           const debugInfo = result.code !== 0 ? `(exit code ${result.code})` : '(empty response)';
-          const stderr = (result.stderr || '').slice(-300);
-          console.error(`[CC] LLM failed ${debugInfo}: ${stderr}`);
+          const stderrTail = (result.stderr || '').trim().split('\n').filter(Boolean).slice(-3).join(' | ');
+          console.error(`[CC] LLM failed after retries ${debugInfo}: ${stderrTail}`);
           return jsonReply(res, 200, {
-            text: `I had trouble processing that ${debugInfo}. ${stderr ? 'Detail: ' + stderr.split('\n').pop() : 'Try again or rephrase.'}`,
+            text: `I had trouble processing that ${debugInfo}. ${stderrTail ? 'Detail: ' + stderrTail : ''}\n\nTry clicking **New Session** and sending your message again.`,
             actions: [], sessionId: ccSession.sessionId
           });
         }
@@ -1949,6 +2088,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
         return jsonReply(res, 200, { ...parseCCActions(result.text), sessionId: ccSession.sessionId, newSession: !wasResume });
       } finally {
         ccInFlight = false;
+        ccInFlightSince = 0;
       }
     } catch (e) { ccInFlight = false; return jsonReply(res, 500, { error: e.message }); }
   }
