@@ -906,7 +906,7 @@ function areDependenciesMet(item, config) {
     } catch {}
   }
   for (const depId of deps) {
-    const depItem = allWorkItems.find(w => w.sourcePlan === sourcePlan && w.planItemId === depId);
+    const depItem = allWorkItems.find(w => w.sourcePlan === sourcePlan && w.sourcePlanItem === depId);
     if (!depItem) {
       log('warn', `Dependency ${depId} not found for ${item.id} (plan: ${sourcePlan}) — treating as unmet`);
       return false;
@@ -1623,7 +1623,6 @@ function materializePlansAsWorkItems(config) {
           createdBy: 'engine:plan-discovery',
           sourcePlan: file,
           sourcePlanItem: item.id,
-          planItemId: item.id,
           depends_on: item.depends_on || [],
           branchStrategy: plan.branch_strategy || 'parallel',
           featureBranch: plan.feature_branch || null,

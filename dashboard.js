@@ -480,7 +480,7 @@ const server = http.createServer(async (req, res) => {
       if (project) {
         const wiPath = path.join(project.localPath, '.squad', 'work-items.json');
         const items = JSON.parse(safeRead(wiPath) || '[]');
-        const verify = items.find(w => w.sourcePlan === body.file && w.planItemId === 'VERIFY');
+        const verify = items.find(w => w.sourcePlan === body.file && w.sourcePlanItem === 'VERIFY');
         if (verify) {
           return jsonReply(res, 200, { ok: true, verifyId: verify.id });
         }
@@ -858,8 +858,7 @@ const server = http.createServer(async (req, res) => {
 
       // Clean dispatch entries for this item
       cleanDispatchEntries(d =>
-        (d.meta?.item?.sourcePlan === body.source && d.meta?.item?.sourcePlanItem === body.itemId) ||
-        (d.meta?.item?.planItemId === body.itemId && d.meta?.item?.sourcePlan === body.source)
+        d.meta?.item?.sourcePlan === body.source && d.meta?.item?.sourcePlanItem === body.itemId
       );
 
       return jsonReply(res, 200, { ok: true, cancelled });
@@ -1226,8 +1225,7 @@ const server = http.createServer(async (req, res) => {
       // Clean dispatch entries for deleted items
       for (const itemId of deletedItemIds) {
         cleanDispatchEntries(d =>
-          (d.meta?.item?.sourcePlan === body.source && d.meta?.item?.sourcePlanItem === itemId) ||
-          (d.meta?.item?.planItemId === itemId && d.meta?.item?.sourcePlan === body.source)
+          d.meta?.item?.sourcePlan === body.source && d.meta?.item?.sourcePlanItem === itemId
         );
       }
 
@@ -1416,8 +1414,7 @@ const server = http.createServer(async (req, res) => {
       }
       for (const itemId of deletedItemIds) {
         cleanDispatchEntries(d =>
-          (d.meta?.item?.sourcePlan === body.source && d.meta?.item?.sourcePlanItem === itemId) ||
-          (d.meta?.item?.planItemId === itemId && d.meta?.item?.sourcePlan === body.source)
+          d.meta?.item?.sourcePlan === body.source && d.meta?.item?.sourcePlanItem === itemId
         );
       }
 

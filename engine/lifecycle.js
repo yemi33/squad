@@ -39,7 +39,7 @@ function checkPlanCompletion(meta, config) {
       allWorkItems = allWorkItems.concat(wi);
     } catch {}
   }
-  const planItems = allWorkItems.filter(w => w.sourcePlan === planFile && w.planItemId !== 'PR' && w.planItemId !== 'VERIFY');
+  const planItems = allWorkItems.filter(w => w.sourcePlan === planFile && w.sourcePlanItem !== 'PR' && w.sourcePlanItem !== 'VERIFY');
   if (planItems.length === 0) return;
   if (!planItems.every(w => w.status === 'done' || w.status === 'failed')) return;
 
@@ -123,18 +123,18 @@ function checkPlanCompletion(meta, config) {
 
   // 3. For shared-branch plans, create PR work item
   if (plan.branch_strategy === 'shared-branch' && plan.feature_branch && wiPath) {
-    const existingPrItem = allWorkItems.find(w => w.sourcePlan === planFile && w.planItemId === 'PR');
+    const existingPrItem = allWorkItems.find(w => w.sourcePlan === planFile && w.sourcePlanItem === 'PR');
     if (!existingPrItem) {
       const id = shared.nextWorkItemId(workItems, 'PL-W');
       const featureBranch = plan.feature_branch;
       const mainBranch = primaryProject.mainBranch || 'main';
-      const itemSummary = doneItems.map(w => '- ' + w.planItemId + ': ' + w.title.replace('Implement: ', '')).join('\n');
+      const itemSummary = doneItems.map(w => '- ' + w.sourcePlanItem + ': ' + w.title.replace('Implement: ', '')).join('\n');
       workItems.push({
         id, title: `Create PR for plan: ${plan.plan_summary || planFile}`,
         type: 'implement', priority: 'high',
         description: `All plan items from \`${planFile}\` are complete on branch \`${featureBranch}\`.\n\n**Branch:** \`${featureBranch}\`\n**Target:** \`${mainBranch}\`\n\n## Completed Items\n${itemSummary}`,
         status: 'pending', created: e.ts(), createdBy: 'engine:plan-completion',
-        sourcePlan: planFile, planItemId: 'PR',
+        sourcePlan: planFile, sourcePlanItem: 'PR',
         branch: featureBranch, branchStrategy: 'shared-branch', project: projectName,
       });
       shared.safeWrite(wiPath, workItems);
@@ -142,7 +142,7 @@ function checkPlanCompletion(meta, config) {
   }
 
   // 4. Create verification work item (build, test, start webapp, write testing guide)
-  const existingVerify = allWorkItems.find(w => w.sourcePlan === planFile && w.planItemId === 'VERIFY');
+  const existingVerify = allWorkItems.find(w => w.sourcePlan === planFile && w.sourcePlanItem === 'VERIFY');
   if (!existingVerify && doneItems.length > 0) {
     const verifyId = shared.nextWorkItemId(workItems, 'PL-W');
     const planSlug = planFile.replace('.json', '');
@@ -225,7 +225,7 @@ function checkPlanCompletion(meta, config) {
       created: e.ts(),
       createdBy: 'engine:plan-verification',
       sourcePlan: planFile,
-      planItemId: 'VERIFY',
+      sourcePlanItem: 'VERIFY',
       project: projectName,
     });
     shared.safeWrite(wiPath, workItems);

@@ -505,10 +505,10 @@ function getPrdInfo(config) {
     for (const itemId of (pr.prdItems || [])) {
       if (!prdToPr[itemId]) prdToPr[itemId] = [];
       prdToPr[itemId].push({ id: pr.id, url: pr.url, title: pr.title, status: pr.status });
-      const planItemId = wiToPlanItem[itemId];
-      if (planItemId && planItemId !== itemId) {
-        if (!prdToPr[planItemId]) prdToPr[planItemId] = [];
-        prdToPr[planItemId].push({ id: pr.id, url: pr.url, title: pr.title, status: pr.status });
+      const prdItemId = wiToPlanItem[itemId];
+      if (prdItemId && prdItemId !== itemId) {
+        if (!prdToPr[prdItemId]) prdToPr[prdItemId] = [];
+        prdToPr[prdItemId].push({ id: pr.id, url: pr.url, title: pr.title, status: pr.status });
       }
     }
   }
