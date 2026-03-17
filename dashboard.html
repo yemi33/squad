@@ -71,7 +71,9 @@
   .modal-qa-thread { max-height: 200px; overflow-y: auto; margin-bottom: var(--space-4); }
   .modal-qa-q { font-size: var(--text-md); color: var(--blue); margin-bottom: var(--space-2); font-weight: 600; }
   .modal-qa-q .selection-ref { font-weight: 400; color: var(--muted); font-style: italic; display: block; font-size: var(--text-sm); margin-top: var(--space-1); }
-  .modal-qa-a { font-size: var(--text-md); color: var(--text); margin-bottom: var(--space-6); padding: var(--space-4) var(--space-5); background: var(--surface2); border-radius: var(--radius-md); border-left: 2px solid var(--blue); white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .modal-qa-a { font-size: var(--text-md); color: var(--text); margin-bottom: var(--space-6); padding: var(--space-4) var(--space-5); background: var(--surface2); border-radius: var(--radius-md); border-left: 2px solid var(--blue); white-space: pre-wrap; word-break: break-word; line-height: 1.5; position: relative; }
+  .llm-copy-btn { position:absolute;bottom:4px;right:4px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px;line-height:1 }
+  .llm-copy-btn:hover { color:var(--text) }
   .modal-qa-loading { font-size: var(--text-base); color: var(--muted); padding: var(--space-4) var(--space-5); display: flex; align-items: center; gap: var(--space-4); }
   .modal-qa-loading .dot-pulse { display: inline-flex; gap: 3px; }
   .modal-qa-loading .dot-pulse span { width: 5px; height: 5px; background: var(--blue); border-radius: 50%; animation: dotPulse 1.2s infinite; }
@@ -530,6 +532,8 @@
   .modal-copy.copied { color: var(--green); border-color: var(--green); }
   .modal-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: var(--space-2) var(--space-4); }
   .modal-close:hover { color: var(--text); }
+  .notif-badge { position: absolute; top: -4px; right: -4px; min-width: 8px; height: 8px; background: var(--red); border-radius: 50%; pointer-events: none; animation: notifPulse 2s infinite; }
+  @keyframes notifPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
   .modal-body { padding: var(--space-7) var(--space-8); overflow-y: auto; overflow-x: auto; white-space: pre-wrap; font-size: var(--text-md); line-height: 1.7; color: var(--muted); font-family: Consolas, monospace; }
 
   /* Responsive: tablet / narrow window */
@@ -768,6 +772,18 @@ function escHtml(s) {
 
 function statusColor(s) {
   return s === 'working' ? 'working' : s === 'done' ? 'done' : '';
+}
+
+function llmCopyBtn() {
+  return '<button class="llm-copy-btn" onclick="event.stopPropagation();copyLlmText(this)" title="Copy">&#x2398;</button>';
+}
+function copyLlmText(btn) {
+  const container = btn.parentElement;
+  const clone = container.cloneNode(true);
+  clone.querySelectorAll('.llm-copy-btn').forEach(b => b.remove());
+  navigator.clipboard.writeText(clone.textContent.trim());
+  btn.innerHTML = '&#10003;';
+  setTimeout(() => { btn.innerHTML = '&#x2398;'; }, 1500);
 }
 
 // -- Agent Detail Panel --
@@ -2916,6 +2932,42 @@ let _modalDocContext = { title: '', content: '', selection: '' };
 let _modalFilePath = null; // file path for steering (null = read-only Q&A only)
 let _modalOriginalPlan = null; // tracks original plan file when editing a forked version
 
+// ─── Notification Badges ──────────────────────────────────────────────────────
+// Show a red dot on a card/button when a background response arrives
+function showNotifBadge(targetEl) {
+  if (!targetEl || targetEl.querySelector('.notif-badge')) return;
+  targetEl.style.position = 'relative';
+  const dot = document.createElement('span');
+  dot.className = 'notif-badge';
+  targetEl.appendChild(dot);
+}
+function clearNotifBadge(targetEl) {
+  if (!targetEl) return;
+  const dot = targetEl.querySelector('.notif-badge');
+  if (dot) dot.remove();
+}
+// Find the plan/KB/skill card that matches a filePath
+function findCardForFile(filePath) {
+  if (!filePath) return null;
+  const fileName = filePath.split('/').pop();
+  // Search plan cards
+  const planCards = document.querySelectorAll('.plan-card[onclick]');
+  for (const card of planCards) {
+    if (card.getAttribute('onclick')?.includes(fileName)) return card;
+  }
+  // Search KB items
+  const kbItems = document.querySelectorAll('.kb-item[onclick]');
+  for (const item of kbItems) {
+    if (item.getAttribute('onclick')?.includes(fileName)) return item;
+  }
+  // Search inbox items, skill items
+  const inboxItems = document.querySelectorAll('.inbox-item[onclick]');
+  for (const item of inboxItems) {
+    if (item.getAttribute('onclick')?.includes(fileName)) return item;
+  }
+  return null;
+}
+
 function showModalQa() {
   document.getElementById('modal-qa').style.display = '';
 }
@@ -3004,6 +3056,9 @@ function _initQaSession() {
   var key = _modalFilePath || _modalDocContext.title || '';
   if (!key || _qaSessionKey === key) return;
   _qaSessionKey = key;
+  // Clear notification badge on the source card when reopening
+  const card = findCardForFile(_modalFilePath);
+  if (card) clearNotifBadge(card);
   var prior = _qaSessions.get(key);
   if (prior) {
     _qaHistory = prior.history;
@@ -3129,7 +3184,7 @@ async function _processQaMessage(message, selection) {
       const borderColor = data.edited ? 'var(--green)' : 'var(--blue)';
       const suffix = isVersion ? '\n\n✓ New version saved: ' + data.versionedFile
         : data.edited ? '\n\n✓ Document saved.' : '';
-      thread.innerHTML += '<div class="modal-qa-a" style="border-left-color:' + borderColor + '">' + escHtml(data.answer + suffix) + '</div>';
+      thread.innerHTML += '<div class="modal-qa-a" style="border-left-color:' + borderColor + '">' + llmCopyBtn() + escHtml(data.answer + suffix) + '</div>';
 
       // Track conversation history
       _qaHistory.push({ role: 'user', text: message });
@@ -3184,8 +3239,12 @@ async function _processQaMessage(message, selection) {
       docContext: sessionDocContext,
       filePath: sessionFilePath,
     });
-    // If modal was closed while processing, clean up session key now
-    if (!modalIsOpen) _qaSessionKey = '';
+    // If modal was closed while processing, show notification badge on source card
+    if (!modalIsOpen) {
+      const card = findCardForFile(sessionFilePath);
+      if (card) showNotifBadge(card);
+      _qaSessionKey = '';
+    }
   }
 
   // Process next queued message
@@ -3826,6 +3885,7 @@ function toggleCommandCenter() {
   const drawer = document.getElementById('cc-drawer');
   drawer.style.display = _ccOpen ? 'flex' : 'none';
   if (_ccOpen) {
+    clearNotifBadge(document.getElementById('cc-toggle-btn'));
     document.getElementById('cc-input').focus();
     ccRestoreMessages();
   }
@@ -3875,9 +3935,11 @@ function ccAddMessage(role, html, skipSave) {
   const el = document.getElementById('cc-messages');
   const isUser = role === 'user';
   const div = document.createElement('div');
+  const isAssistant = !isUser;
+  div.className = isAssistant ? 'cc-msg-assistant' : '';
   div.style.cssText = 'padding:8px 12px;border-radius:8px;font-size:12px;line-height:1.6;max-width:95%;' +
-    (isUser ? 'background:var(--blue);color:#fff;align-self:flex-end' : 'background:var(--surface2);color:var(--text);align-self:flex-start;border:1px solid var(--border)');
-  div.innerHTML = html;
+    (isUser ? 'background:var(--blue);color:#fff;align-self:flex-end' : 'background:var(--surface2);color:var(--text);align-self:flex-start;border:1px solid var(--border);position:relative');
+  div.innerHTML = (isAssistant && !html.includes('color:var(--red)') && !html.includes('cc-queued-pill') ? llmCopyBtn() : '') + html;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
   if (!skipSave) {
@@ -4009,6 +4071,8 @@ async function _ccDoSend(message, skipUserMsg) {
     ccAddMessage('assistant', '<span style="color:var(--red)">Error: ' + escHtml(e.message) + '</span>');
   } finally {
     _ccSending = false;
+    // Show notification badge on CC button if drawer is closed
+    if (!_ccOpen) showNotifBadge(document.getElementById('cc-toggle-btn'));
   }
 }
 
