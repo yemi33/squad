@@ -3382,13 +3382,17 @@ function renderPlans(plans) {
     }
   }
 
-  // Track which .md plans have a paused PRD
+  // Track which .md plans have a paused PRD, and map .md → PRD .json
   const pausedPlanFiles = new Set();
+  const planToPrdFile = {}; // .md filename → .json PRD filename
   for (const p of plans) {
-    if (p.format === 'prd' && p.status === 'awaiting-approval' && !p.archived) {
-      // Find the source .md plan for this PRD
+    if (p.format === 'prd' && !p.archived) {
+      // Link source .md plans to this PRD
       const srcPlan = plans.find(s => s.format === 'draft' && s.file.endsWith('.md'));
-      if (srcPlan) pausedPlanFiles.add(srcPlan.file);
+      if (srcPlan) {
+        planToPrdFile[srcPlan.file] = p.file;
+        if (p.status === 'awaiting-approval') pausedPlanFiles.add(srcPlan.file);
+      }
     }
   }
 
@@ -3430,14 +3434,15 @@ function renderPlans(plans) {
     // For .md drafts: show Execute only if no PRD exists and not paused
     const executeBtn = isDraft && !isWorking && !isPrdPaused && !isArchived ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green);font-weight:600" ' +
       'onclick="event.stopPropagation();planExecute(\'' + escHtml(p.file) + '\',\'' + escHtml(p.project) + '\',this)">Execute</button>' : '';
-    // Pause/Resume: for PRD-backed plans, use isPrdPaused; for standalone PRDs, use isPaused
+    // Pause/Resume: target the PRD .json file if it exists, otherwise the plan itself
+    const prdFile = planToPrdFile[p.file] || (p.file.endsWith('.json') ? p.file : '');
     const effectivelyPaused = isPrdPaused || isPaused;
-    const showPause = !effectivelyPaused && (isApproved || isWorking || isCompleted) && !isDraft && !isArchived;
-    const showResume = effectivelyPaused && !isArchived;
+    const showPause = !effectivelyPaused && prdFile && !isArchived;
+    const showResume = effectivelyPaused && prdFile && !isArchived;
     const pauseBtn = showPause ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--yellow)" ' +
-      'onclick="event.stopPropagation();planPause(\'' + escHtml(p.file) + '\')">Pause</button>' : '';
+      'onclick="event.stopPropagation();planPause(\'' + escHtml(prdFile) + '\')">Pause</button>' : '';
     const resumeBtn = showResume ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green)" ' +
-      'onclick="event.stopPropagation();planApprove(\'' + escHtml(p.file) + '\')">Resume</button>' : '';
+      'onclick="event.stopPropagation();planApprove(\'' + escHtml(prdFile) + '\')">Resume</button>' : '';
     const deleteBtn = !isArchived ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--red)" ' +
       'onclick="event.stopPropagation();planDelete(\'' + escHtml(p.file) + '\')">Delete</button>' : '';
 
