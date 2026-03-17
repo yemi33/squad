@@ -20,9 +20,15 @@ const { getAgents, getAgentDetail, getPrdInfo, getWorkItems, getDispatchQueue,
   SQUAD_DIR, AGENTS_DIR, ENGINE_DIR, INBOX_DIR, DISPATCH_PATH, PRD_DIR } = queries;
 
 const PORT = parseInt(process.env.PORT || process.argv[2]) || 7331;
-const CONFIG = queries.getConfig();
-const PROJECTS = _getProjects(CONFIG);
-const projectNames = PROJECTS.map(p => p.name || 'Project').join(' + ');
+let CONFIG = queries.getConfig();
+let PROJECTS = _getProjects(CONFIG);
+let projectNames = PROJECTS.map(p => p.name || 'Project').join(' + ');
+
+function reloadConfig() {
+  CONFIG = queries.getConfig();
+  PROJECTS = _getProjects(CONFIG);
+  projectNames = PROJECTS.map(p => p.name || 'Project').join(' + ');
+}
 
 const PLANS_DIR = path.join(SQUAD_DIR, 'plans');
 
@@ -383,49 +389,119 @@ function parseCCActions(text) {
   return { text: displayText, actions };
 }
 
-// Route doc chat/steer through CC's persistent session for squad-aware context
+// ── Shared LLM call core — used by CC panel and doc modals ──────────────────
+
+// Session store for doc modals — keyed by filePath or title
+const docSessions = new Map(); // key → { sessionId, lastActiveAt, turnCount }
+
+// Resolve session from any store (CC global or doc-specific)
+function resolveSession(store, key) {
+  if (store === 'cc') {
+    return ccSessionValid() ? { sessionId: ccSession.sessionId, turnCount: ccSession.turnCount } : null;
+  }
+  if (!key) return null;
+  const s = docSessions.get(key);
+  if (!s) return null;
+  const age = Date.now() - new Date(s.lastActiveAt).getTime();
+  if (age > CC_SESSION_EXPIRY_MS || s.turnCount >= CC_SESSION_MAX_TURNS) {
+    docSessions.delete(key);
+    return null;
+  }
+  return s;
+}
+
+// Update session after successful call
+function updateSession(store, key, sessionId, existing) {
+  if (!sessionId) return;
+  const now = new Date().toISOString();
+  if (store === 'cc') {
+    ccSession = {
+      sessionId,
+      createdAt: existing ? ccSession.createdAt : now,
+      lastActiveAt: now,
+      turnCount: (existing ? ccSession.turnCount : 0) + 1,
+    };
+    safeWrite(path.join(ENGINE_DIR, 'cc-session.json'), ccSession);
+  } else if (key) {
+    const prev = docSessions.get(key);
+    docSessions.set(key, {
+      sessionId,
+      lastActiveAt: now,
+      turnCount: (existing && prev ? prev.turnCount : 0) + 1,
+    });
+  }
+}
+
+/**
+ * Core LLM call — shared by CC panel and doc modals.
+ * @param {string} message - User message
+ * @param {object} opts
+ * @param {string} opts.store - 'cc' or 'doc'
+ * @param {string} opts.sessionKey - Key for doc session (filePath or title)
+ * @param {string} opts.extraContext - Additional context prepended to message (e.g., document)
+ * @param {string} opts.label - Metrics label
+ * @param {number} opts.timeout - Timeout in ms
+ * @param {number} opts.maxTurns - Max tool-use turns
+ * @param {string} opts.allowedTools - Comma-separated tool list
+ */
+async function ccCall(message, { store = 'cc', sessionKey, extraContext, label = 'command-center', timeout = 300000, maxTurns = 5, allowedTools = 'Read,Glob,Grep,WebFetch,WebSearch' } = {}) {
+  const existing = resolveSession(store, sessionKey);
+  let sessionId = existing ? existing.sessionId : null;
+
+  // For CC: also validate client-provided sessionId matches
+  const parts = [`## Current Squad State (${new Date().toISOString().slice(0, 16)})\n\n${buildCCStatePreamble()}`];
+  if (extraContext) parts.push(extraContext);
+  parts.push(message);
+  const prompt = parts.join('\n\n---\n\n');
+
+  let result = await llm.callLLM(prompt, sessionId ? '' : CC_STATIC_SYSTEM_PROMPT, {
+    timeout, label, model: 'sonnet', maxTurns, allowedTools, sessionId,
+  });
+  llm.trackEngineUsage(label, result.usage);
+
+  // If resume failed, retry with a fresh session
+  if ((result.code !== 0 || !result.text) && sessionId) {
+    console.log(`[${label}] Resume failed, retrying with fresh session...`);
+    result = await llm.callLLM(prompt, CC_STATIC_SYSTEM_PROMPT, {
+      timeout, label, model: 'sonnet', maxTurns, allowedTools,
+    });
+    llm.trackEngineUsage(label, result.usage);
+    sessionId = null;
+  }
+
+  // Update session on success
+  if (result.code === 0 && result.text) {
+    updateSession(store, sessionKey, result.sessionId || sessionId, !!sessionId);
+  }
+
+  return result;
+}
+
+// Doc-specific wrapper — adds document context, parses ---DOCUMENT---
 async function ccDocCall({ message, document, title, filePath, selection, canEdit, isJson }) {
   const docContext = `## Document Context\n**${title || 'Document'}**${filePath ? ' (`' + filePath + '`)' : ''}${isJson ? ' (JSON)' : ''}\n${selection ? '\n**Selected text:**\n> ' + selection.slice(0, 1500) + '\n' : ''}\n\`\`\`\n${document.slice(0, 20000)}\n\`\`\`\n${canEdit ? '\nIf editing: respond with your explanation, then `---DOCUMENT---` on its own line, then the COMPLETE updated file.' : '\n(Read-only — answer questions only.)'}`;
 
-  const prompt = `## Current Squad State (${new Date().toISOString().slice(0, 16)})\n\n${buildCCStatePreamble()}\n\n---\n\n${docContext}\n\n---\n\n${message}`;
-
-  const sessionId = ccSessionValid() ? ccSession.sessionId : null;
-
-  const result = await llm.callLLM(prompt, sessionId ? '' : CC_STATIC_SYSTEM_PROMPT, {
-    timeout: 120000, label: 'command-center', model: 'sonnet', maxTurns: 3,
-    allowedTools: 'Read,Glob,Grep', sessionId,
+  const result = await ccCall(message, {
+    store: 'doc', sessionKey: filePath || title,
+    extraContext: docContext, label: 'doc-chat',
+    timeout: 120000, maxTurns: 3, allowedTools: 'Read,Glob,Grep',
   });
-  llm.trackEngineUsage('command-center', result.usage);
-
-  // Update CC session
-  const returnedId = result.sessionId || sessionId;
-  if (returnedId) {
-    ccSession = {
-      sessionId: returnedId,
-      createdAt: sessionId ? ccSession.createdAt : new Date().toISOString(),
-      lastActiveAt: new Date().toISOString(),
-      turnCount: (sessionId ? ccSession.turnCount : 0) + 1,
-    };
-    safeWrite(path.join(ENGINE_DIR, 'cc-session.json'), ccSession);
-  }
 
   if (result.code !== 0 || !result.text) {
-    return { answer: 'Failed to process request. Try again.', content: null };
+    return { answer: 'Failed to process request. Try again.', content: null, actions: [] };
   }
 
-  // Parse ---DOCUMENT--- delimiter for doc edits
-  const text = result.text;
-  const delimIdx = text.indexOf('---DOCUMENT---');
+  const { text: stripped, actions } = parseCCActions(result.text);
+
+  const delimIdx = stripped.indexOf('---DOCUMENT---');
   if (delimIdx >= 0) {
-    const answer = text.slice(0, delimIdx).trim();
-    let content = text.slice(delimIdx + '---DOCUMENT---'.length).trim();
+    const answer = stripped.slice(0, delimIdx).trim();
+    let content = stripped.slice(delimIdx + '---DOCUMENT---'.length).trim();
     content = content.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim();
-    return { answer, content };
+    return { answer, content, actions };
   }
 
-  // Also strip any ===ACTIONS=== (CC might still emit them)
-  const actIdx = text.indexOf('===ACTIONS===');
-  return { answer: actIdx >= 0 ? text.slice(0, actIdx).trim() : text, content: null };
+  return { answer: stripped, content: null, actions };
 }
 
 function buildTriageSysPrompt(ctx) {
@@ -1736,23 +1812,23 @@ What would you like to discuss or change? When you're happy, say "approve" and I
         if (diskContent !== null) currentContent = diskContent;
       }
 
-      const { answer, content } = await ccDocCall({
+      const { answer, content, actions } = await ccDocCall({
         message: body.message, document: currentContent, title: body.title,
         filePath: body.filePath, selection: body.selection, canEdit, isJson,
       });
 
-      if (!content) return jsonReply(res, 200, { ok: true, answer, edited: false });
+      if (!content) return jsonReply(res, 200, { ok: true, answer, edited: false, actions });
 
       if (isJson) {
         try { JSON.parse(content); } catch (e) {
-          return jsonReply(res, 200, { ok: true, answer: answer + '\n\n(JSON invalid — not saved: ' + e.message + ')', edited: false });
+          return jsonReply(res, 200, { ok: true, answer: answer + '\n\n(JSON invalid — not saved: ' + e.message + ')', edited: false, actions });
         }
       }
       if (canEdit && fullPath) {
         safeWrite(fullPath, content);
-        return jsonReply(res, 200, { ok: true, answer, edited: true, content });
+        return jsonReply(res, 200, { ok: true, answer, edited: true, content, actions });
       }
-      return jsonReply(res, 200, { ok: true, answer: answer + '\n\n(Read-only — changes not saved)', edited: false });
+      return jsonReply(res, 200, { ok: true, answer: answer + '\n\n(Read-only — changes not saved)', edited: false, actions });
     } catch (e) { return jsonReply(res, 500, { error: e.message }); }
   }
 
@@ -2025,6 +2101,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
 
       config.projects.push(project);
       safeWrite(configPath, config);
+      reloadConfig(); // Update in-memory project list immediately
 
       // Create project-local state files
       const squadDir = path.join(target, '.squad');
@@ -2059,24 +2136,12 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       ccInFlight = true;
 
       try {
-        // Check if client-provided sessionId matches our active session
-        // Resume if client sessionId matches and session is still valid
-        let sessionId = (body.sessionId && body.sessionId === ccSession.sessionId && ccSessionValid())
-          ? ccSession.sessionId : null;
-
-        const prompt = `## Current Squad State (${new Date().toISOString().slice(0, 16)})\n\n${buildCCStatePreamble()}\n\n---\n\n${body.message}`;
-        const ccOpts = { timeout: 300000, label: 'command-center', model: 'sonnet', maxTurns: 5, allowedTools: 'Read,Glob,Grep,WebFetch,WebSearch' };
-
-        let result = await llm.callLLM(prompt, sessionId ? '' : CC_STATIC_SYSTEM_PROMPT, { ...ccOpts, sessionId });
-        llm.trackEngineUsage('command-center', result.usage);
-
-        // If resume failed, retry with a fresh session
-        if ((result.code !== 0 || !result.text) && sessionId) {
-          console.log('[CC] Resume failed, retrying with fresh session...');
-          result = await llm.callLLM(prompt, CC_STATIC_SYSTEM_PROMPT, ccOpts);
-          llm.trackEngineUsage('command-center', result.usage);
-          sessionId = null; // Reset so session update below creates a new session
+        if (body.sessionId && body.sessionId !== ccSession.sessionId) {
+          ccSession = { sessionId: null, createdAt: null, lastActiveAt: null, turnCount: 0 };
         }
+        const wasResume = !!(body.sessionId && body.sessionId === ccSession.sessionId && ccSessionValid());
+
+        const result = await ccCall(body.message, { store: 'cc' });
 
         if (result.code !== 0 || !result.text) {
           const debugInfo = result.code !== 0 ? `(exit code ${result.code})` : '(empty response)';
@@ -2088,21 +2153,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
           });
         }
 
-        // Update session state on success
-        const returnedSessionId = result.sessionId || sessionId;
-        if (returnedSessionId) {
-          ccSession = {
-            sessionId: returnedSessionId,
-            createdAt: sessionId ? ccSession.createdAt : new Date().toISOString(),
-            lastActiveAt: new Date().toISOString(),
-            turnCount: (sessionId ? ccSession.turnCount : 0) + 1,
-          };
-          safeWrite(path.join(ENGINE_DIR, 'cc-session.json'), ccSession);
-        }
-
-        // Tell frontend if this is a new session (so it can clear stale messages)
-        const isNewSession = !sessionId || returnedSessionId !== body.sessionId;
-        return jsonReply(res, 200, { ...parseCCActions(result.text), sessionId: returnedSessionId, newSession: isNewSession });
+        return jsonReply(res, 200, { ...parseCCActions(result.text), sessionId: ccSession.sessionId, newSession: !wasResume });
       } finally {
         ccInFlight = false;
       }
