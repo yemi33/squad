@@ -207,7 +207,7 @@ The web dashboard at `http://localhost:7331` provides:
 - **Plans** — plan approval UI with Approve / Discuss & Revise / Reject. Click to open in doc-chat modal for natural language editing; "Generate PRD" button appears after edits.
 - **Knowledge Base** — browsable by category with inline Q&A (Haiku-powered)
 - **PRD Progress** — dependency graph view, per-item retry button, "Edit PRD" and "Regenerate" actions. Failed items show green retry button.
-- **Token Usage** — per-agent and per-day token tracking, plus engine Haiku usage (triage, consolidation, doc-chat)
+- **Token Usage** — per-agent and per-day token tracking, plus engine LLM usage (command-center, doc-chat, consolidation)
 - **Pull Requests** — paginated PR tracker sorted by date, with review/build/merge status
 - **Skills** — agent-created reusable workflows (squad-wide + project-specific), click to view full content
 - **Notes Inbox + Team Notes** — learnings and team rules, editable from dashboard modal
@@ -517,7 +517,7 @@ To move to a new machine: `npm install -g @yemi33/squad && squad init --force`, 
     lifecycle.js          <- Post-completion hooks, plan chaining, PR sync, metrics
     consolidation.js     <- Haiku-powered inbox consolidation, knowledge base
     ado.js               <- ADO token management, PR polling, PR reconciliation
-    llm.js               <- Shared Haiku wrapper (triage, doc-chat, steer, ask-about)
+    llm.js               <- callLLM() with session resume, trackEngineUsage()
     spawn-agent.js       <- Agent spawn wrapper (resolves claude cli.js)
     ado-mcp-wrapper.js   <- ADO MCP authentication wrapper
     check-status.js      <- Quick status check without full engine load

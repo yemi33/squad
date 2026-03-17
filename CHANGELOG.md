@@ -20,7 +20,7 @@ All notable changes to Squad are documented here. Versions are auto-published to
 - **Auto-detect user questions** — drop `ask-*.md` files in inbox, engine routes to an agent
 - **Solo reviewer skip** — `@squad` keyword not required when you're the only reviewer
 - **Knowledge base** — categorized agent learnings stored in `knowledge/` (architecture, conventions, reviews, etc.)
-- **Command Center triage** — natural language input auto-routed to the right command type
+- **Command Center** — persistent multi-turn Sonnet sessions with full squad awareness and tool access
 - **Zombie engine elimination** — EPERM file lock fixes, stale PID detection, Windows-safe atomic writes
 - **ADO token auto-refresh** — handles expired Azure DevOps authentication tokens
 - **Cooldown system** — prevents re-dispatching recently completed work

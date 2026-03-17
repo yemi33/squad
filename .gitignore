@@ -4,9 +4,14 @@ engine/log.json
 engine/control.json
 engine/prompt-*.md
 engine/sysprompt-*.md
+engine/command-center-*.pid
+engine/command-center-*.md
+engine/doc-chat-*.pid
+engine/cc-session.json
 engine/metrics.json
 agents/*/status.json
 agents/*/output.log
+agents/*/output-*.log
 agents/*/live-output.log
 identity/now.md
 

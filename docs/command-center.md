@@ -147,14 +147,6 @@ Frontend
 | `dashboard.js` | CC endpoint, `buildCCStatePreamble()`, `ccDocCall()`, `parseCCActions()` |
 | `dashboard.html` | Frontend: localStorage persistence, session indicator, New Session button |
 
-## vs Command Bar
+## Command Bar
 
-The command bar at the top of the dashboard still works for quick commands.
-
-| | Command Bar | Command Center |
-|---|---|---|
-| Model | Haiku (fast, cheap) | Sonnet (persistent session) |
-| Tools | None | Read, Glob, Grep, Web |
-| Mode | Classify and dispatch | Conversational + actions |
-| Context | Squad state summary | Full state + file access + session memory |
-| Best for | Quick dispatches | Questions, reasoning, multi-step |
+The command bar at the top of the dashboard routes all input to the CC panel. Typing in the command bar opens the CC drawer and sends the message as a CC turn.

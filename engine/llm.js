@@ -1,6 +1,6 @@
 /**
  * engine/llm.js — Shared LLM utilities for Squad engine + dashboard
- * Provides callLLM() (with optional session resume), callHaiku(), and triageCommand().
+ * Provides callLLM() (with optional session resume) and trackEngineUsage().
  */
 
 const path = require('path');
@@ -89,24 +89,7 @@ function callLLM(promptText, sysPromptText, { timeout = 120000, label = 'llm', m
   });
 }
 
-function callHaiku(promptText, sysPromptText, { timeout = 60000, label = 'llm' } = {}) {
-  return callLLM(promptText, sysPromptText, { timeout, label, model: 'haiku', maxTurns: 1 });
-}
-
-// ── Domain Functions ────────────────────────────────────────────────────────
-
-async function triageCommand(message, sysPrompt) {
-  const userPrompt = `Classify this command and return ONLY a JSON object. No explanation, no markdown fences, no conversation.\n\nUser command: ${message}`;
-  const result = await callHaiku(userPrompt, sysPrompt, { timeout: 45000, label: 'triage' });
-  trackEngineUsage('triage', result.usage);
-  if (result.code !== 0 || !result.text) throw new Error('Triage failed (code=' + result.code + ')');
-  let output = result.text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
-  return JSON.parse(output);
-}
-
 module.exports = {
   callLLM,
-  callHaiku,
   trackEngineUsage,
-  triageCommand,
 };

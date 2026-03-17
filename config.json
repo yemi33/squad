@@ -153,6 +153,30 @@
           "lookbackDays": 7
         }
       }
+    },
+    {
+      "name": "bebop-workspaces-poc",
+      "description": "",
+      "localPath": "C:/Users/yemishin/Bebop_Workspaces",
+      "repoHost": "github",
+      "repositoryId": "",
+      "adoOrg": "x3-design",
+      "adoProject": "",
+      "repoName": "Bebop_Workspaces",
+      "mainBranch": "main",
+      "prUrlBase": "https://github.com/x3-design/Bebop_Workspaces/pull/",
+      "workSources": {
+        "pullRequests": {
+          "enabled": true,
+          "path": ".squad/pull-requests.json",
+          "cooldownMinutes": 30
+        },
+        "workItems": {
+          "enabled": true,
+          "path": ".squad/work-items.json",
+          "cooldownMinutes": 0
+        }
+      }
     }
   ],
   "engine": {

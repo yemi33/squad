@@ -436,14 +436,6 @@
   }
   .cmd-history-resubmit:hover { background: rgba(88,166,255,0.1); border-color: var(--blue); }
   .cmd-history-empty { color: var(--muted); font-size: var(--text-md); padding: var(--space-8) 0; text-align: center; }
-  .cmd-progress { display: none; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 12px; background: var(--surface2); border: 1px solid var(--border); border-left: 3px solid var(--blue); border-radius: var(--radius-sm); font-size: 12px; color: var(--muted); }
-  .cmd-progress.active { display: flex; }
-  .cmd-progress .dot-pulse { display: inline-flex; gap: 3px; }
-  .cmd-progress .dot-pulse span { width: 5px; height: 5px; background: var(--blue); border-radius: 50%; animation: dotPulse 1.2s infinite; }
-  .cmd-progress .dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
-  .cmd-progress .dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
-  .cmd-progress-text { color: var(--text); }
-  .cmd-progress-sub { font-size: 10px; color: var(--muted); margin-left: auto; }
   .cmd-toast {
     display: none; padding: var(--space-4) var(--space-7); border-radius: var(--radius-sm); font-size: var(--text-md);
     margin-top: var(--space-5); animation: fadeIn 0.3s;
@@ -631,16 +623,7 @@
       <span>Ask anything, dispatch work, manage plans — powered by Sonnet</span>
       <button class="cmd-history-btn" onclick="cmdShowHistory()">Past Commands</button>
     </div>
-    <div class="cmd-progress" id="cmd-progress">
-      <div class="dot-pulse"><span></span><span></span><span></span></div>
-      <span class="cmd-progress-text" id="cmd-progress-text">Thinking...</span>
-      <span class="cmd-progress-sub" id="cmd-progress-sub"></span>
-    </div>
     <div class="cmd-toast" id="cmd-toast"></div>
-    <div id="cmd-answer" style="display:none;margin-top:8px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:var(--radius-sm);font-size:12px;color:var(--text);line-height:1.5;white-space:pre-wrap;cursor:pointer;position:relative" onclick="this.style.display='none'">
-      <span style="position:absolute;top:4px;right:8px;color:var(--muted);font-size:10px">click to dismiss</span>
-      <span id="cmd-answer-text"></span>
-    </div>
   </section>
 
   <section>
@@ -2506,7 +2489,7 @@ function renderTokenUsage(metrics) {
   // Engine (Haiku) usage table
   const engineEntries = Object.entries(engine).filter(([, e]) => (e.costUsd || 0) > 0 || (e.calls || 0) > 0);
   if (engineEntries.length > 0) {
-    const labels = { 'consolidation': 'Consolidation', 'triage': 'Command Triage', 'doc-chat': 'Doc Q&A + Edit', 'steer-document': 'Doc Steering', 'ask-about': 'Doc Q&A' };
+    const labels = { 'consolidation': 'Consolidation', 'command-center': 'Command Center', 'doc-chat': 'Doc Chat' };
     html += '<div style="font-size:10px;color:var(--muted);margin:12px 0 4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Engine Usage (Haiku)</div>';
     html += '<table class="token-agent-table"><thead><tr><th>Operation</th><th>Cost</th><th>Calls</th><th>Input</th><th>Output</th><th>$/call</th></tr></thead><tbody>';
     for (const [cat, e] of engineEntries.sort((a, b) => (b[1].costUsd || 0) - (a[1].costUsd || 0))) {
@@ -2908,92 +2891,6 @@ function cmdKeyDown(e) {
   }
 }
 
-// Triage via Haiku LLM, fallback to regex parser
-let _lastTriageExchange = null; // { userMessage, response } for follow-up context
-
-// Feature 2: Client-side instant status answers
-function tryClientSideAnswer(raw) {
-  var t = raw.toLowerCase().trim();
-  var statusRe = /^(what('s| is| are) (everyone|the squad|the team|agents?|all agents?) doing|squad status|status$|team status|agent status|who('s| is) (working|busy|idle|free|available)|what('s| is) (active|running|happening|going on)|any(one|body) (working|busy|idle|free)|show (me )?status)/;
-  if (!statusRe.test(t)) return null;
-  var working = (agentData || []).filter(function(a) { return a.status === 'working'; });
-  var idle = (agentData || []).filter(function(a) { return a.status !== 'working'; });
-  var lines = [];
-  if (working.length > 0) {
-    lines.push('Working (' + working.length + '):');
-    working.forEach(function(a) { lines.push('  ' + a.emoji + ' ' + a.name + ' — ' + (a.currentTask || a.lastAction || 'working').slice(0, 80)); });
-  }
-  if (idle.length > 0) {
-    lines.push('Idle (' + idle.length + '): ' + idle.map(function(a) { return a.name; }).join(', '));
-  }
-  var disp = window._lastDispatch || {};
-  lines.push('Dispatch: ' + ((disp.active || []).length) + ' active, ' + ((disp.pending || []).length) + ' pending');
-  return { intent: 'answer', answer: lines.join('\n') };
-}
-
-// Feature 3: Skip Haiku for unambiguous intents
-function canSkipHaiku(raw) {
-  var t = raw.trim();
-  // Explicit slash commands — regex parser handles perfectly
-  if (/^\/(?:plan|note|decide|prd|stop|cancel|kill)\b/i.test(t)) return true;
-  // @agent + clear action — no ambiguity about who or what
-  if (/^@\w+\s+\S/.test(t) && !_lastTriageExchange) return true;
-  // Natural "remember" keywords — always a note
-  if (/^(remember|don't forget|note that|keep in mind)\b/i.test(t)) return true;
-  // Short imperative with clear verb and no references to existing items
-  if (!_lastTriageExchange && /^(fix|implement|add|create|build|test|explore|investigate|run|deploy|refactor)\s+/i.test(t) && t.length < 150 && !/\b(the plan|ripley's|dallas's|rebecca's|lambert's|ralph's|failed|wave|that)\b/i.test(t)) return true;
-  return false;
-}
-
-async function cmdTriageAndSubmit(raw) {
-  // Tier 1: Instant client-side answer (no network)
-  var clientAnswer = tryClientSideAnswer(raw);
-  if (clientAnswer) return clientAnswer;
-
-  // Tier 2: Regex fast-path for unambiguous intents (no Haiku wait)
-  if (canSkipHaiku(raw)) {
-    _lastTriageExchange = null;
-    return cmdParseInput(raw);
-  }
-
-  // Tier 3: Haiku LLM triage for ambiguous / contextual inputs
-  try {
-    var body = { message: raw };
-    if (_lastTriageExchange) body.previousExchange = _lastTriageExchange;
-    var resp = await fetch('/api/triage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(50000),
-    });
-    if (resp.ok) {
-      var parsed = await resp.json();
-      if (parsed.intent && (parsed.title || parsed.answer || parsed.retryIds || parsed.agents)) {
-        _lastTriageExchange = { userMessage: raw, response: parsed };
-        return parsed;
-      }
-    }
-  } catch (e) {
-    console.warn('Triage failed, using regex fallback:', e.message);
-  }
-  _lastTriageExchange = null;
-  return cmdParseInput(raw);
-}
-
-// Unified submit
-function cmdProgress(text, sub) {
-  const el = document.getElementById('cmd-progress');
-  const textEl = document.getElementById('cmd-progress-text');
-  const subEl = document.getElementById('cmd-progress-sub');
-  if (text) {
-    textEl.textContent = text;
-    subEl.textContent = sub || '';
-    el.classList.add('active');
-  } else {
-    el.classList.remove('active');
-  }
-}
-
 async function cmdSubmit() {
   const input = document.getElementById('cmd-input');
   const raw = input.value.trim();
@@ -3008,186 +2905,6 @@ async function cmdSubmit() {
   return;
 }
 
-async function _legacyCmdSubmit() {
-  cmdDismissAnswer();
-  const input = document.getElementById('cmd-input');
-  const raw = input.value.trim();
-  if (!raw) return showToast('cmd-toast', 'Type something first', false);
-
-  const btn = document.getElementById('cmd-send-btn');
-  btn.disabled = true;
-  const startTime = Date.now();
-  cmdProgress('Understanding your request...', '');
-  const elapsed = () => { const s = Math.floor((Date.now() - startTime) / 1000); return s > 0 ? s + 's' : ''; };
-  const elapsedTimer = setInterval(() => {
-    const sub = document.getElementById('cmd-progress-sub');
-    if (sub) sub.textContent = elapsed();
-  }, 1000);
-  const slowTimer = setTimeout(() => cmdProgress('Still thinking...', elapsed()), 8000);
-
-  let parsed;
-  try {
-    parsed = await cmdTriageAndSubmit(raw);
-  } catch (e) {
-    clearTimeout(slowTimer);
-    clearInterval(elapsedTimer);
-    cmdProgress(null);
-    btn.disabled = false;
-    btn.innerHTML = 'Send <kbd>Ctrl+Enter</kbd>';
-    showToast('cmd-toast', 'Error: ' + e.message, false);
-    return;
-  }
-  clearTimeout(slowTimer);
-
-  const intentLabels = { 'work-item': 'Creating work item...', note: 'Saving note...', plan: 'Creating plan...', prd: 'Creating PRD item...', retry: 'Retrying work items...', answer: 'Got it!', cancel: 'Cancelling...' };
-  cmdProgress(intentLabels[parsed.intent] || 'Processing...', elapsed());
-
-  try {
-    if (parsed.intent === 'answer') {
-      cmdShowAnswer(parsed.answer || parsed.title || 'No answer');
-    } else if (parsed.intent === 'cancel') {
-      await cmdSubmitCancel(parsed);
-    } else if (parsed.intent === 'retry') {
-      await cmdSubmitRetry(parsed);
-    } else if (parsed.intent === 'note') {
-      await cmdSubmitNote(parsed);
-    } else if (parsed.intent === 'plan' || parsed.intent === 'prd') {
-      await cmdSubmitPlan(parsed);
-    } else {
-      await cmdSubmitWorkItem(parsed);
-    }
-    cmdSaveHistory(raw, parsed.intent);
-    _cmdHistoryIdx = -1;
-    _cmdHistoryDraft = '';
-    input.value = '';
-    cmdAutoResize();
-    cmdRenderMeta();
-  } catch (e) {
-    showToast('cmd-toast', 'Error: ' + e.message, false);
-  } finally {
-    clearInterval(elapsedTimer);
-    cmdProgress(null);
-    btn.disabled = false;
-    btn.innerHTML = 'Send <kbd>Ctrl+Enter</kbd>';
-  }
-}
-
-async function cmdSubmitWorkItem(parsed) {
-  const body = {
-    title: parsed.title,
-    type: parsed.type,
-    priority: parsed.priority,
-    description: parsed.description,
-  };
-  if (parsed.project) body.project = parsed.project;
-  if (parsed.fanout) body.scope = 'fan-out';
-  if (parsed.agents.length === 1) body.agent = parsed.agents[0];
-  // For multiple agent mentions without @everyone, treat as fan-out with agent list
-  if (parsed.agents.length > 1) {
-    body.scope = 'fan-out';
-    body.agents = parsed.agents;
-  }
-
-  const res = await fetch('/api/work-items', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to add');
-  const agentLabel = parsed.fanout ? ' (fan-out)' : parsed.agents.length ? ' → ' + parsed.agents.join(', ') : '';
-  showToast('cmd-toast', 'Work item ' + data.id + ' created' + agentLabel, true);
-}
-
-function cmdShowAnswer(text) {
-  const el = document.getElementById('cmd-answer');
-  document.getElementById('cmd-answer-text').textContent = text;
-  el.style.display = 'block';
-}
-
-function cmdDismissAnswer() {
-  document.getElementById('cmd-answer').style.display = 'none';
-}
-
-async function cmdSubmitCancel(parsed) {
-  var body = {};
-  if (parsed.agents && parsed.agents.length > 0) body.agent = parsed.agents[0];
-  else if (parsed.cancelTask) body.task = parsed.cancelTask;
-  else { showToast('cmd-toast', 'Specify an agent or task to cancel', false); return; }
-  try {
-    var res = await fetch('/api/agents/cancel', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    var data = await res.json();
-    if (res.ok && data.cancelled && data.cancelled.length > 0) {
-      showToast('cmd-toast', 'Cancelled ' + data.cancelled.map(function(c) { return c.agent; }).join(', '), true);
-      refresh();
-    } else if (res.ok) {
-      showToast('cmd-toast', 'No active agent found matching that', false);
-    } else {
-      showToast('cmd-toast', 'Cancel failed: ' + (data.error || 'unknown'), false);
-    }
-  } catch (e) { showToast('cmd-toast', 'Cancel error: ' + e.message, false); }
-}
-
-async function cmdSubmitRetry(parsed) {
-  const ids = parsed.retryIds || [];
-  if (ids.length === 0) {
-    showToast('cmd-toast', 'No work items to retry', false);
-    return;
-  }
-  let retried = 0;
-  for (const id of ids) {
-    // Try central first, then each project
-    const sources = ['central', ...(window._lastStatus?.projects || []).map(p => p.name)];
-    for (const source of sources) {
-      try {
-        const res = await fetch('/api/work-items/retry', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, source })
-        });
-        if (res.ok) { retried++; break; }
-      } catch {}
-    }
-  }
-  showToast('cmd-toast', 'Retried ' + retried + '/' + ids.length + ' work items — engine will re-dispatch on next tick', true);
-  refresh();
-}
-
-async function cmdSubmitNote(parsed) {
-  const res = await fetch('/api/notes', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      title: parsed.title,
-      author: '',
-      what: parsed.title + (parsed.description ? '\n' + parsed.description : ''),
-      why: '',
-    }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to add');
-  showToast('cmd-toast', 'Note added', true);
-}
-
-async function cmdSubmitPlan(parsed) {
-  const body = {
-    title: parsed.title,
-    description: parsed.description || '',
-    priority: parsed.priority,
-    branch_strategy: parsed.branchStrategy || 'parallel',
-  };
-  if (parsed.project) body.project = parsed.project;
-  if (parsed.agents.length === 1) body.agent = parsed.agents[0];
-
-  const res = await fetch('/api/plan', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to create plan');
-  const agentLabel = data.agent ? ' → ' + data.agent : '';
-  showToast('cmd-toast', 'Plan ' + data.id + ' dispatched' + agentLabel + ' (will chain → PRD → dispatch)', true);
-}
 
 // ─── Modal Q&A (Ask about document) ──────────────────────────────────────────
 
@@ -3372,7 +3089,6 @@ async function _processQaMessage(message, selection) {
         title: _modalDocContext.title,
         selection: selection,
         filePath: _modalFilePath || null,
-        history: _qaHistory,
       }),
     });
     const data = await res.json();
@@ -3387,6 +3103,11 @@ async function _processQaMessage(message, selection) {
       // Track conversation history
       _qaHistory.push({ role: 'user', text: message });
       _qaHistory.push({ role: 'assistant', text: data.answer });
+
+      // Execute any CC actions (dispatch, note, etc.)
+      if (data.actions && data.actions.length > 0) {
+        for (const action of data.actions) { await ccExecuteAction(action); }
+      }
 
       // Refresh modal body if document was edited
       if (data.edited && data.content) {

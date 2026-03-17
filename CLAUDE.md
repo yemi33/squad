@@ -46,7 +46,7 @@ No dependencies — uses only Node.js built-ins.
 | `lifecycle.js` | Post-completion hooks, plan→PRD chaining, PR sync, metrics, post-merge cleanup |
 | `consolidation.js` | Haiku-powered inbox consolidation, regex fallback, knowledge base classification |
 | `ado.js` | ADO token management (`azureauth`), PR status polling, human `@squad` comment polling |
-| `llm.js` | Shared Haiku call wrapper used by both engine and dashboard (triage, doc-chat, steer, ask-about) |
+| `llm.js` | `callLLM()` with session resume support + `trackEngineUsage()`, used by dashboard CC and doc-chat |
 | `spawn-agent.js` | Spawns `claude` CLI with prompt files piped via stdin |
 
 Module dependency flow: `shared.js` ← `queries.js` ← `engine.js` / `dashboard.js`. Circular dependencies between engine.js and lifecycle/consolidation/cli/ado are handled with lazy `require()` inside functions.

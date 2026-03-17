@@ -109,81 +109,6 @@ function getStatus() {
   };
 }
 
-// -- Triage context for Haiku LLM --
-
-function getTriageContext() {
-  const agents = getAgents().map(a => `- ${a.name} (${a.id}): ${a.status}${a.currentTask ? ' — ' + a.currentTask.slice(0, 60) : ''}`).join('\n');
-  const projects = PROJECTS.map(p => `- ${p.name}: ${(p.description || '').slice(0, 60)}`).join('\n');
-
-  // Recent work items (last 10 central + all project items that are active/failed)
-  const centralWi = getWorkItems().slice(-10).map(i => {
-    let line = `- ${i.id}: "${(i.title || '').slice(0, 60)}" [${i.type}] ${i.status}`;
-    if (i.dispatched_to) line += ' → ' + i.dispatched_to;
-    if (i.status === 'failed' && i.failReason) line += ' | reason: ' + i.failReason.slice(0, 100);
-    return line;
-  });
-  const projectWi = [];
-  for (const proj of PROJECTS) {
-    try {
-      const items = safeJson(path.join(proj.localPath, '.squad', 'work-items.json'));
-      items.filter(i => i.status === 'failed' || i.status === 'dispatched' || i.status === 'pending')
-        .forEach(i => {
-          let line = `- ${i.id}: "${(i.title || '').slice(0, 60)}" [${i.type}] ${i.status} (${proj.name})`;
-          if (i.dispatched_to) line += ' → ' + i.dispatched_to;
-          if (i.status === 'failed' && i.failReason) line += ' | reason: ' + i.failReason.slice(0, 100);
-          projectWi.push(line);
-        });
-    } catch {}
-  }
-  // Recent completed dispatches with errors (last 5 errors for context)
-  let recentErrors = '';
-  try {
-    const dispatch = JSON.parse(safeRead(path.join(SQUAD_DIR, 'engine', 'dispatch.json')) || '{}');
-    const errors = (dispatch.completed || []).filter(d => d.result === 'error').slice(-5);
-    if (errors.length > 0) {
-      recentErrors = '\n\n### Recent Failures\n' + errors.map(d =>
-        `- ${d.agent}: "${(d.task || '').slice(0, 60)}" | ${d.reason || 'unknown'} | ${d.completed_at || ''}`
-      ).join('\n');
-    }
-  } catch {}
-  const wi = [...centralWi, ...projectWi].join('\n') + recentErrors;
-
-  // Plans (with summary, author, project, status) — PRDs are in prd/
-  let plans = '';
-  try {
-    plans = safeReadDir(PRD_DIR).filter(f => f.endsWith('.json'))
-      .map(f => {
-        try {
-          const plan = JSON.parse(safeRead(path.join(PRD_DIR, f)) || '{}');
-          const author = plan.generatedBy || plan.generated_by || '';
-          const summary = (plan.plan_summary || '').slice(0, 80);
-          const status = plan.status || 'unknown';
-          const project = plan.project || '';
-          return `- ${f} | ${status} | by ${author} | project: ${project} | "${summary}"`;
-        } catch { return `- ${f}`; }
-      }).join('\n');
-  } catch {}
-
-  // PRD items (from all plan JSONs)
-  let prdItems = '';
-  try {
-    const prdInfo = getPrdInfo();
-    if (prdInfo.progress && prdInfo.progress.items) {
-      prdItems = prdInfo.progress.items.map(i => {
-        const deps = (i.depends_on || []).join(',');
-        return `- ${i.id}: "${(i.name || '').slice(0, 50)}" [${i.status}] ${i.priority}${deps ? ' deps:[' + deps + ']' : ''} (${i.source})`;
-      }).join('\n');
-    }
-  } catch {}
-
-  // Active dispatch
-  const dq = getDispatchQueue();
-  const active = (dq.active || []).map(d =>
-    `- ${d.agentName || d.agent}: ${(d.task || '').slice(0, 50)}`
-  ).join('\n');
-
-  return { agents, projects, workItems: wi, plans, prdItems, activeDispatch: active };
-}
 
 // ── Command Center: session state + helpers ─────────────────────────────────
 
@@ -211,7 +136,36 @@ try {
 const CC_STATIC_SYSTEM_PROMPT = `You are the Command Center AI for a software engineering squad called "Squad."
 You have complete visibility into the squad's state and can answer questions AND take actions.
 
-Each message includes an updated "[Current Squad State]" section with real-time data. Use it to answer questions accurately.
+Each message includes a lightweight state snapshot (agent statuses, counts, active dispatch). For anything deeper, **use your tools** — you have full read access to the \`${SQUAD_DIR}\` directory.
+
+## Filesystem — What's Where
+
+\`\`\`
+${SQUAD_DIR}/
+├── config.json                    # Engine + project config
+├── routing.md                     # Agent dispatch routing rules
+├── notes.md                       # Consolidated team notes
+├── work-items.json                # Central work item queue
+├── pull-requests.json             # PR tracking
+├── agents/
+│   ├── {id}/charter.md            # Agent role definition
+│   ├── {id}/output.log            # Latest agent output
+│   └── {id}/output-{dispatchId}.log  # Archived outputs
+├── plans/                         # Source plans (.md)
+├── prd/                           # PRD items (.json), prd/archive/, prd/guides/
+├── knowledge/{category}/*.md      # Knowledge base
+├── engine/
+│   ├── dispatch.json              # Pending, active, completed dispatches
+│   ├── metrics.json               # Token/cost tracking
+│   ├── control.json               # Engine state (running/paused/stopped)
+│   └── cooldowns.json             # Dispatch cooldown timers
+├── skills/*.md                    # Reusable agent workflow definitions
+└── notes/inbox/*.md               # Unconsolidated agent findings
+\`\`\`
+
+Projects are configured in \`config.json\` under \`projects[]\`. Each project has its own \`{localPath}/.squad/work-items.json\` and \`{localPath}/.squad/pull-requests.json\`.
+
+**Use tools proactively.** Don't guess — Read the file. If asked about a PR, read \`pull-requests.json\`. If asked about an agent's work, read their output log. If asked about a plan, read it from \`plans/\` or \`prd/\`. Glob and Grep to discover files you don't know about.
 
 ## Actions You Can Take
 
@@ -240,131 +194,44 @@ Available action types:
 - **remove-prd-item**: Remove a PRD item. Fields: source (PRD filename), itemId
 - **delete-work-item**: Delete a work item. Fields: id, source (project name or "central")
 
-## Tool Access
-
-You have read-only access to the filesystem. Use these tools when the squad state above isn't enough:
-- **Read**: Read any file (code, config, plans, agent output logs, etc.)
-- **Glob**: Find files by pattern (e.g., \`agents/*/output.log\`, \`plans/*.json\`)
-- **Grep**: Search file contents (e.g., find where a function is defined, search agent outputs)
-- **WebFetch/WebSearch**: Look up external resources
-
-Key paths:
-- Squad root: \`${SQUAD_DIR}\`
-- Agent outputs: \`${SQUAD_DIR}/agents/{id}/output.log\` (latest) or \`output-{dispatch-id}.log\` (archived)
-- Plans: \`${SQUAD_DIR}/plans/\` (.md source plans) and \`${SQUAD_DIR}/prd/\` (.json PRDs)
-- Work items: \`${SQUAD_DIR}/work-items.json\` (central) or \`{project}/.squad/work-items.json\`
-- Knowledge: \`${SQUAD_DIR}/knowledge/{category}/*.md\`
-- Config: \`${SQUAD_DIR}/config.json\`
-
 ## Rules
 
-1. Answer questions conversationally. Be specific — cite IDs, agent names, statuses, filenames, line numbers.
-2. When the user wants action, include the action block AND explain what you're doing.
-3. Resolve references like "ripley's plan", "the failing PR", "the old plan" to specific items from the context. Use Read/Grep to look up details if needed.
-4. When recommending which agent to assign, consult the charters and routing rules.
-5. If something is ambiguous, ask for clarification rather than guessing.
+1. **Use tools first, answer second.** Read the relevant files before answering — don't rely solely on the state snapshot.
+2. Be specific — cite IDs, agent names, statuses, filenames, line numbers.
+3. When the user wants action, include the action block AND explain what you're doing.
+4. Resolve references like "ripley's plan", "the failing PR" by reading files — use Glob/Grep to find them.
+5. When recommending which agent to assign, read \`routing.md\` and agent charters.
 6. Keep responses concise but informative. Use markdown.
-7. Never modify engine source code or config files directly — only take actions via action blocks.
-8. When the user asks about what an agent did, read the agent's output log for details.`;
+7. Never modify engine source code or config files directly — only take actions via action blocks.`;
 
 function buildCCStatePreamble() {
-  const ctx = getTriageContext();
-  const notes = safeRead(path.join(SQUAD_DIR, 'notes.md')) || '';
-  const notesTail = notes.length > 3000 ? notes.slice(-3000) : notes;
-  const config = queries.getConfig();
+  // Lightweight snapshot — just enough to orient. Use tools for details.
+  const agents = getAgents().map(a => `- ${a.name} (${a.id}): ${a.status}${a.currentTask ? ' — ' + a.currentTask.slice(0, 60) : ''}`).join('\n');
+  const projects = PROJECTS.map(p => `- ${p.name}: ${p.localPath}`).join('\n');
 
-  // Plan contents
-  let planContents = '';
-  for (const { dir, label } of [{ dir: PLANS_DIR, label: 'plan' }, { dir: PRD_DIR, label: 'prd' }]) {
-    try {
-      for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.md') || f.endsWith('.json'))) {
-        try {
-          const raw = safeRead(path.join(dir, f));
-          if (f.endsWith('.md')) {
-            planContents += `\n#### ${f} (${label})\n${raw.length > 4000 ? raw.slice(0, 4000) + '\n...(truncated)' : raw}\n`;
-          } else {
-            const plan = JSON.parse(raw);
-            planContents += `\n#### ${f} (${label})\nStatus: ${plan.status || 'unknown'} | By: ${plan.generated_by || 'unknown'} | Project: ${plan.project || ''}\nSummary: ${plan.plan_summary || ''}\n`;
-            if (plan.missing_features) {
-              planContents += `Items (${plan.missing_features.length}):\n`;
-              for (const item of plan.missing_features) planContents += `- ${item.id}: ${(item.name || '').slice(0, 60)} [${item.status}] ${item.priority || ''}\n`;
-            }
-          }
-        } catch {}
-      }
-      try {
-        for (const f of fs.readdirSync(path.join(dir, 'archive')).filter(f => f.endsWith('.md') || f.endsWith('.json')).slice(-3)) {
-          try { planContents += `\n#### [archived] ${f}\n${safeRead(path.join(dir, 'archive', f)).slice(0, 2000)}\n`; } catch {}
-        }
-      } catch {}
-    } catch {}
-  }
+  const dq = getDispatchQueue();
+  const active = (dq.active || []).map(d => `- ${d.agentName || d.agent}: ${(d.task || '').slice(0, 50)}`).join('\n') || '(none)';
+  const pending = (dq.pending || []).length;
 
-  const agentCharters = Object.keys(config.agents || {}).map(id => {
-    const charter = safeRead(path.join(SQUAD_DIR, 'agents', id, 'charter.md'));
-    return charter ? `#### ${id}\n${charter.slice(0, 600)}` : '';
-  }).filter(Boolean).join('\n\n');
+  const prCount = getPullRequests().length;
+  const wiCount = getWorkItems().length;
 
-  const routing = safeRead(path.join(SQUAD_DIR, 'routing.md')) || '(no routing.md)';
-  const skillsList = getSkills().map(s => `- **${s.name}**: ${s.description || ''} (trigger: ${s.trigger || 'manual'})`).join('\n') || '(no skills)';
-  const kbEntries = getKnowledgeBaseEntries().slice(-20).map(e => `- [${e.cat}] ${e.title} (${e.file})`).join('\n') || '(empty)';
-  const allPrs = getPullRequests().map(pr =>
-    `- **${pr.id}** (${pr._project}): ${(pr.title || '').slice(0, 60)} | status: ${pr.status} | review: ${pr.reviewStatus || '?'} | build: ${pr.buildStatus || '?'}${pr.branch ? ' | branch: \`' + pr.branch + '\`' : ''}${pr.url ? ' | ' + pr.url : ''}`
-  ).join('\n') || '(no PRs)';
-  const engineConfig = config.engine || {};
-  const dispatchHistory = (() => {
-    try {
-      const d = JSON.parse(safeRead(path.join(SQUAD_DIR, 'engine', 'dispatch.json')) || '{}');
-      return (d.completed || []).slice(-15).reverse().map(c =>
-        `- ${c.agent} ${c.result}: ${(c.task || '').slice(0, 80)}${c.resultSummary ? ' — ' + c.resultSummary.slice(0, 120) : ''}${c.reason ? ' [' + c.reason.slice(0, 60) + ']' : ''} (${(c.completed_at || '').slice(0, 16)})`
-      ).join('\n') || '(none)';
-    } catch { return '(unavailable)'; }
-  })();
+  const planFiles = [...safeReadDir(PLANS_DIR), ...safeReadDir(PRD_DIR)].filter(f => f.endsWith('.md') || f.endsWith('.json'));
 
-  return `### Agents & Statuses
-${ctx.agents}
-
-### Agent Charters
-${agentCharters}
-
-### Routing Rules
-${routing}
-
-### Projects
-${ctx.projects}
-
-### Engine Config
-Tick: ${engineConfig.tickInterval || 60000}ms | Max concurrent: ${engineConfig.maxConcurrent || 3} | Agent timeout: ${Math.round((engineConfig.agentTimeout || 18000000) / 60000)}min | Max turns: ${engineConfig.maxTurns || 100}
-
-### Work Items
-${ctx.workItems}
-
-### Pull Requests
-${allPrs}
-
-### Plans & PRDs
-${ctx.plans}
-
-### Plan Contents
-${planContents || '(none)'}
-
-### PRD Items
-${ctx.prdItems}
+  return `### Agents
+${agents}
 
 ### Active Dispatch
-${ctx.activeDispatch}
+${active}
+Pending: ${pending}
 
-### Recent Dispatch History
-${dispatchHistory}
+### Quick Counts
+PRs: ${prCount} | Work items: ${wiCount} | Plans/PRDs on disk: ${planFiles.length}
 
-### Skills
-${skillsList}
+### Projects
+${projects}
 
-### Knowledge Base
-${kbEntries}
-
-### Team Notes
-${notesTail.slice(-1500)}`;
+For details on any of the above, use your tools to read files under \`${SQUAD_DIR}\`.`;
 }
 
 function parseCCActions(text) {
@@ -502,95 +369,6 @@ async function ccDocCall({ message, document, title, filePath, selection, canEdi
   }
 
   return { answer: stripped, content: null, actions };
-}
-
-function buildTriageSysPrompt(ctx) {
-  return `You are a triage assistant for a software engineering squad called "Squad."
-Given a user command, determine the intent and return structured JSON.
-
-## Squad Context
-
-### Agents
-${ctx.agents}
-
-### Projects
-${ctx.projects}
-
-### Recent Work Items
-${ctx.workItems}
-
-### Plans on Disk
-${ctx.plans}
-
-### PRD Items (from active PRDs)
-${ctx.prdItems}
-
-### Currently Active
-${ctx.activeDispatch}
-
-## Available Intents
-
-- "work-item": A task for an agent. Types: ask, explore, fix, review, test, implement, plan-to-prd
-- "note": A decision, reminder, or knowledge to save (keywords: remember, note, don't forget)
-- "plan": Create a NEW multi-step implementation plan from scratch. Use only when no plan exists yet.
-  Keywords: plan, design, architect, make a plan for, /plan
-- "work-item" with type "plan-to-prd": Convert an EXISTING plan into PRD items / executable tasks.
-  Use when the user references a plan that already exists on disk (check plans list above).
-  Keywords: create PRD from, convert plan to PRD, execute the plan, implement the plan, break down the plan
-- "cancel": Stop/cancel/kill a running agent or active task.
-  Keywords: stop, cancel, kill, abort, halt
-  Include the agent ID in "agents" field. If targeting by task name, include "cancelTask" with a substring.
-- "retry": Retry/restart/rerun existing failed or stuck work items. Do NOT create new work items.
-  Keywords: retry, restart, rerun, redo, try again, re-dispatch, reset
-  Include the work item IDs to retry in the "retryIds" field. Match from the work items list above.
-  If the user says "the failed tasks" or "the three failed ones", find items with status "failed" and include their IDs.
-- "answer": Answer a question about the squad state. Use when the user asks a question
-  (what, which, how many, status, what's blocking, what's left, who is working on, etc.)
-  Put your concise answer in the "answer" field. Use the context above to answer accurately.
-
-## Rules
-
-0. CRITICAL: If the user is ASKING A QUESTION about the current state (why, what, which, how many,
-   what happened, what failed, what's blocking, status, progress, who is working on), use intent "answer".
-   Do NOT create a work item for questions. Only create work items when the user wants ACTION taken.
-   "Why did X fail?" = answer. "Fix X" = work-item. "What's blocking P011?" = answer. "Unblock P011" = work-item.
-1. Explicit prefixes override everything: /plan or /prd -> plan, /note or /decide -> note
-2. @mentions map to agent IDs. @everyone or @all -> fanout=true
-3. #tags map to project names from the project list above
-4. !high or !urgent -> priority "high"; !low -> "low"; default "medium"
-5. For work items, pick the best type:
-   - ask: user wants an explanation or answer (explain, why, what does, how)
-   - explore: user wants research, analysis, investigation, or document review
-   - fix: bugs, errors, broken things
-   - review: PR/code review specifically (not document review)
-   - test: build, run, verify, test
-   - implement: build something new, create, add feature
-6. When the user references an agent's work, resolve it to a specific artifact from the lists above.
-7. If the user references "the plan" or "latest plan", use the most recent plan from the plans list.
-8. Default branchStrategy for plans: "parallel"
-9. Be concise in title and description.
-10. When the user says "create PRD from X's plan", "execute the plan", "implement the plan":
-    -> If the plan EXISTS on disk -> intent "work-item", type "plan-to-prd", include plan filename in description
-    -> If NO plan exists yet -> intent "plan" (create one first)
-
-## Output Format
-
-Respond with ONLY a JSON object, no markdown fences, no explanation:
-{
-  "intent": "work-item|note|plan|retry|answer|cancel",
-  "title": "concise action title",
-  "description": "additional context, resolved references",
-  "type": "ask|explore|fix|review|test|implement|plan-to-prd",
-  "priority": "low|medium|high",
-  "agents": ["agent-id"] or [],
-  "fanout": false,
-  "project": "project-name or empty string",
-  "projects": [],
-  "branchStrategy": "parallel",
-  "cancelTask": "task substring", // only for intent "cancel"
-  "retryIds": ["work-item-id"], // only for intent "retry"
-  "answer": "text response" // only for intent "answer"
-}`;
 }
 
 // -- POST helpers --
@@ -1131,25 +909,6 @@ const server = http.createServer(async (req, res) => {
 
       return jsonReply(res, 200, { ok: true, cancelled });
     } catch (e) { return jsonReply(res, 400, { error: e.message }); }
-  }
-
-  // POST /api/triage — Haiku LLM command triage for natural language input
-  if (req.method === 'POST' && req.url === '/api/triage') {
-    let body;
-    try { body = await readBody(req); } catch (e) { return jsonReply(res, 400, { error: 'Invalid request body' }); }
-    if (!body.message) return jsonReply(res, 400, { error: 'message required' });
-    const ctx = getTriageContext();
-    const sysPrompt = buildTriageSysPrompt(ctx);
-    // Include previous exchange for follow-up context
-    let message = body.message;
-    if (body.previousExchange) {
-      const prev = body.previousExchange;
-      message = `Previous user message: ${prev.userMessage}\nPrevious response: ${JSON.stringify(prev.response)}\n\nCurrent user message: ${body.message}`;
-    }
-    llm.triageCommand(message, sysPrompt)
-      .then(result => jsonReply(res, 200, result))
-      .catch(e => jsonReply(res, 500, { error: e.message }));
-    return;
   }
 
   // GET /api/agent/:id/live — tail live output for a working agent
