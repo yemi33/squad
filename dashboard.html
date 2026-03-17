@@ -1832,6 +1832,7 @@ function closeModal() {
       docContext: { ..._modalDocContext },
       filePath: _modalFilePath,
     });
+    _saveQaSessions();
   }
   // If still processing, show animated badge on the source card
   if (_qaProcessing && _modalFilePath) {
@@ -3038,6 +3039,20 @@ let _qaProcessing = false; // true while waiting for Haiku response
 let _qaQueue = []; // queued messages while processing
 let _qaSessionKey = ''; // key for current conversation (title or filePath)
 const _qaSessions = new Map(); // persist conversations across modal open/close {key → {history, threadHtml}}
+// Restore from localStorage
+try {
+  const saved = JSON.parse(localStorage.getItem('qa-sessions') || '{}');
+  for (const [k, v] of Object.entries(saved)) _qaSessions.set(k, v);
+} catch {}
+function _saveQaSessions() {
+  try {
+    const obj = {};
+    // Only persist last 10 sessions, cap threadHtml at 50KB each
+    const entries = [..._qaSessions.entries()].slice(-10);
+    for (const [k, v] of entries) obj[k] = { ...v, threadHtml: (v.threadHtml || '').slice(0, 50000) };
+    localStorage.setItem('qa-sessions', JSON.stringify(obj));
+  } catch {}
+}
 
 // Track text selection anywhere in content areas for the floating "Ask about this" button
 document.addEventListener('mouseup', function(e) {
@@ -3301,6 +3316,7 @@ async function _processQaMessage(message, selection) {
       docContext: sessionDocContext,
       filePath: sessionFilePath,
     });
+    _saveQaSessions();
     // If modal was closed while processing, show notification badge on source card
     if (!modalIsOpen) {
       const card = findCardForFile(sessionFilePath);

@@ -349,7 +349,7 @@ function updateSession(store, key, sessionId, existing) {
  * @param {number} opts.maxTurns - Max tool-use turns
  * @param {string} opts.allowedTools - Comma-separated tool list
  */
-async function ccCall(message, { store = 'cc', sessionKey, extraContext, label = 'command-center', timeout = 300000, maxTurns = 5, allowedTools = 'Read,Glob,Grep,WebFetch,WebSearch', skipStatePreamble = false } = {}) {
+async function ccCall(message, { store = 'cc', sessionKey, extraContext, label = 'command-center', timeout = 300000, maxTurns = 5, allowedTools = 'Read,Glob,Grep,WebFetch,WebSearch', skipStatePreamble = false, model = 'sonnet' } = {}) {
   const existing = resolveSession(store, sessionKey);
   let sessionId = existing ? existing.sessionId : null;
 
@@ -363,7 +363,7 @@ async function ccCall(message, { store = 'cc', sessionKey, extraContext, label =
   // Attempt 1: resume existing session (skip if we know it's expired)
   if (sessionId) {
     result = await llm.callLLM(prompt, '', {
-      timeout, label, model: 'sonnet', maxTurns, allowedTools, sessionId,
+      timeout, label, model, maxTurns, allowedTools, sessionId,
     });
     llm.trackEngineUsage(label, result.usage);
 
@@ -385,7 +385,7 @@ async function ccCall(message, { store = 'cc', sessionKey, extraContext, label =
 
   // Attempt 2: fresh session
   result = await llm.callLLM(prompt, CC_STATIC_SYSTEM_PROMPT, {
-    timeout, label, model: 'sonnet', maxTurns, allowedTools,
+    timeout, label, model, maxTurns, allowedTools,
   });
   llm.trackEngineUsage(label, result.usage);
 
@@ -398,7 +398,7 @@ async function ccCall(message, { store = 'cc', sessionKey, extraContext, label =
   console.log(`[${label}] Fresh call also failed (code=${result.code}, empty=${!result.text}), retrying once more...`);
   await new Promise(r => setTimeout(r, 2000));
   result = await llm.callLLM(prompt, CC_STATIC_SYSTEM_PROMPT, {
-    timeout, label, model: 'sonnet', maxTurns, allowedTools,
+    timeout, label, model, maxTurns, allowedTools,
   });
   llm.trackEngineUsage(label, result.usage);
 
@@ -421,6 +421,7 @@ async function ccDocCall({ message, document, title, filePath, selection, canEdi
     extraContext: docContext, label: 'doc-chat',
     timeout: isPlanEdit ? 600000 : needsTools ? 120000 : 60000,
     maxTurns: isPlanEdit ? 30 : needsTools ? 5 : 1,
+    model: needsTools ? 'sonnet' : 'haiku',
     allowedTools: needsTools ? 'Read,Glob,Grep' : '',
     skipStatePreamble: !needsTools,
   });
