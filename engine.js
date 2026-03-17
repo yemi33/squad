@@ -963,10 +963,29 @@ function completeDispatch(id, result = 'success', reason = '', resultSummary = '
     safeWrite(DISPATCH_PATH, dispatch);
     log('info', `Completed dispatch: ${id} (${result}${reason ? ': ' + reason : ''})`);
 
-    // Update source work item status on failure + apply backoff cooldown
-    if (result === 'error') {
+    // Update source work item status on failure + auto-retry with backoff
+    if (result === 'error' && item.meta?.item?.id) {
       if (item.meta?.dispatchKey) setCooldownFailure(item.meta.dispatchKey);
-      if (item.meta?.item?.id) updateWorkItemStatus(item.meta, 'failed', reason);
+      const retries = (item.meta.item._retryCount || 0);
+      if (retries < 3) {
+        log('info', `Dispatch error for ${item.meta.item.id} — auto-retry ${retries + 1}/3`);
+        updateWorkItemStatus(item.meta, 'pending', '');
+        // Increment retry counter on the source work item
+        try {
+          const wiPath = item.meta.source === 'central-work-item' || item.meta.source === 'central-work-item-fanout'
+            ? path.join(SQUAD_DIR, 'work-items.json')
+            : item.meta.project?.localPath ? path.join(item.meta.project.localPath, '.squad', 'work-items.json') : null;
+          if (wiPath) {
+            const items = safeJson(wiPath) || [];
+            const wi = items.find(i => i.id === item.meta.item.id);
+            if (wi) { wi._retryCount = retries + 1; wi.status = 'pending'; delete wi.dispatched_at; delete wi.dispatched_to; safeWrite(wiPath, items); }
+          }
+        } catch {}
+      } else {
+        updateWorkItemStatus(item.meta, 'failed', reason || 'Failed after 3 retries');
+      }
+    } else if (result === 'error') {
+      if (item.meta?.dispatchKey) setCooldownFailure(item.meta.dispatchKey);
     }
   }
 }
