@@ -592,9 +592,10 @@ function spawnAgent(dispatchItem, config) {
   let branchName = meta?.branch ? sanitizeBranch(meta.branch) : null;
 
   if (branchName) {
-    // Unique worktree dir: project name + branch + dispatch uid suffix to avoid conflicts
+    // Worktrees live in a sibling 'worktrees/' folder next to each project
     const wtSuffix = id ? id.split('-').pop() : shared.uid();
-    const wtDirName = `${(project.name || 'default')}-${branchName}-${wtSuffix}`;
+    const projectSlug = (project.name || 'default').replace(/[^a-zA-Z0-9_-]/g, '-');
+    const wtDirName = `${projectSlug}-${branchName}-${wtSuffix}`;
     worktreePath = path.resolve(rootDir, engineConfig.worktreeRoot || '../worktrees', wtDirName);
     try {
       if (!fs.existsSync(worktreePath)) {
@@ -612,9 +613,33 @@ function spawnAgent(dispatchItem, config) {
               cwd: rootDir, stdio: 'pipe', windowsHide: true, timeout: 30000
             });
           } catch {
-            // Branch already exists — use it without -b
+            // Branch already exists — try without -b, removing stale worktree if needed
             try { exec(`git fetch origin "${branchName}"`, { cwd: rootDir, stdio: 'pipe', timeout: 30000 }); } catch {}
-            exec(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe', timeout: 30000 });
+            try {
+              exec(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe', timeout: 30000 });
+            } catch (wtErr) {
+              // "already used by worktree" — find and remove the stale worktree, then retry
+              if (wtErr.message?.includes('already used by worktree') || wtErr.message?.includes('already checked out')) {
+                log('info', `Branch ${branchName} locked by stale worktree — pruning and retrying`);
+                try { exec(`git worktree prune`, { cwd: rootDir, stdio: 'pipe', timeout: 10000 }); } catch {}
+                // Find the stale worktree path from the error or worktree list
+                try {
+                  const wtList = exec(`git worktree list --porcelain`, { cwd: rootDir, stdio: 'pipe', timeout: 10000 }).toString();
+                  const lines = wtList.split('\n');
+                  for (let li = 0; li < lines.length; li++) {
+                    if (lines[li].startsWith('worktree ') && lines[li + 1]?.includes(branchName)) {
+                      const stalePath = lines[li].replace('worktree ', '').trim();
+                      log('info', `Removing stale worktree: ${stalePath}`);
+                      try { exec(`git worktree remove "${stalePath}" --force`, { cwd: rootDir, stdio: 'pipe', timeout: 15000 }); } catch {}
+                    }
+                  }
+                } catch {}
+                // Final retry
+                exec(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: rootDir, stdio: 'pipe', timeout: 30000 });
+              } else {
+                throw wtErr;
+              }
+            }
             log('info', `Reusing existing branch: ${branchName}`);
           }
         }
@@ -1862,7 +1887,7 @@ function discoverFromWorkItems(config, project) {
       scope_section: `## Scope: Project — ${project?.name || 'default'}\n\nThis task is scoped to a single project.`,
       branch_name: branchName,
       project_path: root,
-      worktree_path: path.resolve(root, config.engine?.worktreeRoot || '../worktrees', `${project?.name || 'default'}-${branchName}`),
+      worktree_path: path.resolve(root, config.engine?.worktreeRoot || '../worktrees', `${branchName}`),
       commit_message: item.commitMessage || `feat: ${item.title || item.id}`,
       notes_content: '',
     };
