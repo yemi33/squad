@@ -86,9 +86,16 @@ function getMcpServers() {
   } catch { return []; }
 }
 
+let _statusCache = null;
+let _statusCacheTs = 0;
+const STATUS_CACHE_TTL = 3000; // 3s — dashboard polls every 4s
+
 function getStatus() {
+  const now = Date.now();
+  if (_statusCache && (now - _statusCacheTs) < STATUS_CACHE_TTL) return _statusCache;
+
   const prdInfo = getPrdInfo();
-  return {
+  _statusCache = {
     agents: getAgents(),
     prdProgress: prdInfo.progress,
     inbox: getInbox(),
@@ -107,6 +114,8 @@ function getStatus() {
     projects: PROJECTS.map(p => ({ name: p.name, path: p.localPath, description: p.description || '' })),
     timestamp: new Date().toISOString(),
   };
+  _statusCacheTs = now;
+  return _statusCache;
 }
 
 
@@ -263,8 +272,29 @@ function parseCCActions(text) {
 
 // ── Shared LLM call core — used by CC panel and doc modals ──────────────────
 
-// Session store for doc modals — keyed by filePath or title
+// Session store for doc modals — keyed by filePath or title, persisted to disk
+const DOC_SESSIONS_PATH = path.join(ENGINE_DIR, 'doc-sessions.json');
 const docSessions = new Map(); // key → { sessionId, lastActiveAt, turnCount }
+
+// Load persisted doc sessions on startup
+try {
+  const saved = safeJson(DOC_SESSIONS_PATH);
+  if (saved && typeof saved === 'object') {
+    const now = Date.now();
+    for (const [key, s] of Object.entries(saved)) {
+      const age = now - new Date(s.lastActiveAt || 0).getTime();
+      if (age < CC_SESSION_EXPIRY_MS && s.turnCount < CC_SESSION_MAX_TURNS) {
+        docSessions.set(key, s);
+      }
+    }
+  }
+} catch {}
+
+function persistDocSessions() {
+  const obj = {};
+  for (const [key, s] of docSessions) obj[key] = s;
+  safeWrite(DOC_SESSIONS_PATH, obj);
+}
 
 // Resolve session from any store (CC global or doc-specific)
 function resolveSession(store, key) {
@@ -277,6 +307,7 @@ function resolveSession(store, key) {
   const age = Date.now() - new Date(s.lastActiveAt).getTime();
   if (age > CC_SESSION_EXPIRY_MS || s.turnCount >= CC_SESSION_MAX_TURNS) {
     docSessions.delete(key);
+    persistDocSessions();
     return null;
   }
   return s;
@@ -301,6 +332,7 @@ function updateSession(store, key, sessionId, existing) {
       lastActiveAt: now,
       turnCount: (existing && prev ? prev.turnCount : 0) + 1,
     });
+    persistDocSessions();
   }
 }
 
@@ -346,6 +378,7 @@ async function ccCall(message, { store = 'cc', sessionKey, extraContext, label =
       safeWrite(path.join(ENGINE_DIR, 'cc-session.json'), ccSession);
     } else if (sessionKey) {
       docSessions.delete(sessionKey);
+      persistDocSessions();
     }
   }
 
@@ -1255,6 +1288,9 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
     if (!content) content = safeRead(path.join(PRD_DIR, 'archive', file));
     if (!content) content = safeRead(path.join(PLANS_DIR, 'archive', file));
     if (!content) return jsonReply(res, 404, { error: 'not found' });
+    // Find the actual file path for Last-Modified header
+    const planCandidates = [resolvePlanPath(file), path.join(PRD_DIR, file), path.join(PRD_DIR, 'guides', file), path.join(PLANS_DIR, file), path.join(PRD_DIR, 'archive', file), path.join(PLANS_DIR, 'archive', file)];
+    for (const p of planCandidates) { try { const st = fs.statSync(p); if (st) { res.setHeader('Last-Modified', st.mtime.toISOString()); break; } } catch {} }
     const contentType = file.endsWith('.json') ? 'application/json' : 'text/plain';
     res.setHeader('Content-Type', contentType + '; charset=utf-8');
     res.setHeader('Access-Control-Allow-Origin', '*');
