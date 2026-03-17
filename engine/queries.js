@@ -131,9 +131,10 @@ function getAgentCharter(agentId) {
 function getAgents(config) {
   config = config || getConfig();
   const roster = Object.entries(config.agents || {}).map(([id, info]) => ({ id, ...info }));
+  const allInboxFiles = safeReadDir(INBOX_DIR); // read once, not per-agent
 
   return roster.map(a => {
-    const inboxFiles = safeReadDir(INBOX_DIR).filter(f => f.includes(a.id));
+    const inboxFiles = allInboxFiles.filter(f => f.includes(a.id));
 
     let status = 'idle';
     let lastAction = 'Waiting for assignment';

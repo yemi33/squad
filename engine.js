@@ -2484,17 +2484,13 @@ async function tickInner() {
 
   const toDispatch = dispatch.pending.slice(0, slotsAvailable);
 
-  // Collect IDs to dispatch, then spawn — spawnAgent mutates dispatch.pending
-  // so we snapshot the items first and re-read dispatch state per-spawn
-  const idsToDispatch = toDispatch.map(item => item.id);
-  for (const dispatchId of idsToDispatch) {
-    // Re-read dispatch fresh each iteration since spawnAgent modifies it
-    const freshDispatch = getDispatch();
-    const item = freshDispatch.pending.find(d => d.id === dispatchId);
-    // Guard: skip if already moved to active (concurrent tick race)
-    const alreadyActive = (freshDispatch.active || []).some(d => d.id === dispatchId);
-    if (item && !alreadyActive) {
+  // Dispatch items — spawnAgent moves each from pending→active on disk.
+  // We use the already-loaded item objects; spawnAgent handles the state transition.
+  const dispatched = new Set();
+  for (const item of toDispatch) {
+    if (!dispatched.has(item.id)) {
       spawnAgent(item, config);
+      dispatched.add(item.id);
     }
   }
 }
