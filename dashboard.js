@@ -412,18 +412,19 @@ async function ccCall(message, { store = 'cc', sessionKey, extraContext, label =
 async function ccDocCall({ message, document, title, filePath, selection, canEdit, isJson }) {
   const docContext = `## Document Context\n**${title || 'Document'}**${filePath ? ' (`' + filePath + '`)' : ''}${isJson ? ' (JSON)' : ''}\n${selection ? '\n**Selected text:**\n> ' + selection.slice(0, 1500) + '\n' : ''}\n\`\`\`\n${document.slice(0, 20000)}\n\`\`\`\n${canEdit ? '\nIf editing: respond with your explanation, then `---DOCUMENT---` on its own line, then the COMPLETE updated file.' : '\n(Read-only — answer questions only.)'}`;
 
-  const isPlanEdit = canEdit && filePath && /^plans\/.*\.md$/.test(filePath);
-  const isPrdEdit = canEdit && filePath && /\.json$/.test(filePath);
-  // Simple Q&A: no tools, 1 turn, fast. Edits: tools + multi-turn for codebase exploration.
-  const needsTools = canEdit && (isPlanEdit || isPrdEdit);
+  const isPlan = canEdit && filePath && /^plans\/.*\.md$/.test(filePath);
+  const isPrd = canEdit && filePath && /\.json$/.test(filePath);
+  // Detect edit intent from the message — Q&A gets Haiku (fast), edits get Sonnet (tools)
+  const editSignals = /\b(change|update|add|remove|edit|revise|rewrite|fix|replace|move|rename|delete|modify|insert|set|make it|swap|reorganize|refactor)\b/i;
+  const isEditRequest = canEdit && (isPlan || isPrd) && editSignals.test(message);
   const result = await ccCall(message, {
     store: 'doc', sessionKey: filePath || title,
     extraContext: docContext, label: 'doc-chat',
-    timeout: isPlanEdit ? 600000 : needsTools ? 120000 : 60000,
-    maxTurns: isPlanEdit ? 30 : needsTools ? 5 : 1,
-    model: needsTools ? 'sonnet' : 'haiku',
-    allowedTools: needsTools ? 'Read,Glob,Grep' : '',
-    skipStatePreamble: !needsTools,
+    timeout: isEditRequest && isPlan ? 600000 : isEditRequest ? 120000 : 60000,
+    maxTurns: isEditRequest && isPlan ? 30 : isEditRequest ? 5 : 1,
+    model: isEditRequest ? 'sonnet' : 'haiku',
+    allowedTools: isEditRequest ? 'Read,Glob,Grep' : '',
+    skipStatePreamble: !isEditRequest,
   });
 
   if (result.code !== 0 || !result.text) {
