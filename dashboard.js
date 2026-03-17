@@ -349,11 +349,11 @@ function updateSession(store, key, sessionId, existing) {
  * @param {number} opts.maxTurns - Max tool-use turns
  * @param {string} opts.allowedTools - Comma-separated tool list
  */
-async function ccCall(message, { store = 'cc', sessionKey, extraContext, label = 'command-center', timeout = 300000, maxTurns = 5, allowedTools = 'Read,Glob,Grep,WebFetch,WebSearch' } = {}) {
+async function ccCall(message, { store = 'cc', sessionKey, extraContext, label = 'command-center', timeout = 300000, maxTurns = 5, allowedTools = 'Read,Glob,Grep,WebFetch,WebSearch', skipStatePreamble = false } = {}) {
   const existing = resolveSession(store, sessionKey);
   let sessionId = existing ? existing.sessionId : null;
 
-  const parts = [`## Current Squad State (${new Date().toISOString().slice(0, 16)})\n\n${buildCCStatePreamble()}`];
+  const parts = skipStatePreamble ? [] : [`## Current Squad State (${new Date().toISOString().slice(0, 16)})\n\n${buildCCStatePreamble()}`];
   if (extraContext) parts.push(extraContext);
   parts.push(message);
   const prompt = parts.join('\n\n---\n\n');
@@ -413,12 +413,16 @@ async function ccDocCall({ message, document, title, filePath, selection, canEdi
   const docContext = `## Document Context\n**${title || 'Document'}**${filePath ? ' (`' + filePath + '`)' : ''}${isJson ? ' (JSON)' : ''}\n${selection ? '\n**Selected text:**\n> ' + selection.slice(0, 1500) + '\n' : ''}\n\`\`\`\n${document.slice(0, 20000)}\n\`\`\`\n${canEdit ? '\nIf editing: respond with your explanation, then `---DOCUMENT---` on its own line, then the COMPLETE updated file.' : '\n(Read-only — answer questions only.)'}`;
 
   const isPlanEdit = canEdit && filePath && /^plans\/.*\.md$/.test(filePath);
+  const isPrdEdit = canEdit && filePath && /\.json$/.test(filePath);
+  // Simple Q&A: no tools, 1 turn, fast. Edits: tools + multi-turn for codebase exploration.
+  const needsTools = canEdit && (isPlanEdit || isPrdEdit);
   const result = await ccCall(message, {
     store: 'doc', sessionKey: filePath || title,
     extraContext: docContext, label: 'doc-chat',
-    timeout: isPlanEdit ? 600000 : 120000,
-    maxTurns: isPlanEdit ? 30 : 5,
-    allowedTools: 'Read,Glob,Grep',
+    timeout: isPlanEdit ? 600000 : needsTools ? 120000 : 60000,
+    maxTurns: isPlanEdit ? 30 : needsTools ? 5 : 1,
+    allowedTools: needsTools ? 'Read,Glob,Grep' : '',
+    skipStatePreamble: !needsTools,
   });
 
   if (result.code !== 0 || !result.text) {
