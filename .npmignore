@@ -12,6 +12,7 @@ engine/*.pid
 engine/*-prompt*.md
 engine/*-sys*.md
 engine/pid-*
+engine/tmp/
 
 # Agent runtime state
 agents/*/status.json
