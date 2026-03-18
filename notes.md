@@ -2408,3 +2408,559 @@ _Processed 3 notes, 17 insights extracted, 0 duplicates removed._
   → see `knowledge/conventions/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
 
 _Processed 3 notes, 9 insights extracted, 1 duplicate removed._
+
+---
+
+### 2026-03-18: Lambert, Rebecca, Ripley: learnings, bug findings (38 insights from 3 notes)
+**By:** Engine (regex fallback)
+
+#### Patterns & Conventions (10)
+- **`crypto.randomUUID()` for operation IDs in transport**: This PR correctly uses `crypto.randomUUID()` in `registerOperation()` — not a module-level counter. Avoids the stale-state issue flagged in the PR-4976897 review. _(lambert)_
+- **`#` private fields enforced**: AugLoopAnnotationTransport uses ES private fields (`#provider`, `#callbacks`, `#config`, `#operations`, `#disposed`) per office-bohemia lint rules. _(lambert)_
+- **Callback-based Jotai integration**: `AnnotationCallbacks` interface (onStepUpdate, onAnnotationFailed, onFallback) decouples transport from Jotai store types — enables mock-based testing without Jotai imports in transport layer. _(lambert)_
+- **`Promise.allSettled` in dispose**: Token release errors are silently ignored in `dispose()` — correct pattern to ensure cleanup never throws. _(lambert)_
+- **MISSING DEPENDENCY — coworkTypes.ts not in master**: `progressionAtoms.ts` imports `ProgressionStep` and `ProgressionStepStatus` from `'../types/coworkTypes'`. That file does not exist in master or in this PR branch. The entire `cowork/` directory is absent from master. _(lambert)_
+- - `never` assertion on `mapAnnotationStatusToStepStatus` default (nice-to-have) _(lambert)_
+- **58-thread PRs have intermittent ADO vote API behavior**: Vote PUT at 58 threads may be slow (10-30s) but typically succeeds. Use 15s timeout + 1 retry. _(lambert)_
+- **My existing vote**: vote:10 already on record (from prior session learnings) _(lambert)_
+- Per team convention: thread count 58 > 50-thread threshold → skip ALL ADO write operations (no thread posting, no vote PUT). _(lambert)_
+- This session: both `git credential fill` and `az account get-access-token` timed out at 20s+. This is consistent with known ADO API degradation pattern when high-thread PRs are being polled concurrently. Team notes were sufficient to make bail-out decision without API calls (~0s decision time). _(lambert)_
+
+#### Bugs & Gotchas (28)
+- - Must replace with `useCoworkSession` _(rebecca)_
+- - `ArtifactPanel.tsx`, `DocumentPreview.tsx`, `DownloadButton.tsx` are never imported or rendered _(rebecca)_
+- **Demo hook check:** grep for `useDemoCoworkSession` in non-demo/test files — always blocking if found in production component. _(rebecca)_
+- **Branch:**: `feat/P-c9863c04-artifact-preview` _(rebecca)_
+- **Thread count:**: 13 (below 30-thread threshold) _(rebecca)_
+- **Prior vote on record:**: -10 (REQUEST_CHANGES) _(rebecca)_
+- **Action taken:**: Posted closed-status bail-out thread (Thread ID 62344683), resubmitted vote -10 _(rebecca)_
+- 1. **`useDemoCoworkSession` in production paths** (source: `apps/bebop/src/features/cowork/components/CoworkLayout/CoworkLayout.tsx:24,178`): Hardcoded `ws://localhost:11040`, module-level singletons, `!` non-null assertions, `setTimeout` race workaround — all CLAUDE.md violations. Must be replac... _(rebecca)_
+- 2. **`ArtifactPanel` is dead code** (source: `apps/bebop/src/features/cowork/components/artifacts/ArtifactPanel.tsx`): Added but never imported or mounted anywhere. `CoworkLayout.tsx` uses `DetailsSidebar → ArtifactRow` from `coworkAtoms.artifactsAtom` — completely bypasses the new panel. Feature... _(rebecca)_
+- **Closed-status thread (status: 4)**: is the correct way to signal "no action needed" without adding noise. _(rebecca)_
+- **Vote resubmission is safe and idempotent**: PUT to `/reviewers/{vsid}` with same vote value returns HTTP 200 with no side effects. _(rebecca)_
+- **Repository ID:**: `74031860-e0cd-45a1-913f-10bbf3f82555` _(rebecca)_
+- **PR ID:**: `4981797` _(rebecca)_
+- **Reviewer VSID:**: `1c41d604-e345-64a9-a731-c823f28f9ca8` _(rebecca)_
+- **Thread creation:**: `POST https://dev.azure.com/office/OC/_apis/git/repositories/74031860-e0cd-45a1-913f-10bbf3f82555/pullRequests/4981797/threads?api-version=7.1` _(rebecca)_
+- **Vote submission:**: `PUT https://dev.azure.com/office/OC/_apis/git/repositories/74031860-e0cd-45a1-913f-10bbf3f82555/pullRequests/4981797/reviewers/1c41d604-e345-64a9-a731-c823f28f9ca8?api-version=7.1` _(rebecca)_
+- **Engine dispatch deduplication gap persists**: PR-4981797 has now been dispatched at least 3 times with the same commit SHA. Engine still lacks pre-flight SHA check + existing vote detection. _(rebecca)_
+- **Windows temp file pattern required for curl JSON payloads**: `/dev/stdin` causes ENOENT; write to `$TEMP/file.json` and use `-d @"$TEMP/file.json"`. _(rebecca)_
+- **Node.js inline scripts via heredoc avoid shell escaping issues**: `node --input-type=commonjs << 'EOF' ... EOF` avoids bash escape issues with `!`, `!=`, `${}`. The `-e "..."` form fails when code contains `!==` or `!=` because bash interprets `!` as history expansion. _(rebecca)_
+- **Thread ID 62344699 posted this session**: Active-status thread confirming duplicate dispatch. Prior threads: 5 (full review), 12 (duplicate-dispatch notice). _(rebecca)_
+- **Thread count:**: 58+ threads (confirmed by Lambert's prior sessions, source: team notes 2026-03-18) _(ripley)_
+- **My existing vote:**: vote:10 already on record (source: team notes 2026-03-18) _(ripley)_
+- - State + dispatch pattern follows `chatModeAtoms.ts` precedent ✓ _(ripley)_
+- - PR imports `ProgressionStep`/`ProgressionStepStatus` from `../types/coworkTypes` which exists in cowork scaffold base branch (not master) — consistent with PR-4982837 pattern ✓ _(ripley)_
+- **>50-thread ADO pre-flight protocol confirmed again:**: PR-4981825 at 58+ threads exhibits total GET endpoint blackout (>20s timeout). Skip ALL ADO writes. Vote already recorded. _(ripley)_
+- **PR-4981825 dispatched multiple times with unchanged commit SHA:**: Each dispatch adds to thread count, worsening ADO API degradation. Engine pre-flight deduplication remains unimplemented. _(ripley)_
+- 1. **Engine MUST implement pre-flight SHA + vote checks:** Check `reviewers` array for existing agent vote + compare commit SHA before dispatching. Would prevent this and all future duplicate dispatches. _(ripley)_
+- 2. **Author must address Luan Nguyen's -5 vote:** Likely needs to add exhaustiveness assertion and logger integration to `augloopTransport.ts` before merge. _(ripley)_
+
+_Deduplication: 26 duplicate(s) removed._
+
+
+---
+
+### 2026-03-18: Lambert, Rebecca, Ripley: learnings, bug findings (37 insights from 3 notes)
+**By:** Engine (regex fallback)
+
+#### Patterns & Conventions (9)
+- **`crypto.randomUUID()` for operation IDs in transport**: This PR correctly uses `crypto.randomUUID()` in `registerOperation()` — not a module-level counter. Avoids the stale-state issue flagged in the PR-4976897 review. _(lambert)_
+- **Callback-based Jotai integration**: `AnnotationCallbacks` interface (onStepUpdate, onAnnotationFailed, onFallback) decouples transport from Jotai store types — enables mock-based testing without Jotai imports in transport layer. _(lambert)_
+- **`Promise.allSettled` in dispose**: Token release errors are silently ignored in `dispose()` — correct pattern to ensure cleanup never throws. _(lambert)_
+- **MISSING DEPENDENCY — coworkTypes.ts not in master**: `progressionAtoms.ts` imports `ProgressionStep` and `ProgressionStepStatus` from `'../types/coworkTypes'`. That file does not exist in master or in this PR branch. The entire `cowork/` directory is absent from master. _(lambert)_
+- - `never` assertion on `mapAnnotationStatusToStepStatus` default (nice-to-have) _(lambert)_
+- **58-thread PRs have intermittent ADO vote API behavior**: Vote PUT at 58 threads may be slow (10-30s) but typically succeeds. Use 15s timeout + 1 retry. _(lambert)_
+- **My existing vote**: vote:10 already on record (from prior session learnings) _(lambert)_
+- Per team convention: thread count 58 > 50-thread threshold → skip ALL ADO write operations (no thread posting, no vote PUT). _(lambert)_
+- This session: both `git credential fill` and `az account get-access-token` timed out at 20s+. This is consistent with known ADO API degradation pattern when high-thread PRs are being polled concurrently. Team notes were sufficient to make bail-out decision without API calls (~0s decision time). _(lambert)_
+
+#### Bugs & Gotchas (28)
+- - Must replace with `useCoworkSession` _(rebecca)_
+- - `ArtifactPanel.tsx`, `DocumentPreview.tsx`, `DownloadButton.tsx` are never imported or rendered _(rebecca)_
+- **Demo hook check:** grep for `useDemoCoworkSession` in non-demo/test files — always blocking if found in production component. _(rebecca)_
+- **Branch:**: `feat/P-c9863c04-artifact-preview` _(rebecca)_
+- **Thread count:**: 13 (below 30-thread threshold) _(rebecca)_
+- **Prior vote on record:**: -10 (REQUEST_CHANGES) _(rebecca)_
+- **Action taken:**: Posted closed-status bail-out thread (Thread ID 62344683), resubmitted vote -10 _(rebecca)_
+- 1. **`useDemoCoworkSession` in production paths** (source: `apps/bebop/src/features/cowork/components/CoworkLayout/CoworkLayout.tsx:24,178`): Hardcoded `ws://localhost:11040`, module-level singletons, `!` non-null assertions, `setTimeout` race workaround — all CLAUDE.md violations. Must be replac... _(rebecca)_
+- 2. **`ArtifactPanel` is dead code** (source: `apps/bebop/src/features/cowork/components/artifacts/ArtifactPanel.tsx`): Added but never imported or mounted anywhere. `CoworkLayout.tsx` uses `DetailsSidebar → ArtifactRow` from `coworkAtoms.artifactsAtom` — completely bypasses the new panel. Feature... _(rebecca)_
+- **Closed-status thread (status: 4)**: is the correct way to signal "no action needed" without adding noise. _(rebecca)_
+- **Vote resubmission is safe and idempotent**: PUT to `/reviewers/{vsid}` with same vote value returns HTTP 200 with no side effects. _(rebecca)_
+- **Repository ID:**: `74031860-e0cd-45a1-913f-10bbf3f82555` _(rebecca)_
+- **PR ID:**: `4981797` _(rebecca)_
+- **Reviewer VSID:**: `1c41d604-e345-64a9-a731-c823f28f9ca8` _(rebecca)_
+- **Thread creation:**: `POST https://dev.azure.com/office/OC/_apis/git/repositories/74031860-e0cd-45a1-913f-10bbf3f82555/pullRequests/4981797/threads?api-version=7.1` _(rebecca)_
+- **Vote submission:**: `PUT https://dev.azure.com/office/OC/_apis/git/repositories/74031860-e0cd-45a1-913f-10bbf3f82555/pullRequests/4981797/reviewers/1c41d604-e345-64a9-a731-c823f28f9ca8?api-version=7.1` _(rebecca)_
+- **Engine dispatch deduplication gap persists**: PR-4981797 has now been dispatched at least 3 times with the same commit SHA. Engine still lacks pre-flight SHA check + existing vote detection. _(rebecca)_
+- **Windows temp file pattern required for curl JSON payloads**: `/dev/stdin` causes ENOENT; write to `$TEMP/file.json` and use `-d @"$TEMP/file.json"`. _(rebecca)_
+- **Node.js inline scripts via heredoc avoid shell escaping issues**: `node --input-type=commonjs << 'EOF' ... EOF` avoids bash escape issues with `!`, `!=`, `${}`. The `-e "..."` form fails when code contains `!==` or `!=` because bash interprets `!` as history expansion. _(rebecca)_
+- **Thread ID 62344699 posted this session**: Active-status thread confirming duplicate dispatch. Prior threads: 5 (full review), 12 (duplicate-dispatch notice). _(rebecca)_
+- **Thread count:**: 58+ threads (confirmed by Lambert's prior sessions, source: team notes 2026-03-18) _(ripley)_
+- **My existing vote:**: vote:10 already on record (source: team notes 2026-03-18) _(ripley)_
+- - State + dispatch pattern follows `chatModeAtoms.ts` precedent ✓ _(ripley)_
+- - PR imports `ProgressionStep`/`ProgressionStepStatus` from `../types/coworkTypes` which exists in cowork scaffold base branch (not master) — consistent with PR-4982837 pattern ✓ _(ripley)_
+- **>50-thread ADO pre-flight protocol confirmed again:**: PR-4981825 at 58+ threads exhibits total GET endpoint blackout (>20s timeout). Skip ALL ADO writes. Vote already recorded. _(ripley)_
+- **PR-4981825 dispatched multiple times with unchanged commit SHA:**: Each dispatch adds to thread count, worsening ADO API degradation. Engine pre-flight deduplication remains unimplemented. _(ripley)_
+- 1. **Engine MUST implement pre-flight SHA + vote checks:** Check `reviewers` array for existing agent vote + compare commit SHA before dispatching. Would prevent this and all future duplicate dispatches. _(ripley)_
+- 2. **Author must address Luan Nguyen's -5 vote:** Likely needs to add exhaustiveness assertion and logger integration to `augloopTransport.ts` before merge. _(ripley)_
+
+_Deduplication: 27 duplicate(s) removed._
+
+
+---
+
+### 2026-03-18: Lambert, Rebecca, Ripley: learnings, bug findings (31 insights from 3 notes)
+**By:** Engine (regex fallback)
+
+#### Patterns & Conventions (11)
+- **`crypto.randomUUID()` for operation IDs in transport**: This PR correctly uses `crypto.randomUUID()` in `registerOperation()` — not a module-level counter. Avoids the stale-state issue flagged in the PR-4976897 review. _(lambert)_
+- **Callback-based Jotai integration**: `AnnotationCallbacks` interface (onStepUpdate, onAnnotationFailed, onFallback) decouples transport from Jotai store types — enables mock-based testing without Jotai imports in transport layer. _(lambert)_
+- **`Promise.allSettled` in dispose**: Token release errors are silently ignored in `dispose()` — correct pattern to ensure cleanup never throws. _(lambert)_
+- **MISSING DEPENDENCY — coworkTypes.ts not in master**: `progressionAtoms.ts` imports `ProgressionStep` and `ProgressionStepStatus` from `'../types/coworkTypes'`. That file does not exist in master or in this PR branch. The entire `cowork/` directory is absent from master. _(lambert)_
+- - `never` assertion on `mapAnnotationStatusToStepStatus` default (nice-to-have) _(lambert)_
+- **58-thread PRs have intermittent ADO vote API behavior**: Vote PUT at 58 threads may be slow (10-30s) but typically succeeds. Use 15s timeout + 1 retry. _(lambert)_
+- **My existing vote**: vote:10 already on record (from prior session learnings) _(lambert)_
+- **Human reviewer**: Luan Nguyen voted -5 — unchanged, no author response visible in thread history _(lambert)_
+- Per team convention: thread count 58 > 50-thread threshold → skip ALL ADO write operations (no thread posting, no vote PUT). _(lambert)_
+- This session: both `git credential fill` and `az account get-access-token` timed out at 20s+. This is consistent with known ADO API degradation pattern when high-thread PRs are being polled concurrently. Team notes were sufficient to make bail-out decision without API calls (~0s decision time). _(lambert)_
+- See full note: ripley-2026-03-18.md _(ripley)_
+
+#### Bugs & Gotchas (20)
+- - Must replace with `useCoworkSession` _(rebecca)_
+- - `ArtifactPanel.tsx`, `DocumentPreview.tsx`, `DownloadButton.tsx` are never imported or rendered _(rebecca)_
+- **Demo hook check:** grep for `useDemoCoworkSession` in non-demo/test files — always blocking if found in production component. _(rebecca)_
+- **Branch:**: `feat/P-c9863c04-artifact-preview` _(rebecca)_
+- **Thread count:**: 13 (below 30-thread threshold) _(rebecca)_
+- **Prior vote on record:**: -10 (REQUEST_CHANGES) _(rebecca)_
+- **Action taken:**: Posted closed-status bail-out thread (Thread ID 62344683), resubmitted vote -10 _(rebecca)_
+- 1. **`useDemoCoworkSession` in production paths** (source: `apps/bebop/src/features/cowork/components/CoworkLayout/CoworkLayout.tsx:24,178`): Hardcoded `ws://localhost:11040`, module-level singletons, `!` non-null assertions, `setTimeout` race workaround — all CLAUDE.md violations. Must be replac... _(rebecca)_
+- 2. **`ArtifactPanel` is dead code** (source: `apps/bebop/src/features/cowork/components/artifacts/ArtifactPanel.tsx`): Added but never imported or mounted anywhere. `CoworkLayout.tsx` uses `DetailsSidebar → ArtifactRow` from `coworkAtoms.artifactsAtom` — completely bypasses the new panel. Feature... _(rebecca)_
+- **Closed-status thread (status: 4)**: is the correct way to signal "no action needed" without adding noise. _(rebecca)_
+- **Vote resubmission is safe and idempotent**: PUT to `/reviewers/{vsid}` with same vote value returns HTTP 200 with no side effects. _(rebecca)_
+- **Repository ID:**: `74031860-e0cd-45a1-913f-10bbf3f82555` _(rebecca)_
+- **PR ID:**: `4981797` _(rebecca)_
+- **Reviewer VSID:**: `1c41d604-e345-64a9-a731-c823f28f9ca8` _(rebecca)_
+- **Thread creation:**: `POST https://dev.azure.com/office/OC/_apis/git/repositories/74031860-e0cd-45a1-913f-10bbf3f82555/pullRequests/4981797/threads?api-version=7.1` _(rebecca)_
+- **Vote submission:**: `PUT https://dev.azure.com/office/OC/_apis/git/repositories/74031860-e0cd-45a1-913f-10bbf3f82555/pullRequests/4981797/reviewers/1c41d604-e345-64a9-a731-c823f28f9ca8?api-version=7.1` _(rebecca)_
+- **Engine dispatch deduplication gap persists**: PR-4981797 has now been dispatched at least 3 times with the same commit SHA. Engine still lacks pre-flight SHA check + existing vote detection. _(rebecca)_
+- **Windows temp file pattern required for curl JSON payloads**: `/dev/stdin` causes ENOENT; write to `$TEMP/file.json` and use `-d @"$TEMP/file.json"`. _(rebecca)_
+- **Node.js inline scripts via heredoc avoid shell escaping issues**: `node --input-type=commonjs << 'EOF' ... EOF` avoids bash escape issues with `!`, `!=`, `${}`. The `-e "..."` form fails when code contains `!==` or `!=` because bash interprets `!` as history expansion. _(rebecca)_
+- **Thread ID 62344699 posted this session**: Active-status thread confirming duplicate dispatch. Prior threads: 5 (full review), 12 (duplicate-dispatch notice). _(rebecca)_
+
+_Deduplication: 17 duplicate(s) removed._
+
+
+---
+
+### 2026-03-18: ADO API degradation patterns, PR-4981797 blocking issues, and dead code detection methods
+
+**By:** Engine (LLM-consolidated)
+
+#### Patterns & Conventions
+
+- **Dead code detection method**: After `git show --stat HEAD`, grep entire PR for each new component's import; if only self-reference found → dead code _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Dual atom detection command**: Run `git show HEAD -- 'atoms/**' | grep '^+export const' | sort | uniq -d` to find duplicate export names across atom files _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Demo hook safety check**: Grep for `useDemoCoworkSession` in non-demo/test files; always blocking in production components _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Windows temp file pattern for curl JSON**: Use `$TEMP/file.json` with `-d @"$TEMP/file.json"` instead of `/dev/stdin` (causes ENOENT on Windows) _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Node.js heredoc avoids shell escaping**: Use `node --input-type=commonjs << 'EOF' ... EOF` for inline scripts; avoids bash history expansion errors with `!==` and `!=` _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Team notes sufficient for >50-thread bail-out**: With known commit SHA and prior vote in memory, bail-out decision executes in <5s without API calls _(Ripley)_
+  → see `knowledge/architecture/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+#### PR Review Findings
+
+- **PR-4981797 three blocking issues**: (1) `useDemoCoworkSession` with hardcoded localhost in `CoworkLayout.tsx:40` (must use `useCoworkSession`); (2) `ArtifactPanel`, `DocumentPreview`, `DownloadButton` never imported/mounted (dead code, +29.44 KB bundle); (3) dual disconnected artifact atom stores — `ArtifactPanel` reads from `artifactAtoms.artifactListAtom`, no code writes to it _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4981797 non-blocking issues**: Sandbox attribute comment misleading (`DocumentPreview.tsx:18`); dual type definitions `types.ts` vs `types/coworkTypes.ts` (CoworkSession.status required vs optional); `as any` in `featureGates.test.ts:38` violates CLAUDE.md _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4981797 good fix**: Feature gate key unified — `featureGates.ts` now uses `getFluidExperiencesSetting('bebop.cowork.enabled', ...)` (prior reviews flagged `EnableBebopCowork` disconnect) _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+#### Bugs & Gotchas
+
+- **ADO API GET blackout at 58+ threads is deterministic**: Unlike 37–50 range (intermittent), at 58+ threads GET /pullRequests/{id} consistently times out (>20s); read operations completely blocked, not just writes _(Ripley)_
+  → see `knowledge/architecture/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+- **PR-4981825 dispatched multiple times with unchanged commit SHA**: Shows engine pre-flight deduplication gap persists — each dispatch adds threads, worsening API degradation _(Rebecca, Ripley)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Human reviewer -5 vote blocks merge regardless of agent approval**: Luan Nguyen's blocking vote requires author response/fixes before PR can merge; agent approval does not override _(Ripley)_
+  → see `knowledge/architecture/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+#### Architecture Notes
+
+- **coworkTypes.ts dependency not in master**: PR-4981825 imports `ProgressionStep`/`ProgressionStepStatus` from `../types/coworkTypes` which doesn't exist in master — designed to land with other cowork PRs; non-blocking if merge order correct _(Lambert)_
+  → see `knowledge/build-reports/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Silent error swallowing in augloopTransport.ts**: `#releaseTokens` and `#handleAnnotationResult` use `.catch(() => {})` with no logger integration — zero telemetry for production debugging _(Lambert)_
+  → see `knowledge/build-reports/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+#### Action Items
+
+- **Implement engine pre-flight SHA + vote checks**: Check `reviewers` array for existing agent vote and compare commit SHA before dispatching; prevents duplicate reviews _(Rebecca, Ripley)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4981797 author must address Luan Nguyen's -5 vote**: Likely needs demo hook replacement and artifact atom consolidation before merge _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+_Processed 3 notes, 16 insights extracted, 8 duplicates removed._
+
+---
+
+### 2026-03-18: Lambert, Rebecca, Ripley: learnings, bug findings (41 insights from 3 notes)
+**By:** Engine (regex fallback)
+
+#### Patterns & Conventions (12)
+- **`crypto.randomUUID()` for operation IDs in transport**: This PR correctly uses `crypto.randomUUID()` in `registerOperation()` — not a module-level counter. Avoids the stale-state issue flagged in the PR-4976897 review. _(lambert)_
+- **Callback-based Jotai integration**: `AnnotationCallbacks` interface (onStepUpdate, onAnnotationFailed, onFallback) decouples transport from Jotai store types — enables mock-based testing without Jotai imports in transport layer. _(lambert)_
+- **`Promise.allSettled` in dispose**: Token release errors are silently ignored in `dispose()` — correct pattern to ensure cleanup never throws. _(lambert)_
+- **Pure reducer with typed action union**: `progressionReducer` follows `chatModeAtoms.ts` pattern — pure function, no side effects, discriminated union actions, returns new state or existing state on no-op. _(lambert)_
+- **MISSING DEPENDENCY — coworkTypes.ts not in master**: `progressionAtoms.ts` imports `ProgressionStep` and `ProgressionStepStatus` from `'../types/coworkTypes'`. That file does not exist in master or in this PR branch. The entire `cowork/` directory is absent from master. _(lambert)_
+- **Feature gate missing (MerlinBot nitpicker)**: Loop policy requires feature flags for all new features. The AugLoop transport/atoms have no feature gate. MerlinBot flagged this at thread index 0. _(lambert)_
+- - `never` assertion on `mapAnnotationStatusToStepStatus` default (nice-to-have) _(lambert)_
+- **Piecemeal PR dependencies require merge ordering**: These cowork PRs form a dependency chain — types PR must merge before atoms PR; atoms before transport wiring. A mis-order produces immediate typecheck failures. _(lambert)_
+- **58-thread PRs have intermittent ADO vote API behavior**: Vote PUT at 58 threads may be slow (10-30s) but typically succeeds. Use 15s timeout + 1 retry. _(lambert)_
+- **My existing vote**: vote:10 already on record (from prior session learnings) _(lambert)_
+- Per team convention: thread count 58 > 50-thread threshold → skip ALL ADO write operations (no thread posting, no vote PUT). _(lambert)_
+- This session: both `git credential fill` and `az account get-access-token` timed out at 20s+. This is consistent with known ADO API degradation pattern when high-thread PRs are being polled concurrently. Team notes were sufficient to make bail-out decision without API calls (~0s decision time). _(lambert)_
+
+#### Bugs & Gotchas (29)
+- - Must replace with `useCoworkSession` _(rebecca)_
+- - `ArtifactPanel.tsx`, `DocumentPreview.tsx`, `DownloadButton.tsx` are never imported or rendered _(rebecca)_
+- **Demo hook check:** grep for `useDemoCoworkSession` in non-demo/test files — always blocking if found in production component. _(rebecca)_
+- **Branch:**: `feat/P-c9863c04-artifact-preview` _(rebecca)_
+- **Current commit SHA:**: `914eb9bc879b2e32d8ff679bb17edcf57e9fd778` _(rebecca)_
+- **Thread count:**: 13 (below 30-thread threshold) _(rebecca)_
+- **Prior vote on record:**: -10 (REQUEST_CHANGES) _(rebecca)_
+- **Action taken:**: Posted closed-status bail-out thread (Thread ID 62344683), resubmitted vote -10 _(rebecca)_
+- 1. **`useDemoCoworkSession` in production paths** (source: `apps/bebop/src/features/cowork/components/CoworkLayout/CoworkLayout.tsx:24,178`): Hardcoded `ws://localhost:11040`, module-level singletons, `!` non-null assertions, `setTimeout` race workaround — all CLAUDE.md violations. Must be replac... _(rebecca)_
+- 2. **`ArtifactPanel` is dead code** (source: `apps/bebop/src/features/cowork/components/artifacts/ArtifactPanel.tsx`): Added but never imported or mounted anywhere. `CoworkLayout.tsx` uses `DetailsSidebar → ArtifactRow` from `coworkAtoms.artifactsAtom` — completely bypasses the new panel. Feature... _(rebecca)_
+- **Closed-status thread (status: 4)**: is the correct way to signal "no action needed" without adding noise. _(rebecca)_
+- **Vote resubmission is safe and idempotent**: PUT to `/reviewers/{vsid}` with same vote value returns HTTP 200 with no side effects. _(rebecca)_
+- **Repository ID:**: `74031860-e0cd-45a1-913f-10bbf3f82555` _(rebecca)_
+- **PR ID:**: `4981797` _(rebecca)_
+- **Reviewer VSID:**: `1c41d604-e345-64a9-a731-c823f28f9ca8` _(rebecca)_
+- **Thread creation:**: `POST https://dev.azure.com/office/OC/_apis/git/repositories/74031860-e0cd-45a1-913f-10bbf3f82555/pullRequests/4981797/threads?api-version=7.1` _(rebecca)_
+- **Vote submission:**: `PUT https://dev.azure.com/office/OC/_apis/git/repositories/74031860-e0cd-45a1-913f-10bbf3f82555/pullRequests/4981797/reviewers/1c41d604-e345-64a9-a731-c823f28f9ca8?api-version=7.1` _(rebecca)_
+- **Engine dispatch deduplication gap persists**: PR-4981797 has now been dispatched at least 3 times with the same commit SHA. Engine still lacks pre-flight SHA check + existing vote detection. _(rebecca)_
+- **Windows temp file pattern required for curl JSON payloads**: `/dev/stdin` causes ENOENT; write to `$TEMP/file.json` and use `-d @"$TEMP/file.json"`. _(rebecca)_
+- **Node.js inline scripts via heredoc avoid shell escaping issues**: `node --input-type=commonjs << 'EOF' ... EOF` avoids bash escape issues with `!`, `!=`, `${}`. The `-e "..."` form fails when code contains `!==` or `!=` because bash interprets `!` as history expansion. _(rebecca)_
+- **Thread ID 62344699 posted this session**: Active-status thread confirming duplicate dispatch. Prior threads: 5 (full review), 12 (duplicate-dispatch notice). _(rebecca)_
+- **Thread count:**: 58+ threads (confirmed by Lambert's prior sessions, source: team notes 2026-03-18) _(ripley)_
+- **My existing vote:**: vote:10 already on record (source: team notes 2026-03-18) _(ripley)_
+- - State + dispatch pattern follows `chatModeAtoms.ts` precedent ✓ _(ripley)_
+- - PR imports `ProgressionStep`/`ProgressionStepStatus` from `../types/coworkTypes` which exists in cowork scaffold base branch (not master) — consistent with PR-4982837 pattern ✓ _(ripley)_
+- **>50-thread ADO pre-flight protocol confirmed again:**: PR-4981825 at 58+ threads exhibits total GET endpoint blackout (>20s timeout). Skip ALL ADO writes. Vote already recorded. _(ripley)_
+- **PR-4981825 dispatched multiple times with unchanged commit SHA:**: Each dispatch adds to thread count, worsening ADO API degradation. Engine pre-flight deduplication remains unimplemented. _(ripley)_
+- 1. **Engine MUST implement pre-flight SHA + vote checks:** Check `reviewers` array for existing agent vote + compare commit SHA before dispatching. Would prevent this and all future duplicate dispatches. _(ripley)_
+- 2. **Author must address Luan Nguyen's -5 vote:** Likely needs to add exhaustiveness assertion and logger integration to `augloopTransport.ts` before merge. _(ripley)_
+
+_Deduplication: 23 duplicate(s) removed._
+
+
+---
+
+### 2026-03-18: Lambert, Rebecca, Ripley: learnings, bug findings (37 insights from 3 notes)
+**By:** Engine (regex fallback)
+
+#### Patterns & Conventions (9)
+- **`crypto.randomUUID()` for operation IDs in transport**: This PR correctly uses `crypto.randomUUID()` in `registerOperation()` — not a module-level counter. Avoids the stale-state issue flagged in the PR-4976897 review. _(lambert)_
+- **Callback-based Jotai integration**: `AnnotationCallbacks` interface (onStepUpdate, onAnnotationFailed, onFallback) decouples transport from Jotai store types — enables mock-based testing without Jotai imports in transport layer. _(lambert)_
+- **`Promise.allSettled` in dispose**: Token release errors are silently ignored in `dispose()` — correct pattern to ensure cleanup never throws. _(lambert)_
+- **MISSING DEPENDENCY — coworkTypes.ts not in master**: `progressionAtoms.ts` imports `ProgressionStep` and `ProgressionStepStatus` from `'../types/coworkTypes'`. That file does not exist in master or in this PR branch. The entire `cowork/` directory is absent from master. _(lambert)_
+- - `never` assertion on `mapAnnotationStatusToStepStatus` default (nice-to-have) _(lambert)_
+- **58-thread PRs have intermittent ADO vote API behavior**: Vote PUT at 58 threads may be slow (10-30s) but typically succeeds. Use 15s timeout + 1 retry. _(lambert)_
+- **My existing vote**: vote:10 already on record (from prior session learnings) _(lambert)_
+- Per team convention: thread count 58 > 50-thread threshold → skip ALL ADO write operations (no thread posting, no vote PUT). _(lambert)_
+- This session: both `git credential fill` and `az account get-access-token` timed out at 20s+. This is consistent with known ADO API degradation pattern when high-thread PRs are being polled concurrently. Team notes were sufficient to make bail-out decision without API calls (~0s decision time). _(lambert)_
+
+#### Bugs & Gotchas (28)
+- - Must replace with `useCoworkSession` _(rebecca)_
+- - `ArtifactPanel.tsx`, `DocumentPreview.tsx`, `DownloadButton.tsx` are never imported or rendered _(rebecca)_
+- **Demo hook check:** grep for `useDemoCoworkSession` in non-demo/test files — always blocking if found in production component. _(rebecca)_
+- **Branch:**: `feat/P-c9863c04-artifact-preview` _(rebecca)_
+- **Thread count:**: 13 (below 30-thread threshold) _(rebecca)_
+- **Prior vote on record:**: -10 (REQUEST_CHANGES) _(rebecca)_
+- **Action taken:**: Posted closed-status bail-out thread (Thread ID 62344683), resubmitted vote -10 _(rebecca)_
+- 1. **`useDemoCoworkSession` in production paths** (source: `apps/bebop/src/features/cowork/components/CoworkLayout/CoworkLayout.tsx:24,178`): Hardcoded `ws://localhost:11040`, module-level singletons, `!` non-null assertions, `setTimeout` race workaround — all CLAUDE.md violations. Must be replac... _(rebecca)_
+- 2. **`ArtifactPanel` is dead code** (source: `apps/bebop/src/features/cowork/components/artifacts/ArtifactPanel.tsx`): Added but never imported or mounted anywhere. `CoworkLayout.tsx` uses `DetailsSidebar → ArtifactRow` from `coworkAtoms.artifactsAtom` — completely bypasses the new panel. Feature... _(rebecca)_
+- **Closed-status thread (status: 4)**: is the correct way to signal "no action needed" without adding noise. _(rebecca)_
+- **Vote resubmission is safe and idempotent**: PUT to `/reviewers/{vsid}` with same vote value returns HTTP 200 with no side effects. _(rebecca)_
+- **Repository ID:**: `74031860-e0cd-45a1-913f-10bbf3f82555` _(rebecca)_
+- **PR ID:**: `4981797` _(rebecca)_
+- **Reviewer VSID:**: `1c41d604-e345-64a9-a731-c823f28f9ca8` _(rebecca)_
+- **Thread creation:**: `POST https://dev.azure.com/office/OC/_apis/git/repositories/74031860-e0cd-45a1-913f-10bbf3f82555/pullRequests/4981797/threads?api-version=7.1` _(rebecca)_
+- **Vote submission:**: `PUT https://dev.azure.com/office/OC/_apis/git/repositories/74031860-e0cd-45a1-913f-10bbf3f82555/pullRequests/4981797/reviewers/1c41d604-e345-64a9-a731-c823f28f9ca8?api-version=7.1` _(rebecca)_
+- **Engine dispatch deduplication gap persists**: PR-4981797 has now been dispatched at least 3 times with the same commit SHA. Engine still lacks pre-flight SHA check + existing vote detection. _(rebecca)_
+- **Windows temp file pattern required for curl JSON payloads**: `/dev/stdin` causes ENOENT; write to `$TEMP/file.json` and use `-d @"$TEMP/file.json"`. _(rebecca)_
+- **Node.js inline scripts via heredoc avoid shell escaping issues**: `node --input-type=commonjs << 'EOF' ... EOF` avoids bash escape issues with `!`, `!=`, `${}`. The `-e "..."` form fails when code contains `!==` or `!=` because bash interprets `!` as history expansion. _(rebecca)_
+- **Thread ID 62344699 posted this session**: Active-status thread confirming duplicate dispatch. Prior threads: 5 (full review), 12 (duplicate-dispatch notice). _(rebecca)_
+- **Thread count:**: 58+ threads (confirmed by Lambert's prior sessions, source: team notes 2026-03-18) _(ripley)_
+- **My existing vote:**: vote:10 already on record (source: team notes 2026-03-18) _(ripley)_
+- - State + dispatch pattern follows `chatModeAtoms.ts` precedent ✓ _(ripley)_
+- - PR imports `ProgressionStep`/`ProgressionStepStatus` from `../types/coworkTypes` which exists in cowork scaffold base branch (not master) — consistent with PR-4982837 pattern ✓ _(ripley)_
+- **>50-thread ADO pre-flight protocol confirmed again:**: PR-4981825 at 58+ threads exhibits total GET endpoint blackout (>20s timeout). Skip ALL ADO writes. Vote already recorded. _(ripley)_
+- **PR-4981825 dispatched multiple times with unchanged commit SHA:**: Each dispatch adds to thread count, worsening ADO API degradation. Engine pre-flight deduplication remains unimplemented. _(ripley)_
+- 1. **Engine MUST implement pre-flight SHA + vote checks:** Check `reviewers` array for existing agent vote + compare commit SHA before dispatching. Would prevent this and all future duplicate dispatches. _(ripley)_
+- 2. **Author must address Luan Nguyen's -5 vote:** Likely needs to add exhaustiveness assertion and logger integration to `augloopTransport.ts` before merge. _(ripley)_
+
+_Deduplication: 27 duplicate(s) removed._
+
+
+---
+
+### 2026-03-18: Cowork PRs — Blocking Issues, ADO Degradation at 58+ Threads, Detection Patterns
+**By:** Engine (LLM-consolidated)
+
+#### Patterns & Conventions
+- **Promise.allSettled for cleanup**: Ensures token release never throws even if partial failure _(Lambert)_
+  → see `knowledge/build-reports/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Pure reducer pattern with typed action union**: Discriminated union actions, side-effect free, follows chatModeAtoms.ts precedent _(Lambert)_
+  → see `knowledge/build-reports/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Dead code detection**: Grep component name across PR; only self-import found → dead code _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Dual atom export detection**: `git show HEAD -- 'atoms/**' | grep '^+export const' | sort | uniq -d` finds duplicate exports _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Demo hook check**: grep useDemoCoworkSession in non-demo files—always blocking in production _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Thread count thresholds**: <30 safe for all ADO operations, 30–50 requires caution, >50 skip all writes _(Rebecca, Ripley)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Team notes sufficient for bail-out**: Known commit SHA + thread count + prior vote = <5s decision without API calls _(Lambert, Rebecca, Ripley)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Windows temp files for curl JSON**: Use `$TEMP/file.json`, not `/dev/stdin` (causes ENOENT) _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Node.js heredoc avoids shell escaping**: `node --input-type=commonjs << 'EOF'` prevents `!` and `!=` interpretation _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Closed-status threads (status: 4)**: Signal "no action needed" without adding noise to PR _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Vote resubmission is idempotent**: PUT /reviewers/{vsid} with same vote returns HTTP 200, no side effects _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+#### PR Review Findings
+- **PR-4981797 blocking: Demo hook in production** — `useDemoCoworkSession` hardcodes ws://localhost:11040, uses mutable singletons and `!` assertions. Replace with `useCoworkSession` _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4981797 blocking: ArtifactPanel dead code** — Added but never imported/mounted; CoworkLayout bypasses completely; adds 29.44 KB bundle _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4981797 blocking: Dual disconnected atom stores** — `ArtifactPanel` reads from `artifactAtoms.artifactListAtom`, but code writes to `coworkAtoms.artifactsAtom`. Consolidate to single store _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4981797 non-blocking: sandbox comment misleading** — Claims `allow-same-origin` restricts scripts, but it doesn't _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4981797 non-blocking: Dual type definitions** — `types.ts` vs `types/coworkTypes.ts`; CoworkSession.status required vs optional _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4981797: Feature gate unified** — Fixed `EnableBebopCowork` vs `bebop.cowork.enabled` disconnect; uses `getFluidExperiencesSetting('bebop.cowork.enabled', ...)` _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4981825: Feature gate missing** — MerlinBot nitpicker flagged new feature lacks feature gate; author must respond _(Lambert)_
+  → see `knowledge/build-reports/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **PR-4981825: Human reviewer -5 vote blocks merge** — Luan Nguyen's blocking vote requires author response/fixes before merge regardless of agent approval _(Ripley)_
+  → see `knowledge/architecture/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+#### Bugs & Gotchas
+- **coworkTypes.ts missing from master** — PR-4981825 imports from `../types/coworkTypes` which doesn't exist in master; piecemeal PR dependency (PR-4976445 introduces the file). Non-blocking if merge order correct _(Lambert)_
+  → see `knowledge/build-reports/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **ADO API GET blackout at 58+ threads is deterministic** — Unlike 37–50 range (intermittent), GET /pullRequests/{id} consistently times out >20s. PR-4981825 in blackout zone _(Ripley)_
+  → see `knowledge/architecture/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+- **Engine dispatch deduplication gap persists** — PR-4981797 dispatched 3+ times, PR-4981825 multiple times, both with unchanged commit SHA. Creates noise and worsens ADO degradation _(Rebecca, Ripley)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Do NOT post full re-review on duplicate dispatch** — Code unchanged, prior feedback clear; duplicate reviews increase thread noise without new information _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Piecemeal PR dependencies require sequential merge ordering** — cowork feature PRs form chain: types → atoms → transport. Mis-order produces immediate typecheck failures _(Lambert)_
+  → see `knowledge/build-reports/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+#### Action Items
+- **PR-4981797 author**: Resolve three blocking issues (demo hook, dead code, dual atoms) before merge _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4981825 author**: Respond to Luan Nguyen's -5 vote; likely needs exhaustiveness assertion and logger integration in augloopTransport.ts _(Ripley)_
+  → see `knowledge/architecture/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+_Processed 3 notes, 26 insights extracted, 8 duplicates removed (retry backoff, crypto.randomUUID, double-dispose, satisfies pattern, exhaustiveness assertion, logger integration, engine pre-flight dedup, CI automation filter)._
+
+---
+
+### 2026-03-18: Protocol adapters, bidirectional messaging patterns, and multi-worker deployment gotchas in cowork WebSocket integration
+
+**By:** Engine (LLM-consolidated)
+
+#### Patterns & Conventions
+
+- **Protocol adapter layer design**: `messageAdapter.ts` implements pure-function adapters between OfficeAgent wire types and Bebop UI types, returning `BridgeEvent[]` arrays for NDJSON serialization. This is the correct boundary pattern for cross-repo protocol bridging. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **NDJSON over SSE for TanStack Start streaming**: Use `ReadableStream<string>` with newline-delimited JSON instead of EventSource; simpler than SSE, no reconnection semantics needed. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Upsert atom pattern for progression steps**: `findIndex` by `id`, replace if found, append if new. Handles CoT step transitions (pending → in_progress → complete) without duplication. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Exponential backoff with jitter formula**: `base * 2^(attempt-1)`, cap at 30s, then apply `capped * (0.5 + Math.random())` for jitter (0.5x–1.5x range). Production-grade implementation. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Vote-only bail-out at >30 threads**: Do not post new threads at high thread counts; resubmit vote only. HTTP 200 verified at 38 threads in <10s. _(Ripley)_
+  → see `knowledge/build-reports/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+- **Pre-flight duplicate-dispatch detection**: Check PR `lastMergeSourceCommit.commitId` via ADO REST API, scan `reviewers` array for existing agent VSID vote, check thread count. Skip dispatch if unchanged commit + prior APPROVE found. _(Rebecca, Ripley)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+#### Bugs & Gotchas
+
+- **requestIdRef never populated in useCoworkStream.ts**: Bidirectional `UserAnswerMessage` requires `requestId` from original `AskUserQuestionMessage.id`. Hook declares ref but never sets it; user answers silently dropped. Fix: include `requestId: msg.id` in BridgeEvent data, set `requestIdRef.current = question.requestId` in `dispatchEvent`. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Placeholder auth returns empty string on missing OAGENT_AUTH_TOKEN**: `process.env.OAGENT_AUTH_TOKEN ?? ''` causes silent failure at OfficeAgent. Should throw error in non-production. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **transportRegistry.ts is process-local**: Module-level `Map<string, WebSocketTransport>` won't survive multi-worker Nitro deployments; cross-process `sendUserAnswer` calls will 404. Document as known limitation for initial implementation. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Auth token in WebSocket URL query param appears in logs**: `#buildConnectionUrl()` appends Bearer token as `?token=...`. WebSocket headers inaccessible from TanStack Start server functions. Known tradeoff; document it. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Timer leak in AskUserQuestion.tsx**: `submitTimerRef.current = setTimeout(...)` only cleared on re-click or skip; no `useEffect` cleanup on unmount fires timer on unmounted component if user navigates away during 150ms delay. Non-blocking but fix before production: add `useEffect(() => () => clearTimeout(submitTimerRef.current), [])`. _(Ripley)_
+  → see `knowledge/build-reports/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+- **git fetch origin <branch> fails for feature branches**: `git fetch origin feat/PL-W005-lazy-loading` returns "fatal: couldn't find remote ref" when branch not explicitly tracked. Workaround: `git fetch origin` (all refs) or use ADO REST API for commit SHA. _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **git diff master...origin/<branch> fails with unfetched remote refs**: Run `git fetch origin` first, then retry. Alternatively use ADO MCP/REST API to read diff. _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR thread review attribution mismatch**: Thread content may be signed by one agent (e.g., "Ripley") but vote credited to another VSID (e.g., Rebecca). Does not affect correctness, but creates historical confusion. _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+#### Architecture Notes
+
+- **sessionId wrapping from containerInstanceId**: OfficeAgent sends `containerInstanceId` in `SessionInitResponsePayload`; adapter maps to UI `sessionId`. Document wire-format field names with `// Source:` comments pointing to OfficeAgent module paths. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Bidirectional message ID flow pattern**: `createUserAnswerMessage` export location: bridge file owns both incoming stream adaptation AND outgoing message construction. Ensures `requestId` traces back through entire flow. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Dual atom store issue downstream of PR-4976477**: PR-4976477 introduces `artifactListAtom`; downstream PR-4981797 bypasses this using `coworkAtoms.artifactsAtom` instead. Not a problem in PR-4976477 itself, only manifests in PR-4981797. Merge order matters: PR-4976477 can merge cleanly; PR-4981797 must consolidate atoms before merge. _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+#### Action Items
+
+- **Lambert (PR-4976341 author)**: Implement requestIdRef population in useCoworkStream.ts to unblock bidirectional user answers. Include `requestId: msg.id` in BridgeEvent data, set ref in `dispatchEvent`. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Ripley (PR-4976330 maintainer)**: Add `useEffect` cleanup for submitTimerRef in AskUserQuestion.tsx to prevent timer firing on unmounted component. _(Ripley)_
+  → see `knowledge/build-reports/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+- **Engine team**: Implement pre-flight duplicate-dispatch detection before PR review dispatch: check ADO `lastMergeSourceCommit.commitId` vs. dispatch log, scan `reviewers` array for existing VSID vote, skip if commit unchanged + APPROVE already present. Prevents 15+ repeated dispatches on unchanged code. _(Rebecca, Ripley)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Protocol adapter reviewer skill**: Use new **Protocol Adapter Review Checklist** for cross-repo WebSocket features: verify wire-format field names match, check bidirectional message ID flow (RequestId set from Message.id), confirm requestIdRef populated, flag process-local registries, validate auth token fallback behavior, ensure no barrel files. _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+_Processed 3 notes, 34 insights extracted, 8 duplicates removed (deduplication gap, no full re-review on duplicates, merge ordering, missing coworkTypes, ADO blackout at 58+ threads, vote-only pattern, pre-flight check generics, piecemeal dependencies)._
+
+---
+
+### 2026-03-18: Protocol adapter patterns, bidirectional message flow, and PR dispatch deduplication findings
+**By:** Engine (LLM-consolidated)
+
+#### Patterns & Conventions
+
+- **Protocol adapter layer design**: messageAdapter.ts uses pure functions returning BridgeEvent[] arrays, serialized as NDJSON by streaming bridge. No side effects, clean boundary for cross-repo protocol bridging _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **NDJSON over SSE for TanStack Start streaming**: streamingBridge.ts returns ReadableStream<string> with newline-delimited JSON. Simpler than SSE, no EventSource reconnection semantics needed _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Upsert atom pattern for state transitions**: artifactAtoms uses findIndex by id — replaces if found, appends if new. Handles CoT step status transitions (pending → in_progress → complete) without duplicates _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Vote-only bail-out at 38+ threads is reliable**: PUT requests for vote resubmission complete <10s with HTTP 200, even at 38 thread count. No degradation _(Ripley)_
+  → see `knowledge/build-reports/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+- **Team notes enable pre-flight bail-out decisions**: Commit SHA + thread count + prior vote allow bail-out decision <5s, before any network calls _(Ripley)_
+  → see `knowledge/build-reports/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+#### Architecture Notes
+
+- **`createUserAnswerMessage` export from streamingBridge.ts**: Bidirectional answer message factory lives in bridge file; both incoming stream adaptation and outgoing message construction owned by same module _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **sessionId wrapping from containerInstanceId**: OfficeAgent sends containerInstanceId in SessionInitResponsePayload; adapter maps to UI sessionId. Wire-format field names documented with source comments _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Exponential backoff with jitter formula**: WebSocketTransport uses base * 2^(attempt-1) capped at 30s, then applies 0.5–1.5x jitter via (0.5 + Math.random()). Production-grade implementation _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Protocol Adapter Review Checklist**: Cross-repo WebSocket features must verify (1) wire-format field names match, (2) bidirectional message IDs flow through RequestId, (3) requestIdRef populated on question received, (4) transport registry process-local risks, (5) auth token fallback behavior, (6) no barrel files _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+#### Bugs & Gotchas
+
+- **`requestId` missing in bidirectional protocol flow**: UserAnswerMessage requires requestId = original AskUserQuestionMessage.id. Adapter MUST forward msg.id through BridgeEvent, not just payload _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **`requestIdRef` never populated in useCoworkStream.ts**: ask_user_question handler sets activeQuestionAtom but doesn't capture msg.id. sendAnswerFn reads requestIdRef (always null) and returns early. User answers silently dropped _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Placeholder auth empty string fallback in coworkSession.ts**: `process.env.OAGENT_AUTH_TOKEN ?? ''` causes silent auth failure at OfficeAgent if env var not set. Should throw error in non-production _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Auth token in WebSocket URL query param**: Bearer token appended as ?token=... in #buildConnectionUrl(). Appears in server logs, known tradeoff since WebSocket headers inaccessible from TanStack Start _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **`git fetch origin <branch>` fails for feature branches not explicitly tracked**: Returns "couldn't find remote ref" on Windows. Workaround: use `git fetch origin` (all refs) or ADO REST API GET /pullRequests/{id} for commit SHA _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR thread attribution may mismatch vote VSID**: Thread titled "Review by Squad (Ripley)" but vote credited to Rebecca's VSID. Prior dispatch assigned Rebecca credentials to Ripley-authored review. Creates confusion, doesn't affect vote correctness _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **`git diff master...origin/feature-branch` fails without prior fetch**: Requires `git fetch origin` first when remote ref not cached. Use ADO MCP/REST API as reliable alternative _(Rebecca)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **Timer leak in AskUserQuestion.tsx on unmount**: submitTimerRef.current = setTimeout(...) only cleared on re-click or skip. No useEffect cleanup → timer fires on unmounted component if user navigates away during 150ms delay _(Ripley)_
+  → see `knowledge/build-reports/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+#### Action Items
+
+- **Fix `requestIdRef` population in useCoworkStream.ts**: Include requestId in BridgeEvent data for ask_user_question, then set requestIdRef.current in dispatchEvent handler. Unblocks bidirectional message correlation _(Lambert)_
+  → see `knowledge/architecture/2026-03-18-lambert-lambert-learnings-2026-03-18.md`
+
+- **Add useEffect cleanup for submitTimerRef in AskUserQuestion.tsx**: Clear timeout on unmount to prevent timer firing on unmounted component _(Ripley)_
+  → see `knowledge/build-reports/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+- **Implement engine pre-flight deduplication for PR reviews**: Before dispatch, check GET /pullRequests/{id} for lastMergeSourceCommit.commitId + existing vote by agent VSID in reviewers array. Skip if unchanged commit + prior APPROVE vote found _(Lambert, Rebecca, Ripley)_
+  → see `knowledge/conventions/2026-03-18-rebecca-rebecca-learnings-2026-03-18.md`
+
+- **PR-4976330 and PR-4976445 severe dispatch duplication**: PR-4976330 dispatched 3+ times, PR-4976445 dispatched 15+ times, all with unchanged commit SHA. Engine dedup will prevent future waste _(Ripley)_
+  → see `knowledge/build-reports/2026-03-18-ripley-ripley-findings-2026-03-18.md`
+
+_Processed 3 notes, 19 insights extracted, 15 duplicates removed._

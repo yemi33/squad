@@ -1346,6 +1346,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       plan.status = 'approved';
       plan.approvedAt = new Date().toISOString();
       plan.approvedBy = body.approvedBy || os.userInfo().username;
+      delete plan.pausedAt;
       safeWrite(planPath, plan);
 
       // Resume paused work items across all projects
@@ -1397,7 +1398,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       if (!body.file) return jsonReply(res, 400, { error: 'file required' });
       const planPath = resolvePlanPath(body.file);
       const plan = JSON.parse(safeRead(planPath) || '{}');
-      plan.status = 'awaiting-approval';
+      plan.status = 'paused';
       plan.pausedAt = new Date().toISOString();
       safeWrite(planPath, plan);
 

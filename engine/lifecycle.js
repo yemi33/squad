@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const shared = require('./shared');
-const { safeRead, safeJson, safeWrite, execSilent, projectPrPath } = shared;
+const { safeRead, safeJson, safeWrite, execSilent, projectPrPath, getPrLinks, addPrLink } = shared;
 const { trackEngineUsage } = require('./llm');
 const queries = require('./queries');
 const { getConfig, getInboxFiles, getNotes, getPrs, getAgentStatus,
@@ -41,7 +41,8 @@ function checkPlanCompletion(meta, config) {
   }
   const planItems = allWorkItems.filter(w => w.sourcePlan === planFile && w.itemType !== 'pr' && w.itemType !== 'verify');
   if (planItems.length === 0) return;
-  if (!planItems.every(w => w.status === 'done' || w.status === 'failed')) return;
+  const completedStatuses = new Set(['done', 'in-pr', 'failed']);
+  if (!planItems.every(w => completedStatuses.has(w.status))) return;
 
   // Don't mark complete if not all plan features have been materialized as work items
   const totalPlanFeatures = (plan.missing_features || []).length;
@@ -50,7 +51,7 @@ function checkPlanCompletion(meta, config) {
     return;
   }
 
-  const doneItems = planItems.filter(w => w.status === 'done');
+  const doneItems = planItems.filter(w => w.status === 'done' || w.status === 'in-pr');
   const failedItems = planItems.filter(w => w.status === 'failed');
   const allDone = failedItems.length === 0;
 
@@ -80,8 +81,10 @@ function checkPlanCompletion(meta, config) {
     try {
       const prPath = shared.projectPrPath(p);
       const prs = safeJson(prPath) || [];
+      const prLinks = getPrLinks();
       for (const pr of prs) {
-        if ((pr.prdItems || []).some(id => doneItems.find(w => w.id === id))) {
+        const linkedItemId = prLinks[pr.id];
+        if (linkedItemId && doneItems.find(w => w.id === linkedItemId)) {
           prsCreated.push(pr);
         }
       }
@@ -150,9 +153,12 @@ function checkPlanCompletion(meta, config) {
     // Group PRs by project — one worktree per project with all branches merged in
     const projectPrs = {}; // projectName -> { project, prs: [], mainBranch }
     for (const p of projects) {
+      const prLinks = getPrLinks();
       const prs = (safeJson(shared.projectPrPath(p)) || [])
-        .filter(pr => pr.status === 'active' && (pr.prdItems || []).some(id =>
-          doneItems.find(w => w.id === id || w.id === id)));
+        .filter(pr => {
+          const linkedId = prLinks[pr.id];
+          return pr.status === 'active' && linkedId && doneItems.find(w => w.id === linkedId);
+        });
       if (prs.length > 0) {
         projectPrs[p.name] = { project: p, prs, mainBranch: p.mainBranch || 'main' };
       }
@@ -413,8 +419,28 @@ function updateWorkItemStatus(meta, status, reason) {
     shared.safeWrite(wiPath, items);
     e.log('info', `Work item ${itemId} → ${status}${reason ? ': ' + reason : ''}`);
 
-    // PRD item status is derived from work items at read time (getPrdInfo) — no sync needed
+    // Sync status to PRD JSON so the two share the same value (work item is source of truth)
+    syncPrdItemStatus(itemId, status, meta.item?.sourcePlan);
   }
+}
+
+function syncPrdItemStatus(itemId, status, sourcePlan) {
+  if (!itemId) return;
+  try {
+    const prdDir = path.join(SQUAD_DIR, 'prd');
+    const files = sourcePlan ? [sourcePlan] : require('fs').readdirSync(prdDir).filter(f => f.endsWith('.json'));
+    for (const pf of files) {
+      const fpath = path.join(prdDir, pf);
+      const plan = safeJson(fpath);
+      if (!plan?.missing_features) continue;
+      const feature = plan.missing_features.find(f => f.id === itemId);
+      if (feature && feature.status !== status) {
+        feature.status = status;
+        shared.safeWrite(fpath, plan);
+        return;
+      }
+    }
+  } catch {}
 }
 
 // ─── PR Sync from Output ─────────────────────────────────────────────────────
@@ -511,10 +537,10 @@ function syncPrsFromOutput(output, agentId, meta, config) {
       status: 'active',
       created: e.dateStamp(),
       url: targetProject.prUrlBase ? targetProject.prUrlBase + prId : '',
-      prdItems: meta?.item?.id ? [meta.item.id] : [],
       sourcePlan: meta?.item?.sourcePlan || '',
       itemType: meta?.item?.itemType || ''
     });
+    if (meta?.item?.id) addPrLink(fullId, meta.item.id);
     added++;
   }
 
@@ -618,7 +644,8 @@ async function handlePostMerge(pr, project, config, newStatus) {
 
   if (newStatus !== 'merged') return;
 
-  if (pr.prdItems?.length > 0) {
+  const mergedItemId = getPrLinks()[pr.id];
+  if (mergedItemId) {
     const prdDir = path.join(SQUAD_DIR, 'prd');
     try {
       const planFiles = fs.readdirSync(prdDir).filter(f => f.endsWith('.json'));
@@ -626,18 +653,14 @@ async function handlePostMerge(pr, project, config, newStatus) {
       for (const pf of planFiles) {
         const plan = safeJson(path.join(prdDir, pf));
         if (!plan?.missing_features) continue;
-        let changed = false;
-        for (const itemId of pr.prdItems) {
-          const feature = plan.missing_features.find(f => f.id === itemId);
-          if (feature && feature.status !== 'implemented') {
-            feature.status = 'implemented';
-            changed = true;
-            updated++;
-          }
+        const feature = plan.missing_features.find(f => f.id === mergedItemId);
+        if (feature && feature.status !== 'implemented') {
+          feature.status = 'implemented';
+          shared.safeWrite(path.join(prdDir, pf), plan);
+          updated++;
         }
-        if (changed) shared.safeWrite(path.join(prdDir, pf), plan);
       }
-      if (updated > 0) e.log('info', `Post-merge: marked ${updated} PRD item(s) as implemented for ${pr.id}`);
+      if (updated > 0) e.log('info', `Post-merge: marked ${mergedItemId} as implemented for ${pr.id}`);
     } catch {}
   }
 
@@ -935,14 +958,7 @@ function runPostCompletionHooks(dispatchItem, agentId, code, stdout, config) {
   if (isSuccess && (type === 'implement' || type === 'implement:large' || type === 'fix') && prsCreatedCount === 0 && meta?.item?.id) {
     // Check if a PR already exists linked to this work item (from a previous attempt)
     const projects = shared.getProjects(config);
-    let existingPrFound = false;
-    for (const p of projects) {
-      const prs = safeJson(projectPrPath(p)) || [];
-      if (prs.some(pr => (pr.prdItems || []).includes(meta.item.id))) {
-        existingPrFound = true;
-        break;
-      }
-    }
+    const existingPrFound = Object.values(getPrLinks()).includes(meta.item.id);
     if (!existingPrFound) {
       e.log('warn', `Agent completed implement task ${meta.item.id} but no PR was created`);
       // Set noPr flag on the work item so the dashboard can surface this
@@ -977,15 +993,50 @@ function runPostCompletionHooks(dispatchItem, agentId, code, stdout, config) {
 }
 
 // ─── PR → PRD Status Sync ─────────────────────────────────────────────────────
-// No-op: PRD item status is computed at read time by getPrdInfo() in queries.js
-// (checks work item status + PR status). Writing to PRD files caused flicker
-// because two sources of truth competed. handlePostMerge still writes 'implemented'.
-function syncPrdFromPrs() {}
+// Runs every 6 ticks (~3 min). For all pending work items across all projects,
+// runs the reconciliation pass to catch PRs created after materialization
+// (e.g., manually raised PRs, cross-plan PRs, or PRs created while engine was paused).
+function syncPrdFromPrs(config) {
+  try {
+    const { getConfig, getProjects, projectWorkItemsPath, projectPrPath, safeJson, safeWrite } = require('./shared');
+    const { reconcileItemsWithPrs } = require('../engine');
+    config = config || getConfig();
+    const allProjects = getProjects(config);
+
+    // Exact prdItems match only — no fuzzy matching
+    const allPrs = allProjects.flatMap(p => safeJson(projectPrPath(p)) || []);
+
+    let totalReconciled = 0;
+    for (const project of allProjects) {
+      const wiPath = projectWorkItemsPath(project);
+      const items = safeJson(wiPath) || [];
+      const hasPending = items.some(wi => wi.status === 'pending' && !wi._pr);
+      if (!hasPending) continue;
+      const reconciled = reconcileItemsWithPrs(items, allPrs);
+      if (reconciled > 0) {
+        safeWrite(wiPath, items);
+        // Sync in-pr status to PRD JSON for each newly reconciled item
+        for (const wi of items) {
+          if (wi.status === 'in-pr') syncPrdItemStatus(wi.id, 'in-pr', wi.sourcePlan);
+        }
+        totalReconciled += reconciled;
+      }
+    }
+    if (totalReconciled > 0) {
+      const { log } = require('./shared');
+      log('info', `PR sync: reconciled ${totalReconciled} pending work item(s) to in-pr`);
+    }
+  } catch (err) {
+    // Non-fatal — log and continue
+    try { require('./shared').log('warn', `syncPrdFromPrs error: ${err?.message || err}`); } catch {}
+  }
+}
 
 module.exports = {
   checkPlanCompletion,
   chainPlanToPrd,
   updateWorkItemStatus,
+  syncPrdItemStatus,
   syncPrsFromOutput,
   updatePrAfterReview,
   updatePrAfterFix,

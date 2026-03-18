@@ -12,10 +12,11 @@
     "test:e2e:ui": "npx playwright test --ui",
     "test:e2e:report": "npx playwright show-report test/playwright/report",
     "test:e2e:video": "npx playwright test --video=on --headed",
-    "test:all": "node test/squad-tests.js && npx playwright test",
+    "test:all": "node test/prd-status-sync.test.js && node test/squad-tests.js && npx playwright test",
     "test:e2e:accept": "node test/playwright/accept-baseline.js",
     "test:e2e:accept-force": "node test/playwright/accept-baseline.js --force",
-    "test:setup": "npx playwright install chromium"
+    "test:setup": "npx playwright install chromium",
+    "test:unit": "node test/prd-status-sync.test.js"
   },
   "keywords": [
     "ai",

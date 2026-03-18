@@ -125,6 +125,10 @@ const commands = {
 
         if (agentPid) {
           e.activeProcesses.set(item.id, { proc: { pid: agentPid > 0 ? agentPid : null }, agentId, startedAt: item.created_at, reattached: true });
+          // Sync work item status to dispatched — it may have been reset to pending during restart
+          if (item.meta?.item?.id) {
+            try { e.updateWorkItemStatus(item.meta, 'dispatched', ''); } catch {}
+          }
           reattached++;
           e.log('info', `Re-attached to ${agentId} (${item.id}) — PID ${agentPid > 0 ? agentPid : 'unknown (active output)'}`);
         }

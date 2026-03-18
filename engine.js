@@ -537,7 +537,7 @@ function buildAgentContext(agentId, config, project) {
 
 // ─── Lifecycle (extracted to engine/lifecycle.js) ────────────────────────────
 
-const { runPostCompletionHooks, updateWorkItemStatus, handlePostMerge, checkPlanCompletion, chainPlanToPrd,
+const { runPostCompletionHooks, updateWorkItemStatus, syncPrdItemStatus, handlePostMerge, checkPlanCompletion, chainPlanToPrd,
   syncPrsFromOutput, updatePrAfterReview, updatePrAfterFix, checkForLearnings, extractSkillsFromOutput,
   updateAgentHistory, updateMetrics, createReviewFeedbackForAuthor, parseAgentOutput, syncPrdFromPrs } = require('./engine/lifecycle');
 
@@ -634,6 +634,12 @@ function spawnAgent(dispatchItem, config) {
       log('info', `Reusing existing worktree for ${branchName}: ${existingWt}`);
       try { exec(`git fetch origin "${branchName}"`, { ..._gitOpts, cwd: rootDir }); } catch {}
       try { exec(`git pull origin "${branchName}"`, { ..._gitOpts, cwd: existingWt }); } catch {}
+    } else if (type === 'review' || type === 'test') {
+      // Review and test are reuse-only — if no existing worktree, run in rootDir rather than creating a new one
+      // (avoids expensive checkout on large repos when no worktree has already been set up)
+      log('info', `${type}: no existing worktree for ${branchName} — falling back to rootDir`);
+      branchName = null;
+      worktreePath = null;
     } else {
       try {
         if (!fs.existsSync(worktreePath)) {
@@ -994,11 +1000,35 @@ function completeDispatch(id, result = 'success', reason = '', resultSummary = '
           if (wiPath) {
             const items = safeJson(wiPath) || [];
             const wi = items.find(i => i.id === item.meta.item.id);
-            if (wi) { wi._retryCount = retries + 1; wi.status = 'pending'; delete wi.dispatched_at; delete wi.dispatched_to; safeWrite(wiPath, items); }
+            if (wi && wi.status !== 'paused') { wi._retryCount = retries + 1; wi.status = 'pending'; delete wi.dispatched_at; delete wi.dispatched_to; safeWrite(wiPath, items); }
           }
         } catch {}
       } else {
         updateWorkItemStatus(item.meta, 'failed', reason || 'Failed after 3 retries');
+        // Alert: find items blocked by this failure and write inbox note
+        try {
+          const config = getConfig();
+          const failedId = item.meta.item.id;
+          const blockedItems = [];
+          for (const p of getProjects(config)) {
+            const items = safeJson(projectWorkItemsPath(p)) || [];
+            items.filter(w => w.status === 'pending' && (w.depends_on || []).includes(failedId))
+              .forEach(w => blockedItems.push(`- \`${w.id}\` — ${w.title}`));
+          }
+          const centralItems = safeJson(path.join(SQUAD_DIR, 'work-items.json')) || [];
+          centralItems.filter(w => w.status === 'pending' && (w.depends_on || []).includes(failedId))
+            .forEach(w => blockedItems.push(`- \`${w.id}\` — ${w.title}`));
+
+          writeInboxAlert(`failed-${failedId}`,
+            `# Work Item Failed — \`${failedId}\`\n\n` +
+            `**Item:** ${item.meta.item.title || failedId}\n` +
+            `**Reason:** ${reason || 'Failed after 3 retries'}\n\n` +
+            (blockedItems.length > 0
+              ? `**Blocked dependents (${blockedItems.length}):**\n${blockedItems.join('\n')}\n\n` +
+                `These items cannot dispatch until \`${failedId}\` is fixed and reset to \`pending\`.\n`
+              : `No downstream items are blocked.\n`)
+          );
+        } catch {}
       }
     } else if (result === 'error') {
       if (item.meta?.dispatchKey) setCooldownFailure(item.meta.dispatchKey);
@@ -1023,9 +1053,18 @@ function areDependenciesMet(item, config) {
       allWorkItems = allWorkItems.concat(wi);
     } catch {}
   }
+  // PRD item statuses that count as "done" for dep resolution
+  const PRD_MET_STATUSES = new Set(['in-pr', 'implemented', 'done', 'complete']);
+
   for (const depId of deps) {
     const depItem = allWorkItems.find(w => w.id === depId);
     if (!depItem) {
+      // Fallback: check PRD JSON — plan-to-prd agents may pre-set items to in-pr/done
+      try {
+        const plan = safeJson(path.join(PRD_DIR, sourcePlan));
+        const prdItem = (plan?.missing_features || []).find(f => f.id === depId);
+        if (prdItem && PRD_MET_STATUSES.has(prdItem.status)) continue; // PRD says done/in-pr — treat as met
+      } catch {}
       log('warn', `Dependency ${depId} not found for ${item.id} (plan: ${sourcePlan}) — treating as unmet`);
       return false;
     }
@@ -1050,6 +1089,39 @@ function detectDependencyCycles(items) {
   return [...cycleIds];
 }
 
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+// Write a one-off alert note to notes/inbox so the user sees it on next consolidation
+function writeInboxAlert(slug, content) {
+  try {
+    const file = path.join(INBOX_DIR, `engine-alert-${slug}-${dateStamp()}.md`);
+    // Dedupe: don't write the same alert twice in the same day
+    const existing = safeReadDir(INBOX_DIR).find(f => f.startsWith(`engine-alert-${slug}-${dateStamp()}`));
+    if (existing) return;
+    safeWrite(file, content);
+  } catch {}
+}
+
+// Reconciles work items against known PRs via exact prdItems match only.
+// reconcilePrs (ado.js) and syncPrsFromOutput (lifecycle.js) are responsible for
+// correctly populating prdItems on PRs — this function just reads that linkage.
+// onlyIds: if provided, only items whose ID is in this Set are eligible.
+function reconcileItemsWithPrs(items, allPrs, { onlyIds } = {}) {
+  let reconciled = 0;
+  for (const wi of items) {
+    if (wi.status !== 'pending' || wi._pr) continue;
+    if (onlyIds && !onlyIds.has(wi.id)) continue;
+
+    const exactPr = allPrs.find(pr => (pr.prdItems || []).includes(wi.id));
+    if (exactPr) {
+      wi.status = 'in-pr';
+      wi._pr = exactPr.id;
+      reconciled++;
+    }
+  }
+  return reconciled;
+}
 
 // ─── Inbox Consolidation (extracted to engine/consolidation.js) ──────────────
 
@@ -1692,6 +1764,32 @@ function isAlreadyDispatched(key) {
  * Convert plan files into project work items (side-effect, like specs).
  * Plans write to the target project's work-items.json — picked up by discoverFromWorkItems next tick.
  */
+// Auto-clean pending/failed work items for a PRD so they re-materialize with updated plan data
+function autoCleanPrdWorkItems(prdFile, config) {
+  const allProjects = getProjects(config);
+  const wiPaths = [path.join(SQUAD_DIR, 'work-items.json')];
+  for (const proj of allProjects) wiPaths.push(path.join(proj.localPath, '.squad', 'work-items.json'));
+  const deletedIds = [];
+  for (const wiPath of wiPaths) {
+    try {
+      const items = safeJson(wiPath);
+      if (!items) continue;
+      const filtered = items.filter(w => {
+        if (w.sourcePlan === prdFile && (w.status === 'pending' || w.status === 'failed')) {
+          deletedIds.push(w.id); return false;
+        }
+        return true;
+      });
+      if (filtered.length < items.length) safeWrite(wiPath, filtered);
+    } catch {}
+  }
+  if (deletedIds.length > 0) {
+    const deletedSet = new Set(deletedIds);
+    cleanDispatchEntries(d => deletedSet.has(d.meta?.item?.id) && d.meta?.item?.sourcePlan === prdFile);
+    log('info', `Plan sync: cleared ${deletedIds.length} pending/failed work items for ${prdFile}`);
+  }
+}
+
 function materializePlansAsWorkItems(config) {
   if (!fs.existsSync(PRD_DIR)) { try { fs.mkdirSync(PRD_DIR, { recursive: true }); } catch {} }
 
@@ -1741,11 +1839,32 @@ function materializePlansAsWorkItems(config) {
     const plan = safeJson(path.join(PRD_DIR, file));
     if (!plan?.missing_features) continue;
 
+    // Plan staleness: if source_plan .md was modified since last sync, auto-clean and re-sync
+    if (plan.source_plan) {
+      const sourcePlanPath = path.join(PLANS_DIR, plan.source_plan);
+      try {
+        const sourceMtime = Math.floor(fs.statSync(sourcePlanPath).mtimeMs); // floor to strip sub-ms Windows precision
+        const recorded = plan.sourcePlanModifiedAt ? new Date(plan.sourcePlanModifiedAt).getTime() : null;
+        if (!recorded) {
+          // First time seeing this plan — record baseline mtime (no clean needed)
+          plan.sourcePlanModifiedAt = new Date(sourceMtime).toISOString();
+          safeWrite(path.join(PRD_DIR, file), plan);
+        } else if (sourceMtime > recorded) {
+          // Source plan changed — auto-clean pending/failed items so they re-materialize with updated data
+          log('info', `Source plan ${plan.source_plan} updated — re-syncing PRD ${file}`);
+          autoCleanPrdWorkItems(file, config);
+          plan.sourcePlanModifiedAt = new Date(sourceMtime).toISOString();
+          plan.lastSyncedFromPlan = new Date().toISOString();
+          safeWrite(path.join(PRD_DIR, file), plan);
+        }
+      } catch {}
+    }
+
     // Human approval gate: plans start as 'awaiting-approval' and must be approved before work begins
     // Plans without a status (legacy) or with status 'approved' are allowed through
     const planStatus = plan.status || (plan.requires_approval ? 'awaiting-approval' : null);
-    if (planStatus === 'awaiting-approval' || planStatus === 'rejected' || planStatus === 'revision-requested') {
-      continue; // Skip — waiting for human approval or revision
+    if (planStatus === 'awaiting-approval' || planStatus === 'paused' || planStatus === 'rejected' || planStatus === 'revision-requested') {
+      continue; // Skip — waiting for human approval, paused, or revision
     }
 
     const defaultProjectName = plan.project || file.replace(/-\d{4}-\d{2}-\d{2}\.json$/, '');
@@ -1775,6 +1894,12 @@ function materializePlansAsWorkItems(config) {
       if (cycles.length > 0) {
         log('error', `Dependency cycle detected in plan ${file}: ${cycles.join(', ')} — skipping cyclic items`);
         cycles.forEach(c => cycleSet.add(c));
+        writeInboxAlert(`cycle-${path.basename(file, '.json')}`,
+          `# Dependency Cycle Detected — ${path.basename(file)}\n\n` +
+          `The following PRD items form a cycle and were **skipped** (will never be dispatched):\n\n` +
+          cycles.map(id => `- \`${id}\``).join('\n') + '\n\n' +
+          `Fix by removing or reordering the \`depends_on\` relationships in \`prd/${path.basename(file)}\`.\n`
+        );
       }
     }
 
@@ -1783,6 +1908,7 @@ function materializePlansAsWorkItems(config) {
       const wiPath = projectWorkItemsPath(project);
       const existingItems = safeJson(wiPath) || [];
       let created = 0;
+      const newlyCreatedIds = new Set(); // tracks IDs created in this pass for reconciliation scoping
 
       for (const item of projItems) {
         // Skip if already materialized — work item ID = PRD item ID, check all projects
@@ -1818,10 +1944,30 @@ function materializePlansAsWorkItems(config) {
           project: item.project || plan.project || null,
         };
         existingItems.push(newItem);
+        newlyCreatedIds.add(id);
         created++;
       }
 
       if (created > 0) {
+        // Reconciliation: exact prdItems match only, scoped to newly created items
+        const allPrsForReconcile = allProjects.flatMap(p => safeJson(projectPrPath(p)) || []);
+        const reconciled = reconcileItemsWithPrs(existingItems, allPrsForReconcile, { onlyIds: newlyCreatedIds });
+        if (reconciled > 0) log('info', `Plan reconciliation: marked ${reconciled} item(s) as in-pr → ${projName}`);
+
+        // PRD removal sync: cancel pending work items whose PRD item was removed from the plan
+        const currentPrdIds = new Set(plan.missing_features.map(f => f.id));
+        let cancelled = 0;
+        for (const wi of existingItems) {
+          if (wi.status !== 'pending' || wi.sourcePlan !== file) continue;
+          if (!currentPrdIds.has(wi.id)) {
+            wi.status = 'cancelled';
+            wi.cancelledAt = ts();
+            wi.cancelReason = `PRD item removed from ${file}`;
+            cancelled++;
+          }
+        }
+        if (cancelled > 0) log('info', `Plan sync: cancelled ${cancelled} item(s) removed from ${file} → ${projName}`);
+
         safeWrite(wiPath, existingItems);
         log('info', `Plan discovery: created ${created} work item(s) from ${file} → ${projName}`);
       }
@@ -1927,7 +2073,7 @@ function discoverFromPrs(config, project) {
       const item = buildPrDispatch(agentId, config, project, pr, 'review', {
         pr_id: pr.id, pr_number: prNumber, pr_title: pr.title || '', pr_branch: pr.branch || '',
         pr_author: pr.agent || '', pr_url: pr.url || '',
-      }, `Review PR ${pr.id}: ${pr.title}`, { dispatchKey: key, source: 'pr', pr, project: projMeta });
+      }, `Review PR ${pr.id}: ${pr.title}`, { dispatchKey: key, source: 'pr', pr, branch: pr.branch, project: projMeta });
       if (item) { newWork.push(item); setCooldown(key); }
     }
 
@@ -1974,26 +2120,8 @@ function discoverFromPrs(config, project) {
       if (item) { newWork.push(item); setCooldown(key); }
     }
 
-    // Newly created PRs needing build & test verification
-    if (!pr.buildTested) {
-      const key = `build-test-${project?.name || 'default'}-${pr.id}`;
-      if (isAlreadyDispatched(key) || isOnCooldown(key, cooldownMs)) continue;
-      const agentId = resolveAgent('test', config);
-      if (!agentId) continue;
-
-      const item = buildPrDispatch(agentId, config, project, pr, 'test', {
-        pr_id: pr.id, pr_number: prNumber, pr_title: pr.title || '', pr_branch: pr.branch || '',
-        pr_author: pr.agent || '', pr_url: pr.url || '',
-        project_path: project?.localPath ? path.resolve(project.localPath) : '',
-      }, `Build & test PR ${pr.id}: ${pr.title}`, { dispatchKey: key, source: 'pr-build-test', pr, branch: pr.branch, project: projMeta });
-      if (item) { pr.buildTested = 'dispatched'; newWork.push(item); setCooldown(key); }
-    }
   }
-
-  // Batch-write PR state changes (buildTested flags) once after the loop
-  if (newWork.some(w => w.meta?.source === 'pr-build-test')) {
-    safeWrite(projectPrPath(project), prs);
-  }
+  // Build & test now runs once at PRD completion (via verify task), not per-PR.
 
   return newWork;
 }
@@ -2093,6 +2221,7 @@ function discoverFromWorkItems(config, project) {
     item.status = 'dispatched';
     item.dispatched_at = ts();
     item.dispatched_to = agentId;
+    syncPrdItemStatus(item.id, 'dispatched', item.sourcePlan);
 
     newWork.push({
       type: workType,
@@ -2719,7 +2848,7 @@ async function tickInner() {
   const slotsAvailable = maxConcurrent - activeCount;
 
   // Priority dispatch: fixes > reviews > plan-to-prd > implement > verify > other
-  const typePriority = { fix: 0, ask: 1, review: 1, test: 2, verify: 2, plan: 3, 'plan-to-prd': 3, 'implement:large': 4, implement: 5 };
+  const typePriority = { 'implement:large': 0, implement: 0, fix: 1, ask: 1, review: 2, test: 3, verify: 3, plan: 4, 'plan-to-prd': 4 };
   const itemPriority = { high: 0, medium: 1, low: 2 };
   dispatch.pending.sort((a, b) => {
     const ta = typePriority[a.type] ?? 5, tb = typePriority[b.type] ?? 5;
@@ -2770,6 +2899,9 @@ module.exports = {
   // Discovery
   discoverWork, discoverFromPrs, discoverFromWorkItems,
   materializePlansAsWorkItems,
+
+  // Shared helpers (used by lifecycle.js)
+  reconcileItemsWithPrs, writeInboxAlert,
 
   // Playbooks
   renderPlaybook,

@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SQUAD_DIR = path.resolve(__dirname, '..');
+const PR_LINKS_PATH = path.join(SQUAD_DIR, 'engine', 'pr-links.json');
 
 // ── File I/O ─────────────────────────────────────────────────────────────────
 
@@ -277,8 +278,25 @@ function parseSkillFrontmatter(content, filename) {
   return { name, trigger, description, project, author, created, allowedTools };
 }
 
+// ── PR → PRD Links ────────────────────────────────────────────────────────────
+// Stable single-writer file: maps PR IDs → PRD item IDs.
+// Never touched by polling loops — only written when a PR is first linked to a PRD item.
+
+function getPrLinks() {
+  try { return JSON.parse(require('fs').readFileSync(PR_LINKS_PATH, 'utf8')); } catch { return {}; }
+}
+
+function addPrLink(prId, itemId) {
+  if (!prId || !itemId) return;
+  const links = getPrLinks();
+  if (links[prId] === itemId) return; // already correct, no write needed
+  links[prId] = itemId;
+  safeWrite(PR_LINKS_PATH, links);
+}
+
 module.exports = {
   SQUAD_DIR,
+  PR_LINKS_PATH,
   safeRead,
   safeReadDir,
   safeJson,
@@ -302,6 +320,8 @@ module.exports = {
   projectRoot,
   projectWorkItemsPath,
   projectPrPath,
+  getPrLinks,
+  addPrLink,
   nextWorkItemId,
   getAdoOrgBase,
   sanitizeBranch,

@@ -399,8 +399,15 @@ function getWorkItems(config) {
       if (pr) item._prUrl = pr.url;
     }
     if (!item._pr) {
-      const linkedPr = allPrs.find(p => (p.prdItems || []).includes(item.id));
-      if (linkedPr) { item._pr = linkedPr.id; item._prUrl = linkedPr.url; }
+      const prLinks = shared.getPrLinks();
+      const linkedPrId = Object.entries(prLinks).find(([, v]) => v === item.id)?.[0];
+      if (linkedPrId) {
+        item._pr = linkedPrId;
+        const linkedPr = allPrs.find(p => p.id === linkedPrId);
+        if (linkedPr) item._prUrl = linkedPr.url;
+      } else {
+        // no further fallback — pr-links.json and wi._pr are the sources of truth
+      }
     }
     if (!item._pr && ['implement', 'fix', 'test', ''].includes(item.type || '')) {
       const match = (dispatch.completed || []).find(d => d.meta?.item?.id === item.id && d.meta?.source?.includes('work-item'));
@@ -449,11 +456,21 @@ function getPrdInfo(config) {
           if (!plan.missing_features) continue;
           const stat = fs.statSync(path.join(dir, pf));
           if (!latestStat || stat.mtimeMs > latestStat.mtimeMs) latestStat = stat;
+          // Staleness: compare source plan mtime to recorded sourcePlanModifiedAt
+          let planStale = false;
+          if (!archived && plan.source_plan) {
+            try {
+              const sourceMtime = Math.floor(fs.statSync(path.join(PLANS_DIR, plan.source_plan)).mtimeMs);
+              const recorded = plan.sourcePlanModifiedAt ? new Date(plan.sourcePlanModifiedAt).getTime() : null;
+              if (recorded && sourceMtime > recorded) planStale = true;
+            } catch {}
+          }
           for (const f of plan.missing_features) {
             allPrdItems.push({
               ...f, _source: pf, _planStatus: plan.status || 'active',
               _planSummary: plan.plan_summary || pf, _planProject: plan.project || '',
               _archived: archived, _sourcePlan: plan.source_plan || '',
+              _planStale: planStale, _lastSyncedFromPlan: plan.lastSyncedFromPlan || null,
             });
           }
         } catch {}
@@ -475,45 +492,51 @@ function getPrdInfo(config) {
     } catch {}
   }
 
-  // PR-to-PRD linking — build this FIRST so status override can use it
+  // PR-to-PRD linking — primary source is pr-links.json (single-writer, never clobbered by polling)
   const allPrs = getPullRequests(config);
+  const prById = {};
+  for (const pr of allPrs) prById[pr.id] = pr;
+
   const prdToPr = {};
-  for (const pr of allPrs) {
-    for (const itemId of (pr.prdItems || [])) {
-      if (!prdToPr[itemId]) prdToPr[itemId] = [];
-      prdToPr[itemId].push({ id: pr.id, url: pr.url, title: pr.title, status: pr.status, _project: pr._project });
-    }
+  const prLinks = shared.getPrLinks(); // { "PR-xxxx": "P-xxxx" }
+  for (const [prId, itemId] of Object.entries(prLinks)) {
+    const pr = prById[prId];
+    const project = projects.find(p => p.name === pr?._project) || projects[0];
+    const url = pr?.url || (project?.prUrlBase ? project.prUrlBase + prId.replace('PR-', '') : '');
+    if (!prdToPr[itemId]) prdToPr[itemId] = [];
+    prdToPr[itemId].push({ id: prId, url, title: pr?.title || '', status: pr?.status || 'active', _project: pr?._project || '' });
+  }
+  // Fallback: work item _pr field for anything still missing
+  for (const wi of Object.values(wiById)) {
+    if (!wi._pr || prdToPr[wi.id]?.length) continue;
+    const pr = prById[wi._pr];
+    const project = projects.find(p => p.name === wi.project || p.name === wi._source);
+    const url = pr?.url || (project?.prUrlBase ? project.prUrlBase + wi._pr.replace('PR-', '') : '');
+    prdToPr[wi.id] = [{ id: wi._pr, url, title: pr?.title || '', status: pr?.status || 'active', _project: project?.name || '' }];
   }
 
-  // Override PRD item status from work items + PR status
+  // PRD JSON status is the source of truth — kept in sync with work item by syncPrdItemStatus.
+  // Map from PRD JSON values to display values (dispatched → in-progress etc.)
+  // Augment each item with execution metadata from the work item.
+  const statusDisplay = { dispatched: 'in-progress', pending: 'missing' };
   for (const item of items) {
     const wi = wiById[item.id];
-    const prs = prdToPr[item.id] || [];
-    const hasActivePr = prs.some(pr => pr.status === 'active');
-    const hasMergedPr = prs.some(pr => pr.status === 'completed' || pr.status === 'merged');
-
+    item.status = statusDisplay[item.status] || item.status || 'missing';
+    // Attach execution metadata for display (agent, PR link, fail reason)
     if (wi) {
-      if (wi.status === 'done') {
-        // Work item done = agent finished. Check PR to determine real status.
-        if (hasMergedPr) item.status = 'implemented';
-        else if (hasActivePr) item.status = 'pr-created';
-        else item.status = 'implemented'; // No PR (non-PR task) = truly done
-      }
-      else if (wi.status === 'failed') item.status = 'failed';
-      else if (wi.status === 'paused') item.status = 'paused';
-      else if (wi.status === 'dispatched') item.status = 'in-progress';
-      else if (wi.status === 'pending') item.status = 'missing';
+      if (wi.dispatched_to) item._agent = wi.dispatched_to;
+      if (wi.failReason) item._failReason = wi.failReason;
     }
   }
 
   const byStatus = {};
   items.forEach(item => { const s = item.status || 'missing'; byStatus[s] = byStatus[s] || []; byStatus[s].push(item); });
-  const complete = (byStatus['implemented'] || []).length;
-  const prCreated = (byStatus['pr-created'] || []).length;
+  const complete = (byStatus['done'] || []).length;
+  const inPr = (byStatus['in-pr'] || []).length;
   const inProgress = (byStatus['in-progress'] || []).length;
   const paused = (byStatus['paused'] || []).length;
   const missing = (byStatus['missing'] || []).length;
-  const donePercent = total > 0 ? Math.round(((complete + prCreated) / total) * 100) : 0;
+  const donePercent = total > 0 ? Math.round(((complete + inPr) / total) * 100) : 0;
 
   // Plan timings
   const planTimings = {};
@@ -532,13 +555,14 @@ function getPrdInfo(config) {
   }
 
   const progress = {
-    total, complete, prCreated, inProgress, paused, missing, donePercent, planTimings,
+    total, complete, inPr, inProgress, paused, missing, donePercent, planTimings,
     items: items.map(i => ({
       id: i.id, name: i.name || i.title, priority: i.priority,
       complexity: i.estimated_complexity || i.size, status: i.status || 'missing',
       description: (i.description || '').slice(0, 200), projects: i.projects || [],
       prs: prdToPr[i.id] || [], depends_on: i.depends_on || [],
       source: i._source || '', planSummary: i._planSummary || '', planProject: i._planProject || '', planStatus: i._planStatus || 'active', _archived: i._archived || false, sourcePlan: i._sourcePlan || '',
+      planStale: i._planStale || false, lastSyncedFromPlan: i._lastSyncedFromPlan || null,
     })),
   };
 

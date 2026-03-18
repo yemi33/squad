@@ -14,13 +14,36 @@ When syncing to personal, the following are stripped: agent history, decisions (
 ## Build & Run
 
 ```bash
-node engine.js start    # Start engine (ticks every 30s)
-node dashboard.js       # Dashboard at http://localhost:7331
-node engine.js stop     # Stop engine
-node engine.js status   # Show current state
+# Via squad CLI (preferred)
+squad start             # Start engine daemon
+squad dash              # Dashboard at http://localhost:7331
+squad stop              # Stop engine
+squad status            # Show agents, projects, dispatch queue
+
+# Direct (equivalent)
+node engine.js start
+node dashboard.js
+node engine.js stop
+node engine.js status
 ```
 
 No dependencies — uses only Node.js built-ins.
+
+## Testing
+
+```bash
+npm run test:e2e            # Full Playwright suite (119 tests, headless)
+npm run test:e2e:headed     # Watch in browser
+npm run test:e2e:report     # Open HTML report with traces + screenshots
+npm run test:e2e:accept     # Accept last run as new regression baseline
+npm run test:all            # API unit tests + E2E together
+
+# Run a subset
+npx playwright test --grep "Command Center"
+npx playwright test --grep "Work Items|PRD"
+```
+
+Test files: `test/playwright/dashboard.spec.js` (specs), `engine/test-baseline.json` (baseline), `engine/test-results.json` (last run). Use the `/e2e-tests` skill for guided test workflows.
 
 ## Key Files
 
@@ -48,6 +71,8 @@ No dependencies — uses only Node.js built-ins.
 | `ado.js` | ADO token management (`azureauth`), PR status polling, human `@squad` comment polling |
 | `llm.js` | `callLLM()` with session resume support + `trackEngineUsage()`, used by dashboard CC and doc-chat |
 | `spawn-agent.js` | Spawns `claude` CLI with prompt files piped via stdin |
+| `ado-mcp-wrapper.js` | ADO MCP authentication wrapper |
+| `check-status.js` | Quick status check without full engine load |
 
 Module dependency flow: `shared.js` ← `queries.js` ← `engine.js` / `dashboard.js`. Circular dependencies between engine.js and lifecycle/consolidation/cli/ado are handled with lazy `require()` inside functions.
 
@@ -81,7 +106,7 @@ Module dependency flow: `shared.js` ← `queries.js` ← `engine.js` / `dashboar
 - Claude output parsing uses `shared.parseStreamJsonOutput()` — never reimplement the JSON extraction loop
 - Environment cleanup uses `shared.cleanChildEnv()` — never inline CLAUDE_CODE env var deletion
 - Config uses `projects` array only (no legacy singular `project` key)
-- Dashboard caches HTML at startup — restart requires killing PID on port 7331 with `taskkill //PID <pid> //F`
+- Dashboard caches HTML at startup — restart requires killing PID on port 7331 with `taskkill //PID <pid> //F` (use `/restart-dashboard` skill to do this automatically)
 - ADO API calls go through `adoFetch()` in `engine/ado.js` (auto-refreshes tokens)
 - `engine.js` exports internals via `module.exports`; CLI entrypoint guarded with `require.main === module`
 - Multi-project config: `config.json` has a `projects` array, each with `localPath`, `repositoryId`, `adoOrg`, `adoProject`, `workSources`

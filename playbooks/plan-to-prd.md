@@ -14,7 +14,7 @@ A user has provided a plan. Analyze it against the codebase and produce a struct
 ## Instructions
 
 1. **Read the plan carefully** — understand the goals, scope, and requirements
-2. **Explore the codebase** at `{{project_path}}` — identify what already exists vs what's missing
+2. **Explore the codebase** at `{{project_path}}` — understand the existing structure to write accurate descriptions and acceptance criteria. Do NOT use observations about existing PRs or partial work to set item statuses — all items are always `"missing"` regardless of codebase state
 3. **Break the plan into discrete, implementable items** — each should be a single PR's worth of work
 4. **Estimate complexity** — `small` (< 1 file), `medium` (2-5 files), `large` (6+ files or cross-cutting)
 5. **Order by dependency** — items that others depend on come first
@@ -83,7 +83,7 @@ When using `parallel`:
 
 Rules for items:
 - IDs must be `P-<uuid>` format (e.g. `P-a3f9b2c1`) — globally unique, never sequential
-- All items start with `status: "missing"` — the engine picks these up automatically
+- **`status` MUST always be `"missing"` — no exceptions.** Do NOT set `in-pr`, `done`, `complete`, `implemented`, or any other value, even if you observe active PRs or completed work in the codebase. Status is exclusively engine-managed after the PRD is written. Pre-setting any other status causes items to be silently skipped by the engine and breaks dependency resolution for all downstream items.
 - **`project` field is REQUIRED** — set it to the project name where the code changes go (e.g., `"OfficeAgent"`, `"office-bohemia"`). Cross-repo plans must route each item to the correct project. The engine materializes items into that project's work queue.
 - `depends_on` lists IDs of items that must be done first
 - Keep descriptions actionable — an implementing agent should know exactly what to build

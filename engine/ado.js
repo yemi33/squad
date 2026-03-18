@@ -4,7 +4,7 @@
  */
 
 const shared = require('./shared');
-const { exec, getAdoOrgBase } = shared;
+const { exec, getAdoOrgBase, addPrLink } = shared;
 const { getPrs } = require('./queries');
 
 // Lazy require to avoid circular dependency
@@ -313,20 +313,28 @@ async function reconcilePrs(config) {
     const centralItems = shared.safeJson(centralWiPath) || [];
     const allItems = [...workItems, ...centralItems];
 
+    let projectUpdated = 0;
     for (const adoPr of adoPrs) {
       const prId = `PR-${adoPr.pullRequestId}`;
-      if (existingIds.has(prId)) continue;
-
       const branch = (adoPr.sourceRefName || '').replace('refs/heads/', '');
-      // Try to extract work item ID from branch name (e.g., feat/P-43e5ac28-lazy-loading or work/PL-W005)
-      const wiMatch = branch.match(/(P-[a-f0-9]{6,})/i) || branch.match(/(PL-W\d+)/i);
-      const linkedItemId = wiMatch ? wiMatch[1] : null;
-      // Validate work item exists — only link if confirmed
+      const title = adoPr.title || '';
+      // Extract item ID from branch name or PR title (e.g., feat(P-2cafdc2a): ...)
+      const branchMatch = branch.match(/(P-[a-f0-9]{6,})/i) || branch.match(/(PL-W\d+)/i);
+      const titleMatch = title.match(/\((P-[a-f0-9]{6,})\)/) || title.match(/\((PL-W\d+)\)/);
+      const linkedItemId = branchMatch?.[1] || titleMatch?.[1] || null;
       const linkedItem = linkedItemId ? allItems.find(i => i.id === linkedItemId) : null;
       const confirmedItemId = linkedItem ? linkedItemId : null;
 
-      const prUrl = project.prUrlBase ? project.prUrlBase + adoPr.pullRequestId : '';
+      if (existingIds.has(prId)) {
+        // PR already tracked — write link to pr-links.json if we can extract an ID
+        if (confirmedItemId) {
+          addPrLink(prId, confirmedItemId);
+          projectUpdated++;
+        }
+        continue;
+      }
 
+      const prUrl = project.prUrlBase ? project.prUrlBase + adoPr.pullRequestId : '';
       existingPrs.push({
         id: prId,
         title: (adoPr.title || `PR #${adoPr.pullRequestId}`).slice(0, 120),
@@ -336,17 +344,17 @@ async function reconcilePrs(config) {
         status: 'active',
         created: (adoPr.creationDate || '').slice(0, 10) || e.dateStamp(),
         url: prUrl,
-        prdItems: confirmedItemId ? [confirmedItemId] : [],
       });
+      if (confirmedItemId) addPrLink(prId, confirmedItemId);
       existingIds.add(prId);
       projectAdded++;
-
       e.log('info', `PR reconciliation: added ${prId} (branch: ${branch}${confirmedItemId ? ', linked to ' + confirmedItemId : ''}) to ${project.name}`);
     }
 
-    if (projectAdded > 0) {
+    if (projectAdded > 0 || projectUpdated > 0) {
       shared.safeWrite(prPath, existingPrs);
       totalAdded += projectAdded;
+      if (projectUpdated > 0) e.log('info', `PR reconciliation: linked ${projectUpdated} existing PR(s) to PRD items in ${project.name}`);
     }
   }
 
