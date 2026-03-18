@@ -475,27 +475,7 @@ function getPrdInfo(config) {
     } catch {}
   }
 
-  // Override PRD item status from work items
-  for (const item of items) {
-    const wi = wiById[item.id];
-    if (wi) {
-      if (wi.status === 'done') item.status = 'implemented';
-      else if (wi.status === 'failed') item.status = 'failed';
-      else if (wi.status === 'dispatched') item.status = 'in-progress';
-      else if (wi.status === 'pending') item.status = 'missing';
-    }
-  }
-
-  const byStatus = {};
-  items.forEach(item => { const s = item.status || 'missing'; byStatus[s] = byStatus[s] || []; byStatus[s].push(item); });
-  const complete = (byStatus['complete'] || []).length + (byStatus['completed'] || []).length + (byStatus['implemented'] || []).length;
-  const prCreated = (byStatus['pr-created'] || []).length;
-  const inProgress = (byStatus['in-progress'] || []).length + (byStatus['dispatched'] || []).length;
-  const planned = (byStatus['planned'] || []).length;
-  const missing = (byStatus['missing'] || []).length;
-  const donePercent = total > 0 ? Math.round(((complete + prCreated) / total) * 100) : 0;
-
-  // PR-to-PRD linking — work item ID = PRD item ID, so prdItems directly reference PRD items
+  // PR-to-PRD linking — build this FIRST so status override can use it
   const allPrs = getPullRequests(config);
   const prdToPr = {};
   for (const pr of allPrs) {
@@ -504,6 +484,34 @@ function getPrdInfo(config) {
       prdToPr[itemId].push({ id: pr.id, url: pr.url, title: pr.title, status: pr.status, _project: pr._project });
     }
   }
+
+  // Override PRD item status from work items + PR status
+  for (const item of items) {
+    const wi = wiById[item.id];
+    const prs = prdToPr[item.id] || [];
+    const hasActivePr = prs.some(pr => pr.status === 'active');
+    const hasMergedPr = prs.some(pr => pr.status === 'completed' || pr.status === 'merged');
+
+    if (wi) {
+      if (wi.status === 'done') {
+        // Work item done = agent finished. Check PR to determine real status.
+        if (hasMergedPr) item.status = 'implemented';
+        else if (hasActivePr) item.status = 'pr-created';
+        else item.status = 'implemented'; // No PR (non-PR task) = truly done
+      }
+      else if (wi.status === 'failed') item.status = 'failed';
+      else if (wi.status === 'dispatched') item.status = 'in-progress';
+      else if (wi.status === 'pending') item.status = 'missing';
+    }
+  }
+
+  const byStatus = {};
+  items.forEach(item => { const s = item.status || 'missing'; byStatus[s] = byStatus[s] || []; byStatus[s].push(item); });
+  const complete = (byStatus['implemented'] || []).length;
+  const prCreated = (byStatus['pr-created'] || []).length;
+  const inProgress = (byStatus['in-progress'] || []).length;
+  const missing = (byStatus['missing'] || []).length;
+  const donePercent = total > 0 ? Math.round(((complete + prCreated) / total) * 100) : 0;
 
   // Plan timings
   const planTimings = {};
@@ -522,7 +530,7 @@ function getPrdInfo(config) {
   }
 
   const progress = {
-    total, complete, prCreated, inProgress, planned, missing, donePercent, planTimings,
+    total, complete, prCreated, inProgress, missing, donePercent, planTimings,
     items: items.map(i => ({
       id: i.id, name: i.name || i.title, priority: i.priority,
       complexity: i.estimated_complexity || i.size, status: i.status || 'missing',
