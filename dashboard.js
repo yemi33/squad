@@ -1347,6 +1347,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
 
       // Resume paused work items across all projects
       let resumed = 0;
+      const resumedItemIds = [];
       const wiPaths = [path.join(SQUAD_DIR, 'work-items.json')];
       for (const proj of PROJECTS) {
         wiPaths.push(path.join(proj.localPath, '.squad', 'work-items.json'));
@@ -1360,12 +1361,25 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
             if (w.sourcePlan === body.file && w.status === 'paused' && w._pausedBy === 'prd-pause') {
               w.status = 'pending';
               delete w._pausedBy;
+              w._resumedAt = new Date().toISOString();
+              resumedItemIds.push(w.id);
               resumed++;
               changed = true;
             }
           }
           if (changed) safeWrite(wiPath, items);
         } catch {}
+      }
+
+      // Clear dispatch completed entries for resumed items so they aren't dedup-blocked
+      if (resumedItemIds.length > 0) {
+        const dispatchPath = path.join(SQUAD_DIR, 'engine', 'dispatch.json');
+        const dispatch = JSON.parse(safeRead(dispatchPath) || '{}');
+        if (dispatch.completed?.length) {
+          const resumedSet = new Set(resumedItemIds);
+          dispatch.completed = dispatch.completed.filter(d => !resumedSet.has(d.meta?.item?.id));
+          safeWrite(dispatchPath, dispatch);
+        }
       }
 
       invalidateStatusCache();
@@ -1400,15 +1414,46 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
           }
         } catch {}
       }
+      const dispatchPath = path.join(SQUAD_DIR, 'engine', 'dispatch.json');
+      const dispatch = JSON.parse(safeRead(dispatchPath) || '{}');
+      const killedAgents = [];
+
       for (const wiPath of wiPaths) {
         try {
           const items = safeJson(wiPath);
           if (!items) continue;
           let changed = false;
           for (const w of items) {
-            if (w.sourcePlan === body.file && w.status === 'pending') {
-              // Don't pause if this item already has an active PR
-              if (allPrItemIds.has(w.id) || allPrItemIds.has(w.sourcePlanItem)) continue;
+            if (w.sourcePlan !== body.file) continue;
+            // Don't pause if this item already has an active PR
+            if (allPrItemIds.has(w.id) || allPrItemIds.has(w.sourcePlanItem)) continue;
+
+            if (w.status === 'pending') {
+              w.status = 'paused';
+              w._pausedBy = 'prd-pause';
+              paused++;
+              changed = true;
+            } else if (w.status === 'dispatched') {
+              // Kill the agent working on this item
+              const activeEntry = (dispatch.active || []).find(d => d.meta?.dispatchKey?.includes(w.id));
+              if (activeEntry) {
+                const statusPath = path.join(SQUAD_DIR, 'agents', activeEntry.agent, 'status.json');
+                try {
+                  const agentStatus = JSON.parse(safeRead(statusPath) || '{}');
+                  if (agentStatus.pid) {
+                    if (process.platform === 'win32') {
+                      try { require('child_process').execSync('taskkill /PID ' + agentStatus.pid + ' /F /T', { stdio: 'pipe', timeout: 5000 }); } catch {}
+                    } else {
+                      try { process.kill(agentStatus.pid, 'SIGTERM'); } catch {}
+                    }
+                  }
+                  agentStatus.status = 'idle';
+                  delete agentStatus.currentTask;
+                  delete agentStatus.dispatched;
+                  safeWrite(statusPath, agentStatus);
+                } catch {}
+                killedAgents.push(activeEntry.agent);
+              }
               w.status = 'paused';
               w._pausedBy = 'prd-pause';
               paused++;
@@ -1417,6 +1462,13 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
           }
           if (changed) safeWrite(wiPath, items);
         } catch {}
+      }
+
+      // Remove killed agents from dispatch active
+      if (killedAgents.length > 0) {
+        const killedSet = new Set(killedAgents);
+        dispatch.active = (dispatch.active || []).filter(d => !killedSet.has(d.agent));
+        safeWrite(dispatchPath, dispatch);
       }
 
       invalidateStatusCache();

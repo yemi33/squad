@@ -2027,6 +2027,12 @@ function discoverFromWorkItems(config, project) {
     }
 
     const key = `work-${project?.name || 'default'}-${item.id}`;
+    // Cooldown bypass for resumed items — clear in-memory cooldown so they dispatch immediately
+    if (item._resumedAt) {
+      dispatchCooldowns.delete(key);
+      delete item._resumedAt;
+      safeWrite(path.resolve(root, src.path), items);
+    }
     if (isAlreadyDispatched(key) || isOnCooldown(key, cooldownMs)) { skipped.gated++; continue; }
 
     let workType = item.type || 'implement';

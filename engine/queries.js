@@ -500,6 +500,7 @@ function getPrdInfo(config) {
         else item.status = 'implemented'; // No PR (non-PR task) = truly done
       }
       else if (wi.status === 'failed') item.status = 'failed';
+      else if (wi.status === 'paused') item.status = 'paused';
       else if (wi.status === 'dispatched') item.status = 'in-progress';
       else if (wi.status === 'pending') item.status = 'missing';
     }
@@ -510,6 +511,7 @@ function getPrdInfo(config) {
   const complete = (byStatus['implemented'] || []).length;
   const prCreated = (byStatus['pr-created'] || []).length;
   const inProgress = (byStatus['in-progress'] || []).length;
+  const paused = (byStatus['paused'] || []).length;
   const missing = (byStatus['missing'] || []).length;
   const donePercent = total > 0 ? Math.round(((complete + prCreated) / total) * 100) : 0;
 
@@ -530,7 +532,7 @@ function getPrdInfo(config) {
   }
 
   const progress = {
-    total, complete, prCreated, inProgress, missing, donePercent, planTimings,
+    total, complete, prCreated, inProgress, paused, missing, donePercent, planTimings,
     items: items.map(i => ({
       id: i.id, name: i.name || i.title, priority: i.priority,
       complexity: i.estimated_complexity || i.size, status: i.status || 'missing',
