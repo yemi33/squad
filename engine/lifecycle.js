@@ -580,13 +580,13 @@ function updatePrAfterReview(agentId, pr, project) {
 
   const config = getConfig();
   const reviewerName = config.agents[agentId]?.name || agentId;
-  // Verdict derived from dispatch — squad reviews default to approved
-  // (actual review outcome comes from ADO vote via pollPrStatus)
+  // Record the reviewer — actual verdict comes from ADO/GitHub votes via pollPrStatus.
+  // Set to 'waiting' so pollPrStatus updates it with the real vote on next cycle.
   const dispatch = getDispatch();
   const completedEntry = (dispatch.completed || []).find(d => d.agent === agentId && d.type === 'review');
 
   target.squadReview = {
-    status: 'approved',
+    status: 'waiting',
     reviewer: reviewerName,
     reviewedAt: e.ts(),
     note: completedEntry?.task || ''
@@ -623,9 +623,15 @@ function updatePrAfterFix(pr, project, source) {
   if (!target) return;
 
   if (source === 'pr-human-feedback') {
-    // Human feedback fix: clear pendingFix but preserve existing review verdict
+    // Human feedback fix: clear pendingFix AND reset to waiting for re-review
     if (target.humanFeedback) target.humanFeedback.pendingFix = false;
-    e.log('info', `Updated ${pr.id} → cleared humanFeedback.pendingFix (review verdict preserved: ${target.squadReview?.status || 'none'})`);
+    target.squadReview = {
+      ...target.squadReview,
+      status: 'waiting',
+      note: 'Fixed human feedback, awaiting re-review',
+      fixedAt: e.ts()
+    };
+    e.log('info', `Updated ${pr.id} → cleared humanFeedback.pendingFix, reset to waiting for re-review`);
   } else {
     // Review fix: reset to waiting for re-review
     target.squadReview = {

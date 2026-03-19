@@ -1194,6 +1194,80 @@ async function testCheckStatus() {
   });
 }
 
+// ─── PR Review Fix Cycle Tests ──────────────────────────────────────────────
+
+async function testPrReviewFixCycle() {
+  console.log('\n── PR → Review → Fix Cycle ──');
+
+  await test('No self-review: review agent cannot be PR author', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes('prAuthor'),
+      'discoverFromPrs should extract PR author for self-review check');
+    assert.ok(src.includes('agentId === prAuthor'),
+      'Should check if resolved agent is the PR author');
+  });
+
+  await test('Review verdict is waiting (not hardcoded approved)', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine', 'lifecycle.js'), 'utf8');
+    const reviewFn = src.slice(src.indexOf('function updatePrAfterReview('), src.indexOf('\nfunction ', src.indexOf('function updatePrAfterReview(') + 1));
+    assert.ok(reviewFn.includes("status: 'waiting'"),
+      'updatePrAfterReview should set status to waiting, not approved');
+    assert.ok(!reviewFn.includes("status: 'approved'"),
+      'Should NOT hardcode approved — let pollPrStatus determine actual verdict');
+  });
+
+  await test('Human feedback fix triggers re-review (reset to waiting)', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine', 'lifecycle.js'), 'utf8');
+    const fixFn = src.slice(src.indexOf('function updatePrAfterFix('), src.indexOf('\nfunction ', src.indexOf('function updatePrAfterFix(') + 1));
+    // Both branches should set status to 'waiting'
+    const waitingCount = (fixFn.match(/status: 'waiting'/g) || []).length;
+    assert.ok(waitingCount >= 2,
+      `Both human-feedback and review-feedback fix paths should reset to waiting (found ${waitingCount})`);
+  });
+
+  await test('Human feedback cooldown key uses PR ID only (no timestamp)', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    // The key should NOT include lastProcessedCommentDate
+    assert.ok(!src.includes('human-fix-${project?.name || \'default\'}-${pr.id}-${pr.humanFeedback.lastProcessedCommentDate}'),
+      'Human fix key should not include timestamp (prevents cooldown bypass)');
+    assert.ok(src.includes("human-fix-${project?.name || 'default'}-${pr.id}`"),
+      'Human fix key should be PR-level only');
+  });
+
+  await test('PRs with active dispatch are skipped (race prevention)', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes('activePrIds'),
+      'discoverFromPrs should track active PR dispatches');
+    assert.ok(src.includes('activePrIds.has(pr.id)'),
+      'Should skip PRs that already have an active dispatch');
+  });
+
+  await test('Only active PRs are considered for review/fix', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes("pr.status !== 'active') continue"),
+      'Should skip merged/abandoned PRs');
+  });
+
+  await test('Fix routes to PR author via _author_ token', () => {
+    const routing = fs.readFileSync(path.join(SQUAD_DIR, 'routing.md'), 'utf8');
+    assert.ok(routing.includes('_author_'),
+      'routing.md should have _author_ token for fix routing');
+  });
+
+  await test('Review playbook includes PR context variables', () => {
+    const playbook = fs.readFileSync(path.join(SQUAD_DIR, 'playbooks', 'review.md'), 'utf8');
+    assert.ok(playbook.includes('{{pr_id}}'), 'Review playbook needs pr_id');
+    assert.ok(playbook.includes('{{pr_branch}}'), 'Review playbook needs pr_branch');
+    assert.ok(playbook.includes('{{pr_title}}'), 'Review playbook needs pr_title');
+  });
+
+  await test('Fix playbook includes review feedback variable', () => {
+    const playbook = fs.readFileSync(path.join(SQUAD_DIR, 'playbooks', 'fix.md'), 'utf8');
+    assert.ok(playbook.includes('{{review_note}}'), 'Fix playbook needs review_note for feedback');
+    assert.ok(playbook.includes('{{pr_branch}}'), 'Fix playbook needs pr_branch');
+  });
+}
+
 // ─── Worktree Management Tests ──────────────────────────────────────────────
 
 async function testWorktreeManagement() {
@@ -1505,6 +1579,9 @@ async function main() {
 
     // check-status.js tests
     await testCheckStatus();
+
+    // PR review fix cycle tests
+    await testPrReviewFixCycle();
 
     // Worktree management tests
     await testWorktreeManagement();

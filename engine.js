@@ -2071,8 +2071,15 @@ function discoverFromPrs(config, project) {
 
   const projMeta = { name: project?.name, localPath: project?.localPath };
 
+  // Collect active PR dispatches to prevent simultaneous review+fix on same PR
+  const dispatch = getDispatch();
+  const activePrIds = new Set(
+    (dispatch.active || []).filter(d => d.meta?.pr?.id).map(d => d.meta.pr.id)
+  );
+
   for (const pr of prs) {
     if (pr.status !== 'active') continue;
+    if (activePrIds.has(pr.id)) continue; // Skip PRs with active dispatch (prevent race)
 
     const prNumber = (pr.id || '').replace(/^PR-/, '');
     const squadStatus = pr.squadReview?.status;
@@ -2082,7 +2089,12 @@ function discoverFromPrs(config, project) {
     if (needsReview) {
       const key = `review-${project?.name || 'default'}-${pr.id}`;
       if (isAlreadyDispatched(key) || isOnCooldown(key, cooldownMs)) continue;
-      const agentId = resolveAgent('review', config);
+      // No self-review: exclude the PR author from review assignment
+      const prAuthor = (pr.agent || '').toLowerCase();
+      let agentId = resolveAgent('review', config);
+      if (agentId && agentId === prAuthor) {
+        agentId = resolveAgent('review', config); // retry — prAuthor now claimed, gets skipped
+      }
       if (!agentId) continue;
 
       const item = buildPrDispatch(agentId, config, project, pr, 'review', {
@@ -2108,7 +2120,7 @@ function discoverFromPrs(config, project) {
 
     // PRs with pending human feedback
     if (pr.humanFeedback?.pendingFix) {
-      const key = `human-fix-${project?.name || 'default'}-${pr.id}-${pr.humanFeedback.lastProcessedCommentDate}`;
+      const key = `human-fix-${project?.name || 'default'}-${pr.id}`;
       if (isAlreadyDispatched(key) || isOnCooldown(key, cooldownMs)) continue;
       const agentId = resolveAgent('fix', config, pr.agent);
       if (!agentId) continue;
