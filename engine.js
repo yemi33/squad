@@ -53,7 +53,7 @@ function validateConfig(config) {
     errors++;
   }
   // Projects
-  const projects = config.projects || [];
+  const projects = getProjects(config);
   if (projects.length === 0) {
     console.error('FATAL: No projects configured');
     errors++;

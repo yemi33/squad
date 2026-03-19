@@ -1594,6 +1594,12 @@ async function testEdgeCases() {
     assert.deepStrictEqual(shared.getProjects({ projects: [] }), []);
     assert.deepStrictEqual(shared.getProjects({ projects: [{ name: 'YOUR_PROJECT_NAME' }] }), []);
   });
+
+  await test('engine validateConfig uses filtered getProjects list', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes('const projects = getProjects(config);'),
+      'validateConfig should use shared.getProjects filtering');
+  });
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
