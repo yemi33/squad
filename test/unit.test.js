@@ -1110,6 +1110,8 @@ async function testPrdStaleInvalidation() {
       'dashboard should normalize path-like plan references');
     assert.ok(html.includes("fetch('/api/plans/' + encodeURIComponent(normalizedFile))"),
       'plan modal should fetch using normalized file name');
+    assert.ok(html.includes('async function openVerifyGuide(file)') && html.includes("_modalFilePath = 'prd/' + normalizedFile"),
+      'verify guide modal should also normalize file path');
   });
 
   await test('Dashboard has /api/prd/regenerate endpoint', () => {
