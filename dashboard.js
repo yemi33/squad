@@ -95,6 +95,9 @@ function getStatus() {
   const now = Date.now();
   if (_statusCache && (now - _statusCacheTs) < STATUS_CACHE_TTL) return _statusCache;
 
+  // Reload config on each cache miss — picks up external changes (squad init, squad add)
+  reloadConfig();
+
   const prdInfo = getPrdInfo();
   _statusCache = {
     agents: getAgents(),
