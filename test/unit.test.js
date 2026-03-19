@@ -1287,14 +1287,10 @@ async function testConfigAndPlaybooks() {
   console.log('\n── Config & Playbooks ──');
 
   await test('config.json exists and is valid', () => {
-    // Config lives in SQUAD_DIR (which may be ~/.squad/ at runtime)
     const config = queries.getConfig();
     assert.ok(typeof config === 'object', 'config.json not readable');
-    // config may be empty {} if running from a non-installed repo
-    if (Object.keys(config).length > 0) {
-      assert.ok(config.agents, 'config missing agents');
-      assert.ok(Array.isArray(config.projects), 'config missing projects array');
-    }
+    // Config may have projects but no agents (agents fall back to DEFAULT_AGENTS)
+    if (config.projects) assert.ok(Array.isArray(config.projects), 'projects not array');
   });
 
   await test('All required playbooks exist', () => {

@@ -170,8 +170,10 @@ ${SQUAD_DIR}/
 ├── config.json                    # Engine + project config (READ ONLY)
 ├── routing.md                     # Agent dispatch routing rules
 ├── notes.md                       # Consolidated team notes
-├── work-items.json                # Central work item queue
-├── pull-requests.json             # PR tracking
+├── work-items.json                # Central work item queue (cross-project tasks)
+├── projects/{name}/               # Per-project state (centralized, NOT in project repos)
+│   ├── work-items.json            # Project-specific work items
+│   └── pull-requests.json         # PR tracking for this project
 ├── agents/
 │   ├── {id}/charter.md            # Agent role definition
 │   ├── {id}/output.log            # Latest agent output
@@ -189,7 +191,7 @@ ${SQUAD_DIR}/
 └── notes/inbox/*.md               # Unconsolidated agent findings
 \`\`\`
 
-Projects are configured in \`config.json\` under \`projects[]\`. Each project has its own \`{localPath}/.squad/work-items.json\` and \`{localPath}/.squad/pull-requests.json\`.
+Projects are configured in \`config.json\` under \`projects[]\`. Per-project state lives centrally in \`${SQUAD_DIR}/projects/{name}/\` — NOT inside project repos. There are no \`.squad/\` folders inside project repos.
 
 ## Direct Execution
 
@@ -578,7 +580,7 @@ const server = http.createServer(async (req, res) => {
         return p.name?.toLowerCase() === (plan.project || '').toLowerCase();
       }) || PROJECTS[0];
       if (project) {
-        const wiPath = path.join(project.localPath, '.squad', 'work-items.json');
+        const wiPath = shared.projectWorkItemsPath(project);
         const items = JSON.parse(safeRead(wiPath) || '[]');
         const verify = items.find(w => w.sourcePlan === body.file && w.itemType === 'verify');
         if (verify) {
@@ -896,7 +898,7 @@ const server = http.createServer(async (req, res) => {
       let workItemSynced = false;
       const wiSyncPaths = [path.join(SQUAD_DIR, 'work-items.json')];
       for (const proj of PROJECTS) {
-        wiSyncPaths.push(path.join(proj.localPath, '.squad', 'work-items.json'));
+        wiSyncPaths.push(shared.projectWorkItemsPath(proj));
       }
       for (const wiPath of wiSyncPaths) {
         try {
@@ -936,7 +938,7 @@ const server = http.createServer(async (req, res) => {
       // Also remove any materialized work item for this plan item
       let cancelled = false;
       for (const proj of PROJECTS) {
-        const wiPath = path.join(proj.localPath, '.squad', 'work-items.json');
+        const wiPath = shared.projectWorkItemsPath(proj);
         try {
           const items = safeJson(wiPath);
           const before = items.length;
@@ -1359,7 +1361,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       const resumedItemIds = [];
       const wiPaths = [path.join(SQUAD_DIR, 'work-items.json')];
       for (const proj of PROJECTS) {
-        wiPaths.push(path.join(proj.localPath, '.squad', 'work-items.json'));
+        wiPaths.push(shared.projectWorkItemsPath(proj));
       }
       for (const wiPath of wiPaths) {
         try {
@@ -1413,9 +1415,9 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       const wiPaths = [path.join(SQUAD_DIR, 'work-items.json')];
       const allPrItemIds = new Set();
       for (const proj of PROJECTS) {
-        wiPaths.push(path.join(proj.localPath, '.squad', 'work-items.json'));
+        wiPaths.push(shared.projectWorkItemsPath(proj));
         try {
-          const prs = safeJson(path.join(proj.localPath, '.squad', 'pull-requests.json')) || [];
+          const prs = safeJson(shared.projectPrPath(proj)) || [];
           for (const pr of prs) {
             if (pr.status === 'active' && pr.prdItems?.length) {
               pr.prdItems.forEach(id => allPrItemIds.add(id));
@@ -1615,7 +1617,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       // Scan all work item sources for materialized items from this plan
       const wiPaths = [{ path: path.join(SQUAD_DIR, 'work-items.json'), label: 'central' }];
       for (const proj of PROJECTS) {
-        wiPaths.push({ path: path.join(proj.localPath, '.squad', 'work-items.json'), label: proj.name });
+        wiPaths.push({ path: shared.projectWorkItemsPath(proj), label: proj.name });
       }
 
       // Track which plan items have materialized work items
@@ -1684,7 +1686,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       let cleaned = 0;
       const wiPaths = [path.join(SQUAD_DIR, 'work-items.json')];
       for (const proj of PROJECTS) {
-        wiPaths.push(path.join(proj.localPath, '.squad', 'work-items.json'));
+        wiPaths.push(shared.projectWorkItemsPath(proj));
       }
       for (const wiPath of wiPaths) {
         try {
@@ -1839,7 +1841,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
       let reset = 0, kept = 0;
       const wiPaths = [{ path: path.join(SQUAD_DIR, 'work-items.json'), label: 'central' }];
       for (const proj of PROJECTS) {
-        wiPaths.push({ path: path.join(proj.localPath, '.squad', 'work-items.json'), label: proj.name });
+        wiPaths.push({ path: shared.projectWorkItemsPath(proj), label: proj.name });
       }
       const deletedItemIds = [];
       for (const wiInfo of wiPaths) {
@@ -2327,7 +2329,7 @@ What would you like to discuss or change? When you're happy, say "approve" and I
         adoOrg: detected.org || '', adoProject: detected.project || '',
         repoName: detected.repoName || name, mainBranch: detected.mainBranch || 'main',
         prUrlBase,
-        workSources: { pullRequests: { enabled: true, path: '.squad/pull-requests.json', cooldownMinutes: 30 }, workItems: { enabled: true, path: '.squad/work-items.json', cooldownMinutes: 0 } }
+        workSources: { pullRequests: { enabled: true, cooldownMinutes: 30 }, workItems: { enabled: true, cooldownMinutes: 0 } }
       };
 
       config.projects.push(project);
