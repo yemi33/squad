@@ -178,7 +178,7 @@ You can also run scripts directly: `node ~/.squad/engine.js start`, `node ~/.squ
 - **Human approval gate** — plans require approval before materializing as work items. Dashboard provides Approve / Discuss & Revise / Reject. Discussion launches an interactive Claude Code session.
 - **Dispatches AI agents** (Claude CLI) with full project context, git worktrees, and MCP server access
 - **Routes intelligently** — fixes first, then reviews, then implementation, matched to agent strengths
-- **LLM-powered consolidation** — Haiku summarizes notes (threshold: 3 files). Regex fallback. Source references required.
+- **LLM-powered consolidation** — Haiku summarizes notes (threshold: 5 files). Regex fallback. Source references required.
 - **Knowledge base** — `knowledge/` with categories: architecture, conventions, project-notes, build-reports, reviews. Full notes preserved. Dashboard browsable with inline Q&A.
 - **Token tracking** — per-agent and per-day usage. Dashboard Token Usage panel.
 - **Engine watchdog** — dashboard auto-restarts dead engine.
@@ -436,7 +436,7 @@ Manual cleanup: `squad cleanup`
 Six mechanisms that make the squad get better over time:
 
 ### 1. Learnings Inbox → notes.md
-Agents write findings to `notes/inbox/`. Engine consolidates at 3+ files using Haiku LLM summarization (regex fallback) into `notes.md` — categorized with source references. Auto-prunes at 50KB. Injected into every future playbook.
+Agents write findings to `notes/inbox/`. Engine consolidates at 5+ files using Haiku LLM summarization (regex fallback) into `notes.md` — categorized with source references. Auto-prunes at 50KB. Injected into every future playbook.
 
 ### 6. Knowledge Base
 `knowledge/` stores full notes by category: architecture, conventions, project-notes, build-reports, reviews. Browsable in dashboard with inline Q&A (Haiku-powered).

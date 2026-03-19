@@ -10,8 +10,8 @@ The engine runs a tick every 60 seconds (configurable via `config.json` → `eng
 tick()
   1. checkTimeouts()            Kill stale/hung agents (>heartbeatTimeout)
   2. consolidateInbox()         Merge learnings into notes.md (Haiku-powered)
-  2.5 runCleanup()              Periodic cleanup (every 10 ticks ≈ 5min)
-  2.6 pollPrStatus()            Poll ADO for build, review, merge status (every 6 ticks ≈ 3min)
+  2.5 runCleanup()              Periodic cleanup (every 10 ticks ≈ 10min)
+  2.6 pollPrStatus()            Poll ADO for build, review, merge status (every 6 ticks ≈ 6min)
   2.7 pollPrHumanComments()     Poll PR threads for human @squad comments (every 12 ticks ≈ 6min)
   3. discoverWork()             Scan ALL linked projects for new tasks
   4. updateSnapshot()           Write identity/now.md
@@ -33,13 +33,11 @@ Before scanning, the engine materializes plans and specs into project work items
 | Squad review pending/waiting | Queue a code review | `review` |
 | Squad review `changes-requested` | Route back to author for fixes | `fix` |
 | `buildStatus: "failing"` | Route to any agent for build fix | `fix` |
-| No `buildTested` flag | Queue build & test verification | `test` |
-
 Skips PRs where `status !== "active"`.
 
-**Build & Test auto-dispatch:** When a PR is first created (synced from agent output), it has no `buildTested` field. The engine dispatches a test agent to check out the branch, build, run tests, and if it's a webapp, start a local dev server. If build/tests fail, the agent auto-files a high-priority fix work item. The PR is marked `buildTested: 'dispatched'` to prevent re-dispatch.
+### Source 2: PRD Gap Analysis (via `materializePlansAsWorkItems`)
 
-### Source 2: PRD Gap Analysis (`discoverFromPrd`)
+PRD items flow through `materializePlansAsWorkItems()`, which scans `~/.squad/prd/*.json` for PRD files with `missing`/`planned` items and creates work items in the target project's queue.
 
 **Reads:** `<project>/docs/prd-gaps.json` (or custom path from `workSources.prd.path`)
 
@@ -122,7 +120,7 @@ Both write to `work-items.json` and are picked up by Source 3 on the same or nex
 
 ## ADO PR Status Polling (`pollPrStatus`)
 
-**Runs:** Every 6 ticks (≈ 3 minutes), independently of work discovery. Replaces the retired agent-based `pr-sync`.
+**Runs:** Every 6 ticks (≈ 6 minutes), independently of work discovery. Replaces the retired agent-based `pr-sync`.
 
 The engine directly polls the Azure DevOps REST API for **all** PR metadata: build/CI status, human review votes, and completion state. Two API calls per PR — no agent dispatch needed.
 
@@ -323,7 +321,7 @@ docs/**/*.md (specs)┤  (each tick)      ┌──────────┐
                      addToDispatch()─────────┘
                                             │
 ADO REST API ─── pollPrBuildStatus() ──► pull-requests.json
-(every 3min)      (buildStatus field)       │
+(every 6min)      (buildStatus field)       │
                                        spawnAgent()
                                             │
                                ┌────────────┼────────────┐
@@ -353,11 +351,11 @@ ADO REST API ─── pollPrBuildStatus() ──► pull-requests.json
 
 Two layers of protection:
 
-**Agent timeout** (`engine.agentTimeout`, default 10min):
+**Agent timeout** (`engine.agentTimeout`, default 5 hours / 18,000,000ms):
 - Checks `activeProcesses` Map for elapsed time
 - Sends SIGTERM, then SIGKILL after 5s
 
-**Stale detection** (`engine.staleThreshold`, default 30min):
+**Stale detection** (`engine.heartbeatTimeout`, default 5 min / 300,000ms):
 - Scans `dispatch.active` for items where `started_at` exceeds threshold
 - Catches cases where the process exited but dispatch wasn't cleaned up
 - Kills process if still tracked, marks dispatch as error, resets agent to idle
@@ -381,8 +379,8 @@ All discovery behavior is controlled via `config.json`:
   "engine": {
     "tickInterval": 60000,       // ms between ticks
     "maxConcurrent": 3,          // max agents running at once
-    "agentTimeout": 600000,      // 10min — kill hung processes
-    "staleThreshold": 1800000,   // 30min — kill stale dispatches
+    "agentTimeout": 18000000,     // 5 hours — kill hung processes
+    "heartbeatTimeout": 300000,  // 5min — kill stale/silent agents
     "maxTurns": 100              // max claude CLI turns per agent
   },
   "projects": [

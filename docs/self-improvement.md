@@ -25,7 +25,7 @@ Agent completes task
 Agent finishes task
   → writes notes/inbox/<agent>-<date>.md
   → engine checks inbox on next tick (~60s)
-  → consolidateInbox() fires (threshold: 3 files)
+  → consolidateInbox() fires (threshold: 5 files)
   → spawns Claude Haiku for LLM-powered summarization
   → Haiku reads all inbox notes + existing notes.md
   → produces deduplicated, categorized digest
@@ -323,9 +323,10 @@ When a git merge or rebase produces conflicts in yarn.lock.
 
 | Setting | Default | What it controls |
 |---------|---------|-----------------|
-| `engine.inboxConsolidateThreshold` | 3 | Files needed before consolidation triggers |
+| `engine.inboxConsolidateThreshold` | 5 | Files needed before consolidation triggers |
 | Consolidation model | Haiku | LLM used for summarization (fast, cheap) |
-| Consolidation timeout | 3 min | Max time for LLM call before fallback |
+| LLM process kill timeout | 3 min (180,000ms) | Max time for LLM call before killing process and falling back to regex |
+| Stale flag auto-reset | 5 min (300,000ms) | `_consolidationInFlight` flag auto-resets after this duration to unblock future runs |
 | notes.md max size | 50KB | Auto-prunes old sections above this |
 | Agent history entries | 20 | Max entries kept in history.md |
 | Metrics file | `engine/metrics.json` | Auto-created on first completion |

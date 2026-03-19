@@ -11,7 +11,7 @@
 | PR review | Engine (auto-dispatch) | Agent reviewer | Human (vote to merge) | Human (comments → auto-fix) |
 | Build failures | Engine (auto-detect) | Agent (auto-fix) | — | — |
 | Notes | You (`/note`) or agent (findings) | Engine (consolidate) | You (promote to KB) | — |
-| Cleanup | Engine (every 5 min) | Engine | — | — |
+| Cleanup | Engine (every 10 min) | Engine | — | — |
 | Metrics | Engine (auto-collect) | Engine | You (view) | — |
 | Error recovery | Engine (detect) | — | You (retry/delete) | You |
 | Project linking | You (`squad add/scan`) | — | — | — |
@@ -43,10 +43,10 @@ This is the only point where you decide if the *quality* is good enough.
 
 These run continuously without you:
 
-- **Work discovery** — engine scans all project queues every tick (~30s)
+- **Work discovery** — engine scans all project queues every tick (~60s)
 - **Agent dispatch** — engine picks the right agent, builds the prompt, spawns Claude
 - **Worktree management** — create on dispatch, pull on shared-branch, clean after merge
-- **PR status polling** — checks ADO for build status, review votes, merge state every ~3 min
+- **PR status polling** — checks ADO for build status, review votes, merge state every ~6 min
 - **Build failure detection** — auto-files fix tasks when CI fails
 - **Inbox consolidation** — LLM-powered dedup and categorization when inbox hits threshold
 - **Knowledge base classification** — auto-assigns category to consolidated notes
@@ -55,7 +55,7 @@ These run continuously without you:
 - **Metrics collection** — tracks tasks, errors, PRs, approvals per agent
 - **Dispatch priority** — fixes first, then reviews, then implementations
 - **Cooldown & backoff** — prevents re-dispatching recently failed items
-- **Zombie cleanup** — temp files, orphaned worktrees, stale processes every 5 min
+- **Zombie cleanup** — temp files, orphaned worktrees, stale processes every 10 min
 - **Post-merge hooks** — worktree cleanup, PRD status update, metrics update
 
 ## Human-Triggered, Then Autonomous
@@ -94,7 +94,7 @@ These are entirely on you:
 
 If you start the engine and dashboard, then leave:
 
-1. Engine ticks every 30 seconds
+1. Engine ticks every 60 seconds
 2. Discovers pending work items, PRD gaps, PR reviews needed
 3. Dispatches agents (up to max concurrent)
 4. Agents create worktrees, write code, create PRs

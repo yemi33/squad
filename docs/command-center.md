@@ -13,7 +13,7 @@ CC maintains a true multi-turn session using Claude CLI's `--resume` flag. Unlik
 **Session lifecycle:**
 - **Created** on first message (or after expiry/new-session)
 - **Resumed** on subsequent messages via `--resume <sessionId>`
-- **Expires** after 30 minutes of inactivity or 50 turns
+- **Expires** after 2 hours of inactivity or 50 turns
 - **Persisted** to `engine/cc-session.json` — survives dashboard restarts
 - **Frontend messages** saved to `localStorage` — survive page refresh
 
@@ -46,11 +46,14 @@ Full squad context is injected every turn:
 | Knowledge base | Recent entries (architecture, conventions, build reports, reviews) |
 | Team notes | Recent consolidated notes |
 
-## Tool Access (Read-Only)
+## Tool Access
 
 CC can use tools to look beyond the pre-loaded context:
 
+- **Bash** — Run shell commands (git, build tools, scripts)
 - **Read** — Open any file (agent output logs, code, config, plans)
+- **Write** — Create or overwrite files
+- **Edit** — Make targeted edits to existing files
 - **Glob** — Find files by pattern (e.g., `agents/*/output.log`)
 - **Grep** — Search file contents (find functions, search agent outputs)
 - **WebFetch/WebSearch** — Look up external resources
@@ -91,7 +94,7 @@ When you ask CC to *do* something, it includes structured action blocks in its r
 
 ## Error Handling
 
-- **Frontend timeout**: 5.5-minute `AbortSignal` on the fetch — prevents infinite "thinking" spinner
+- **Frontend timeout**: 10-minute `AbortSignal` on the fetch — prevents infinite "thinking" spinner
 - **Backend timeout**: 5-minute kill timer on the claude process
 - **Resume failure**: If `--resume` fails (corrupted/deleted session), automatically retries with a fresh session
 - **Concurrency guard**: Only one CC call at a time — concurrent requests get a 429 "CC is busy" response
@@ -110,7 +113,7 @@ POST /api/command-center  (or /api/doc-chat, /api/steer-document)
     ├── callLLM() with sessionId (resume) or without (new)
     │     model: sonnet
     │     maxTurns: 5 (CC) or 3 (doc)
-    │     allowedTools: Read, Glob, Grep, WebFetch, WebSearch
+    │     allowedTools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch
     │     timeout: 300s (CC) or 120s (doc)
     │
     ▼
