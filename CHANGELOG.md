@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.88 (2026-03-19)
+
+### Engine
+- engine/shared.js
+
+### Other
+- squad.js
+- test/unit.test.js
+
 ## 0.1.87 (2026-03-19)
 
 ### Dashboard
