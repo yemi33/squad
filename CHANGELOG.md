@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.74 (2026-03-19)
+
+### Dashboard
+- dashboard.js
+
+### Other
+- test/unit.test.js
+
 ## 0.1.73 (2026-03-19)
 
 ### Other
