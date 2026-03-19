@@ -569,6 +569,7 @@ function updatePrAfterReview(agentId, pr, project) {
     reviewedAt: e.ts(),
     note: completedEntry?.task || ''
   };
+  const squadVerdict = target.squadReview.status;
 
   const authorAgentId = (pr.agent || '').toLowerCase();
   if (authorAgentId && config.agents?.[authorAgentId]) {
@@ -994,9 +995,9 @@ function runPostCompletionHooks(dispatchItem, agentId, code, stdout, config) {
 // (e.g., manually raised PRs, cross-plan PRs, or PRs created while engine was paused).
 function syncPrdFromPrs(config) {
   try {
-    const { getConfig, getProjects, projectWorkItemsPath, projectPrPath, safeJson, safeWrite } = require('./shared');
+    const { getProjects, projectWorkItemsPath, projectPrPath, safeJson, safeWrite } = require('./shared');
     const { reconcileItemsWithPrs } = require('../engine');
-    config = config || getConfig();
+    config = config || queries.getConfig();
     const allProjects = getProjects(config);
 
     // Exact prdItems match only — no fuzzy matching
@@ -1019,12 +1020,11 @@ function syncPrdFromPrs(config) {
       }
     }
     if (totalReconciled > 0) {
-      const { log } = require('./shared');
-      log('info', `PR sync: reconciled ${totalReconciled} pending work item(s) to in-pr`);
+      engine().log('info', `PR sync: reconciled ${totalReconciled} pending work item(s) to in-pr`);
     }
   } catch (err) {
     // Non-fatal — log and continue
-    try { require('./shared').log('warn', `syncPrdFromPrs error: ${err?.message || err}`); } catch {}
+    try { engine().log('warn', `syncPrdFromPrs error: ${err?.message || err}`); } catch {}
   }
 }
 

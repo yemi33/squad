@@ -418,16 +418,14 @@ async function testDataIntegrity() {
     assert.ok(Array.isArray(config.projects), 'projects not array');
   });
 
-  await test('All agent status.json files are valid', async () => {
-    const config = readJson(path.join(SQUAD_DIR, 'config.json'));
-    for (const agentId of Object.keys(config.agents || {})) {
-      const statusPath = path.join(SQUAD_DIR, 'agents', agentId, 'status.json');
-      if (fs.existsSync(statusPath)) {
-        const status = readJson(statusPath);
-        assert.ok(status, `Invalid status.json for ${agentId}`);
-        assert.ok(['idle', 'working', 'done', 'completed', 'error'].includes(status.status),
-          `Invalid status '${status.status}' for ${agentId}`);
-      }
+  await test('Agent status is derivable from dispatch.json', async () => {
+    const dispatch = readJson(path.join(ENGINE_DIR, 'dispatch.json'));
+    assert.ok(dispatch, 'dispatch.json missing');
+    assert.ok(Array.isArray(dispatch.pending), 'pending not array');
+    assert.ok(Array.isArray(dispatch.active), 'active not array');
+    assert.ok(Array.isArray(dispatch.completed), 'completed not array');
+    for (const entry of dispatch.active) {
+      assert.ok(entry.agent, `Active dispatch entry missing agent field: ${JSON.stringify(entry)}`);
     }
   });
 

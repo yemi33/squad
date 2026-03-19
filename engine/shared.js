@@ -208,7 +208,7 @@ const DEFAULT_CLAUDE = {
 // ── Project Helpers ──────────────────────────────────────────────────────────
 
 function getProjects(config) {
-  if (config.projects && Array.isArray(config.projects)) {
+  if (config && config.projects && Array.isArray(config.projects)) {
     return config.projects;
   }
   return [];

@@ -1584,7 +1584,7 @@ function runCleanup(config, verbose = false) {
     log('info', `Cleanup: ${cleaned.tempFiles} temp, ${cleaned.liveOutputs} live outputs, ${cleaned.worktrees} worktrees, ${cleaned.zombies} zombies, ${cleaned.files || 0} archives, ${cleaned.orphanedDispatches} orphaned dispatches`);
   }
 
-  // 6. Clean swept KB files older than 7 days
+  // 8. Clean swept KB files older than 7 days
   try {
     const sweptDir = path.join(SQUAD_DIR, 'knowledge', '_swept');
     if (fs.existsSync(sweptDir)) {
@@ -1602,7 +1602,7 @@ function runCleanup(config, verbose = false) {
     }
   } catch {}
 
-  // 7. KB watchdog — restore deleted KB files from git if count dropped vs checkpoint
+  // 9. KB watchdog — restore deleted KB files from git if count dropped vs checkpoint
   try {
     const checkpoint = safeJson(path.join(ENGINE_DIR, 'kb-checkpoint.json'));
     if (checkpoint && checkpoint.count > 0) {
@@ -2852,8 +2852,8 @@ module.exports = {
   discoverWork, discoverFromPrs, discoverFromWorkItems,
   materializePlansAsWorkItems,
 
-  // Shared helpers (used by lifecycle.js)
-  reconcileItemsWithPrs, writeInboxAlert,
+  // Shared helpers (used by lifecycle.js and tests)
+  reconcileItemsWithPrs, writeInboxAlert, detectDependencyCycles,
 
   // Playbooks
   renderPlaybook,
