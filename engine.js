@@ -950,9 +950,9 @@ function completeDispatch(id, result = 'success', reason = '', resultSummary = '
     // Strip prompt from completed items (saves ~10KB per item, reduces file lock contention)
     delete item.prompt;
     dispatch.completed = dispatch.completed || [];
-    // Cap before pushing to prevent unbounded growth from concurrent dispatches
-    while (dispatch.completed.length >= 100) {
-      dispatch.completed.shift();
+    // Cap at 100 entries — use slice instead of shift() to avoid O(n) per removal
+    if (dispatch.completed.length >= 100) {
+      dispatch.completed = dispatch.completed.slice(-99);
     }
     dispatch.completed.push(item);
     safeWrite(DISPATCH_PATH, dispatch);
@@ -1208,8 +1208,10 @@ function checkTimeouts(config) {
     const silentSec = Math.round(silentMs / 1000);
 
     // Check if the agent actually completed (result event in live output)
+    // Optimization: only read file if recent activity (avoids reading stale 1MB logs)
     let completedViaOutput = false;
     try {
+      if (silentMs > 600000) throw 'skip'; // No point reading a file silent for >10min
       const liveLog = safeRead(liveLogPath);
       if (liveLog && liveLog.includes('"type":"result"')) {
         completedViaOutput = true;

@@ -334,7 +334,14 @@ function getSkillIndex(config) {
 
 // ── Knowledge Base ──────────────────────────────────────────────────────────
 
+let _kbCache = null;
+let _kbCacheTs = 0;
+const KB_CACHE_TTL = 30000; // 30s — KB changes infrequently
+
 function getKnowledgeBaseEntries() {
+  const now = Date.now();
+  if (_kbCache && (now - _kbCacheTs) < KB_CACHE_TTL) return _kbCache;
+
   const entries = [];
   for (const cat of KB_CATEGORIES) {
     const catDir = path.join(KNOWLEDGE_DIR, cat);
@@ -354,6 +361,8 @@ function getKnowledgeBaseEntries() {
       });
     }
   }
+  _kbCache = entries;
+  _kbCacheTs = now;
   return entries;
 }
 

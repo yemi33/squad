@@ -38,7 +38,7 @@ function safeWrite(p, data) {
       } catch (e) {
         if (e.code === 'EPERM' && attempt < 4) {
           const delay = 50 * (attempt + 1); // 50, 100, 150, 200ms
-          const start = Date.now(); while (Date.now() - start < delay) {}
+          try { const ab = new SharedArrayBuffer(4); Atomics.wait(new Int32Array(ab), 0, 0, delay); } catch { const start = Date.now(); while (Date.now() - start < delay) {} }
           continue;
         }
         // Final attempt failed — fall through to direct write

@@ -88,7 +88,7 @@ function getMcpServers() {
 
 let _statusCache = null;
 let _statusCacheTs = 0;
-const STATUS_CACHE_TTL = 3000; // 3s — dashboard polls every 4s
+const STATUS_CACHE_TTL = 10000; // 10s — reduces expensive aggregation frequency; mutations call invalidateStatusCache()
 function invalidateStatusCache() { _statusCache = null; }
 
 function getStatus() {
