@@ -480,14 +480,40 @@ function nukeSquad() {
     }
   } catch {}
 
-  // 5. Delete ~/.squad/ entirely
-  console.log(`\n  Deleting ${SQUAD_HOME}...`);
-  try {
-    fs.rmSync(SQUAD_HOME, { recursive: true, force: true });
-    console.log('  Deleted.\n');
-  } catch (err) {
-    console.error(`  Failed to delete: ${err.message}`);
-    console.log('  Try manually: rm -rf ' + SQUAD_HOME + '\n');
+  // 5. Delete runtime state (NOT the source code)
+  console.log('\n  Cleaning runtime state...');
+  const runtimeDirs = ['projects', 'plans', 'prd', 'knowledge', 'skills', 'notes', 'identity'];
+  const runtimeFiles = ['config.json', 'work-items.json', 'notes.md', 'routing.md'];
+  const engineRuntimeFiles = ['control.json', 'dispatch.json', 'log.json', 'metrics.json', 'cooldowns.json', 'pr-links.json', 'kb-checkpoint.json', 'cc-session.json', 'doc-sessions.json'];
+
+  for (const dir of runtimeDirs) {
+    const p = path.join(SQUAD_HOME, dir);
+    if (fs.existsSync(p)) { try { fs.rmSync(p, { recursive: true, force: true }); console.log(`  Deleted ${dir}/`); } catch {} }
+  }
+  for (const f of runtimeFiles) {
+    const p = path.join(SQUAD_HOME, f);
+    if (fs.existsSync(p)) { try { fs.unlinkSync(p); console.log(`  Deleted ${f}`); } catch {} }
+  }
+  const engineDir = path.join(SQUAD_HOME, 'engine');
+  for (const f of engineRuntimeFiles) {
+    const p = path.join(engineDir, f);
+    if (fs.existsSync(p)) { try { fs.unlinkSync(p); console.log(`  Deleted engine/${f}`); } catch {} }
+  }
+  // Clean engine/tmp/
+  const tmpDir = path.join(engineDir, 'tmp');
+  if (fs.existsSync(tmpDir)) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); console.log('  Deleted engine/tmp/'); } catch {} }
+  // Clean agent history and output logs (preserve charters)
+  const agentsDir = path.join(SQUAD_HOME, 'agents');
+  if (fs.existsSync(agentsDir)) {
+    for (const agent of fs.readdirSync(agentsDir)) {
+      const agentDir = path.join(agentsDir, agent);
+      try { if (!fs.statSync(agentDir).isDirectory()) continue; } catch { continue; }
+      for (const f of fs.readdirSync(agentDir)) {
+        if (f === 'charter.md') continue; // preserve charters
+        try { fs.unlinkSync(path.join(agentDir, f)); } catch {}
+      }
+    }
+    console.log('  Cleaned agent state (charters preserved)');
   }
 
   console.log('  Factory reset complete. Run "squad init" to start fresh.\n');
