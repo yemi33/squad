@@ -24,7 +24,7 @@
 const fs = require('fs');
 const path = require('path');
 const shared = require('./engine/shared');
-const { exec, execSilent, runFile } = shared;
+const { exec, execSilent, runFile, ENGINE_DEFAULTS: DEFAULTS } = shared;
 const queries = require('./engine/queries');
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
@@ -779,7 +779,7 @@ function spawnAgent(dispatchItem, config) {
   // Build claude CLI args
   const args = [
     '--output-format', claudeConfig.outputFormat || 'stream-json',
-    '--max-turns', String(engineConfig.maxTurns || 100),
+    '--max-turns', String(engineConfig.maxTurns || DEFAULTS.maxTurns),
     '--verbose',
     '--permission-mode', claudeConfig.permissionMode || 'bypassPermissions'
   ];
@@ -1170,8 +1170,8 @@ function checkIdleThreshold(config) {
 // ─── Timeout Checker ────────────────────────────────────────────────────────
 
 function checkTimeouts(config) {
-  const timeout = config.engine?.agentTimeout || 18000000; // 5h default
-  const heartbeatTimeout = config.engine?.heartbeatTimeout || 300000; // 5min — no output = dead
+  const timeout = config.engine?.agentTimeout || DEFAULTS.agentTimeout;
+  const heartbeatTimeout = config.engine?.heartbeatTimeout || DEFAULTS.heartbeatTimeout;
 
   // 1. Check tracked processes for hard timeout (supports per-item deadline from fan-out)
   for (const [id, info] of activeProcesses.entries()) {
@@ -2446,7 +2446,7 @@ function discoverCentralWorkItems(config) {
           prompt,
           meta: {
             dispatchKey: fanKey, source: 'central-work-item-fanout', item, parentKey: key,
-            deadline: item.timeout ? Date.now() + item.timeout : Date.now() + (config.engine?.fanOutTimeout || config.engine?.agentTimeout || 18000000)
+            deadline: item.timeout ? Date.now() + item.timeout : Date.now() + (config.engine?.fanOutTimeout || config.engine?.agentTimeout || DEFAULTS.agentTimeout)
           }
         });
       }

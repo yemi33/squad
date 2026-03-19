@@ -4,7 +4,7 @@ How the squad learns from its own work and gets better over time.
 
 ## Overview
 
-The squad has four self-improvement mechanisms that form a continuous feedback loop:
+The squad has six self-improvement mechanisms that form a continuous feedback loop:
 
 ```
 Agent completes task
@@ -253,7 +253,7 @@ Metrics are currently informational — displayed in status and dashboard. Plann
              └──────────┘ └──────────┘ └──────────┘
 ```
 
-## 5. Skills — Agent-Discovered Workflows
+## 6. Skills — Agent-Discovered Workflows
 
 When an agent discovers a repeatable multi-step procedure, it can save it as a **skill** — a structured, reusable workflow compatible with Claude Code's skill system. Skills are stored in two locations:
 

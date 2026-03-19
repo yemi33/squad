@@ -2348,12 +2348,13 @@ What would you like to discuss or change? When you're happy, say "approve" and I
       if (body.engine) {
         // Validate and apply engine settings
         const e = body.engine;
-        if (e.tickInterval !== undefined) config.engine.tickInterval = Math.max(10000, Number(e.tickInterval) || 60000);
-        if (e.maxConcurrent !== undefined) config.engine.maxConcurrent = Math.max(1, Math.min(10, Number(e.maxConcurrent) || 3));
-        if (e.inboxConsolidateThreshold !== undefined) config.engine.inboxConsolidateThreshold = Math.max(1, Number(e.inboxConsolidateThreshold) || 5);
-        if (e.agentTimeout !== undefined) config.engine.agentTimeout = Math.max(60000, Number(e.agentTimeout) || 18000000);
-        if (e.maxTurns !== undefined) config.engine.maxTurns = Math.max(5, Math.min(500, Number(e.maxTurns) || 100));
-        if (e.heartbeatTimeout !== undefined) config.engine.heartbeatTimeout = Math.max(60000, Number(e.heartbeatTimeout) || 300000);
+        const D = shared.ENGINE_DEFAULTS;
+        if (e.tickInterval !== undefined) config.engine.tickInterval = Math.max(10000, Number(e.tickInterval) || D.tickInterval);
+        if (e.maxConcurrent !== undefined) config.engine.maxConcurrent = Math.max(1, Math.min(10, Number(e.maxConcurrent) || D.maxConcurrent));
+        if (e.inboxConsolidateThreshold !== undefined) config.engine.inboxConsolidateThreshold = Math.max(1, Number(e.inboxConsolidateThreshold) || D.inboxConsolidateThreshold);
+        if (e.agentTimeout !== undefined) config.engine.agentTimeout = Math.max(60000, Number(e.agentTimeout) || D.agentTimeout);
+        if (e.maxTurns !== undefined) config.engine.maxTurns = Math.max(5, Math.min(500, Number(e.maxTurns) || D.maxTurns));
+        if (e.heartbeatTimeout !== undefined) config.engine.heartbeatTimeout = Math.max(60000, Number(e.heartbeatTimeout) || D.heartbeatTimeout);
       }
 
       if (body.claude) {

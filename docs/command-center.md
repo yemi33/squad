@@ -112,9 +112,9 @@ POST /api/command-center  (or /api/doc-chat, /api/steer-document)
     ├── Build dynamic state preamble (buildCCStatePreamble)
     ├── callLLM() with sessionId (resume) or without (new)
     │     model: sonnet
-    │     maxTurns: 5 (CC) or 3 (doc)
+    │     maxTurns: 25 (CC) or 10 (doc-plan) or 1 (doc-other)
     │     allowedTools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch
-    │     timeout: 300s (CC) or 120s (doc)
+    │     timeout: 600s (CC) or 300s (doc-plan) or 60s (doc-other)
     │
     ▼
 spawn-agent.js

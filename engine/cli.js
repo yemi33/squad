@@ -65,7 +65,7 @@ const commands = {
     console.log(`Engine started (PID: ${process.pid})`);
 
     const config = getConfig();
-    const interval = config.engine?.tickInterval || 60000;
+    const interval = config.engine?.tickInterval || shared.ENGINE_DEFAULTS.tickInterval;
 
     const { getProjects } = require('./shared');
     const projects = getProjects(config);

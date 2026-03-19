@@ -28,7 +28,8 @@ const _processingFiles = new Set(); // files currently being consolidated (race 
 
 function consolidateInbox(config) {
   const e = engine();
-  const threshold = config.engine?.inboxConsolidateThreshold || 3;
+  const { ENGINE_DEFAULTS } = shared;
+  const threshold = config.engine?.inboxConsolidateThreshold || ENGINE_DEFAULTS.inboxConsolidateThreshold;
   const files = getInboxFiles().filter(f => !_processingFiles.has(f));
   if (files.length < threshold) return;
   // Auto-reset stale flag if consolidation has been running for >5 minutes (process died without cleanup)

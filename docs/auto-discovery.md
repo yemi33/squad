@@ -12,7 +12,7 @@ tick()
   2. consolidateInbox()         Merge learnings into notes.md (Haiku-powered)
   2.5 runCleanup()              Periodic cleanup (every 10 ticks ≈ 10min)
   2.6 pollPrStatus()            Poll ADO for build, review, merge status (every 6 ticks ≈ 6min)
-  2.7 pollPrHumanComments()     Poll PR threads for human @squad comments (every 12 ticks ≈ 6min)
+  2.7 pollPrHumanComments()     Poll PR threads for human @squad comments (every 12 ticks ≈ 12min)
   3. discoverWork()             Scan ALL linked projects for new tasks
   4. updateSnapshot()           Write identity/now.md
   5. dispatch                   Spawn agents for pending items (up to maxConcurrent)
