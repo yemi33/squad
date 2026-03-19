@@ -420,6 +420,80 @@ async function initSquad({ skipScan = false, scanRoot, scanDepth } = {}) {
   rl.close();
 }
 
+function nukeSquad() {
+  console.log('\n  Squad Factory Reset');
+  console.log('  ===================\n');
+
+  // 1. Kill engine process
+  const controlPath = path.join(SQUAD_HOME, 'engine', 'control.json');
+  try {
+    const control = JSON.parse(fs.readFileSync(controlPath, 'utf8'));
+    if (control.pid) {
+      try {
+        process.kill(control.pid);
+        console.log(`  Killed engine (PID: ${control.pid})`);
+      } catch { console.log(`  Engine process ${control.pid} already dead`); }
+    }
+  } catch {}
+
+  // 2. Kill dashboard (port 7331)
+  try {
+    if (process.platform === 'win32') {
+      const { execSync } = require('child_process');
+      const out = execSync('netstat -ano | findstr :7331 | findstr LISTENING', { encoding: 'utf8', timeout: 5000, windowsHide: true });
+      const pids = [...new Set(out.split('\n').map(l => l.trim().split(/\s+/).pop()).filter(p => p && p !== '0'))];
+      for (const pid of pids) {
+        try { execSync(`taskkill /F /PID ${pid}`, { windowsHide: true, timeout: 5000 }); console.log(`  Killed dashboard (PID: ${pid})`); } catch {}
+      }
+    } else {
+      const { execSync } = require('child_process');
+      try { execSync('lsof -ti:7331 | xargs kill -9 2>/dev/null', { timeout: 5000 }); console.log('  Killed dashboard'); } catch {}
+    }
+  } catch {}
+
+  // 3. Kill all agent processes (PID files in engine/tmp/)
+  const pidDir = path.join(SQUAD_HOME, 'engine', 'tmp');
+  try {
+    const pidFiles = fs.readdirSync(pidDir).filter(f => f.endsWith('.pid'));
+    for (const f of pidFiles) {
+      try {
+        const pid = parseInt(fs.readFileSync(path.join(pidDir, f), 'utf8').trim());
+        if (pid) { try { process.kill(pid); console.log(`  Killed agent process (PID: ${pid})`); } catch {} }
+      } catch {}
+    }
+  } catch {}
+
+  // 4. Kill any remaining squad-related node processes
+  try {
+    const { execSync } = require('child_process');
+    if (process.platform === 'win32') {
+      // Find node processes with squad in their command line
+      const out = execSync('wmic process where "name=\'node.exe\'" get processid,commandline /format:csv', { encoding: 'utf8', timeout: 10000, windowsHide: true });
+      for (const line of out.split('\n')) {
+        if (line.includes('squad') && (line.includes('engine.js') || line.includes('dashboard.js') || line.includes('spawn-agent.js'))) {
+          const pid = line.split(',').pop()?.trim();
+          if (pid && pid !== String(process.pid)) {
+            try { execSync(`taskkill /F /PID ${pid}`, { windowsHide: true, timeout: 5000 }); console.log(`  Killed squad process (PID: ${pid})`); } catch {}
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 5. Delete ~/.squad/ entirely
+  console.log(`\n  Deleting ${SQUAD_HOME}...`);
+  try {
+    fs.rmSync(SQUAD_HOME, { recursive: true, force: true });
+    console.log('  Deleted.\n');
+  } catch (err) {
+    console.error(`  Failed to delete: ${err.message}`);
+    console.log('  Try manually: rm -rf ' + SQUAD_HOME + '\n');
+  }
+
+  console.log('  Factory reset complete. Run "squad init" to start fresh.\n');
+  rl.close();
+}
+
 const commands = {
   init: () => {
     const skipScanFlag = rest.includes('--skip-scan');
@@ -441,6 +515,7 @@ const commands = {
   list: () => listProjects(),
   scan: () => scanAndAdd({ root: rest[0], depth: rest[1] })
     .catch(e => { console.error(e); process.exit(1); }),
+  nuke: () => nukeSquad(),
 };
 
 if (cmd && commands[cmd]) {
@@ -449,12 +524,10 @@ if (cmd && commands[cmd]) {
   console.log('\n  Squad — Central AI dev team manager\n');
   console.log('  Usage: node squad <command>\n');
   console.log('  Commands:');
-  console.log('    init                    Initialize squad (no projects)');
+  console.log('    init                    Initialize squad, scan repos, auto-start engine + dashboard');
   console.log('    scan [dir] [depth]      Scan for git repos and multi-select to add');
   console.log('    add <project-dir>       Link a single project');
   console.log('    remove <project-dir>    Unlink a project');
-  console.log('    list                    List linked projects\n');
-  console.log('  After init, also use:');
-  console.log('    node ~/.squad/engine.js          Start engine');
-  console.log('    node ~/.squad/dashboard.js        Start dashboard\n');
+  console.log('    list                    List linked projects');
+  console.log('    nuke                    Factory reset — kill all processes, delete ~/.squad/\n');
 }
