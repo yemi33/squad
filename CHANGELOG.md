@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.71 (2026-03-19)
+
+### Other
+- test/demo-screenshots/01-dashboard-overview.png
+- test/demo-screenshots/02-dashboard-workitems-prd.png
+- test/demo-screenshots/03-dashboard-bottom.png
+- test/demo-screenshots/04-cc-plan-request.png
+- test/demo-screenshots/05-cc-work-item.png
+- test/demo-screenshots/06-work-items-table.png
+- test/demo-screenshots/07-work-item-retry-button.png
+- test/demo-screenshots/08-plans-section.png
+- test/demo-screenshots/09-plan-detail-modal.png
+- test/demo-screenshots/10-prd-progress.png
+- test/demo-screenshots/11-inbox-section.png
+- test/demo-screenshots/12-dispatch-queue.png
+- test/demo-screenshots/13-agent-metrics.png
+- test/demo-screenshots/14-full-page.png
+- test/demo.html
+- test/record-demo.js
+- test/scenarios.md
+- test/seed-demo-data.js
+
 ## 0.1.70 (2026-03-19)
 
 ### Engine
