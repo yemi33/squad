@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.59 (2026-03-19)
+
+### Engine
+- engine.js
+- engine/lifecycle.js
+- engine/shared.js
+
+### Other
+- .claude/skills/run-tests/SKILL.md
+- test/squad-tests.js
+- test/unit.test.js
+
 ## 0.1.58 (2026-03-19)
 
 ### Engine
