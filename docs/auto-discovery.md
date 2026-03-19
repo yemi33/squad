@@ -368,7 +368,7 @@ Two layers of protection:
 | Pull requests | 30 minutes | After dispatching a review, won't re-queue for 30min |
 | Work items | 0 (immediate) | No cooldown, but item status changes to "dispatched" |
 
-Cooldowns are **in-memory only**. On engine restart, `isAlreadyDispatched()` still prevents duplicates by checking the pending/active queue in `dispatch.json`. The cooldown just prevents rapid re-discovery within a single engine session.
+Cooldowns are persisted to `engine/cooldowns.json` and reloaded on engine startup. Entries older than 24 hours are pruned. `isAlreadyDispatched()` still provides an additional guard by checking pending/active and recently completed dispatches in `dispatch.json`.
 
 ## Configuration Reference
 
