@@ -6,6 +6,7 @@
  */
 
 const http = require('http');
+const zlib = require('zlib');
 const fs = require('fs');
 const path = require('path');
 const llm = require('./engine/llm');
@@ -50,6 +51,8 @@ function resolvePlanPath(file) {
 
 const HTML_RAW = safeRead(path.join(SQUAD_DIR, 'dashboard.html')) || '';
 const HTML = HTML_RAW.replace('Squad Mission Control', `Squad Mission Control — ${projectNames}`);
+const HTML_GZ = zlib.gzipSync(HTML);
+const HTML_ETAG = '"' + require('crypto').createHash('md5').update(HTML).digest('hex') + '"';
 
 
 // -- Data Collectors (most moved to engine/queries.js) --
@@ -117,6 +120,7 @@ function getStatus() {
     mcpServers: getMcpServers(),
     projects: PROJECTS.map(p => ({ name: p.name, path: p.localPath, description: p.description || '' })),
     initialized: !!(CONFIG.agents && Object.keys(CONFIG.agents).length > 0),
+    installId: safeRead(path.join(SQUAD_DIR, '.install-id')).trim() || null,
     timestamp: new Date().toISOString(),
   };
   _statusCacheTs = now;
@@ -486,11 +490,18 @@ function readBody(req) {
   });
 }
 
-function jsonReply(res, code, data) {
+function jsonReply(res, code, data, req) {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.statusCode = code;
-  res.end(JSON.stringify(data));
+  const json = JSON.stringify(data);
+  const ae = req && req.headers && req.headers['accept-encoding'] || '';
+  if (ae.includes('gzip') && json.length > 1024) {
+    res.setHeader('Content-Encoding', 'gzip');
+    res.end(zlib.gzipSync(json));
+  } else {
+    res.end(json);
+  }
 }
 
 // -- Dispatch cleanup helper --
@@ -2492,21 +2503,31 @@ What would you like to discuss or change? When you're happy, say "approve" and I
   }
 
   if (req.url === '/api/status') {
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Access-Control-Allow-Origin', '*');
     try {
-      res.end(JSON.stringify(getStatus()));
+      return jsonReply(res, 200, getStatus(), req);
     } catch (e) {
-      res.statusCode = 500;
-      res.end(JSON.stringify({ error: e.message }));
+      return jsonReply(res, 500, { error: e.message }, req);
     }
-    return;
   }
 
   // (duplicate /api/health removed — first handler above is the canonical one)
 
+  // Serve dashboard HTML with gzip + caching
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.end(HTML);
+  res.setHeader('ETag', HTML_ETAG);
+  res.setHeader('Cache-Control', 'no-cache'); // revalidate each time, but use 304 if unchanged
+  if (req.headers['if-none-match'] === HTML_ETAG) {
+    res.statusCode = 304;
+    res.end();
+    return;
+  }
+  const ae = req.headers['accept-encoding'] || '';
+  if (ae.includes('gzip')) {
+    res.setHeader('Content-Encoding', 'gzip');
+    res.end(HTML_GZ);
+  } else {
+    res.end(HTML);
+  }
 });
 
 server.listen(PORT, '127.0.0.1', () => {

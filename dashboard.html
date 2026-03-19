@@ -2140,6 +2140,15 @@ function shortTime(t) {
 async function refresh() {
   try {
     const data = await fetch('/api/status').then(r => r.json());
+    // Detect fresh install — clear stale browser state if install ID changed
+    if (data.installId) {
+      const prev = localStorage.getItem('squad-install-id');
+      if (prev && prev !== data.installId) {
+        localStorage.clear();
+        console.log('Squad: fresh install detected, cleared browser state');
+      }
+      localStorage.setItem('squad-install-id', data.installId);
+    }
     document.getElementById('ts').textContent = new Date(data.timestamp).toLocaleTimeString();
     document.getElementById('setup-banner').style.display = data.initialized ? 'none' : 'block';
     renderAgents(data.agents);

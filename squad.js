@@ -398,25 +398,6 @@ async function initSquad({ skipScan = false, scanRoot, scanDepth } = {}) {
     await scanAndAdd({ root: scanRoot, depth: scanDepth });
   }
 
-  // Auto-start engine and dashboard
-  console.log('  Starting engine and dashboard...\n');
-  const { spawn } = require('child_process');
-  const enginePath = path.join(SQUAD_HOME, 'engine.js');
-  const dashboardPath = path.join(SQUAD_HOME, 'dashboard.js');
-
-  const engineProc = spawn(process.execPath, [enginePath], {
-    cwd: SQUAD_HOME, stdio: 'ignore', detached: true, windowsHide: true
-  });
-  engineProc.unref();
-  console.log(`  Engine started (PID: ${engineProc.pid})`);
-
-  const dashProc = spawn(process.execPath, [dashboardPath], {
-    cwd: SQUAD_HOME, stdio: 'ignore', detached: true, windowsHide: true
-  });
-  dashProc.unref();
-  console.log(`  Dashboard started (PID: ${dashProc.pid})`);
-  console.log('  Dashboard: http://localhost:7331\n');
-
   rl.close();
 }
 
@@ -550,7 +531,7 @@ if (cmd && commands[cmd]) {
   console.log('\n  Squad — Central AI dev team manager\n');
   console.log('  Usage: node squad <command>\n');
   console.log('  Commands:');
-  console.log('    init                    Initialize squad, scan repos, auto-start engine + dashboard');
+  console.log('    init                    Initialize squad and scan for repos');
   console.log('    scan [dir] [depth]      Scan for git repos and multi-select to add');
   console.log('    add <project-dir>       Link a single project');
   console.log('    remove <project-dir>    Unlink a project');

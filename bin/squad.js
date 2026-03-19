@@ -119,6 +119,13 @@ function init() {
   // Save version
   saveInstalledVersion(pkgVersion);
 
+  // Generate install ID on fresh init (tells dashboard to clear stale browser state)
+  const installIdPath = path.join(SQUAD_HOME, '.install-id');
+  if (!isUpgrade || !fs.existsSync(installIdPath)) {
+    const crypto = require('crypto');
+    fs.writeFileSync(installIdPath, crypto.randomBytes(8).toString('hex'));
+  }
+
   // Print summary
   console.log('');
   if (actions.updated.length > 0) {
@@ -141,10 +148,20 @@ function init() {
   }
 
   if (!isUpgrade) {
-    console.log('\n  Next steps:');
-    console.log('    squad add ~/my-project    Link your first project');
-    console.log('    squad start               Start the engine');
-    console.log('    squad dash                Open the dashboard\n');
+    // Auto-start engine and dashboard
+    console.log('\n  Starting engine and dashboard...\n');
+    const engineProc = spawn(process.execPath, [path.join(SQUAD_HOME, 'engine.js'), 'start'], {
+      cwd: SQUAD_HOME, stdio: 'ignore', detached: true, windowsHide: true
+    });
+    engineProc.unref();
+    console.log(`  Engine started (PID: ${engineProc.pid})`);
+
+    const dashProc = spawn(process.execPath, [path.join(SQUAD_HOME, 'dashboard.js')], {
+      cwd: SQUAD_HOME, stdio: 'ignore', detached: true, windowsHide: true
+    });
+    dashProc.unref();
+    console.log(`  Dashboard started (PID: ${dashProc.pid})`);
+    console.log('  Dashboard: http://localhost:7331\n');
   } else {
     console.log(`\n  Upgrade complete (${pkgVersion}). Restart the engine: squad stop && squad start\n`);
   }
