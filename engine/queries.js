@@ -111,7 +111,7 @@ function getInbox() {
 // dispatch.active entry for this agent → working
 // dispatch.completed (most recent) → done/error
 // neither → idle
-// Metadata (resultSummary, verdict, pr) stored in status.json as secondary store.
+// Metadata (resultSummary, verdict, pr) is carried on dispatch entries.
 function getAgentStatus(agentId) {
   const dispatch = getDispatch();
 
@@ -124,7 +124,7 @@ function getAgentStatus(agentId) {
       dispatch_id: active.id,
       type: active.type || '',
       branch: active.meta?.branch || '',
-      started_at: active.created_at || null,
+      started_at: active.started_at || active.created_at || null,
     };
   }
 
@@ -436,7 +436,16 @@ function getWorkItems(config) {
     }
   }
 
-  const statusOrder = { pending: 0, queued: 0, dispatched: 1, done: 2 };
+  const statusOrder = {
+    pending: 0,
+    queued: 0,
+    dispatched: 1,
+    'in-pr': 2,
+    done: 3,
+    implemented: 3,
+    failed: 4,
+    paused: 5,
+  };
   allItems.sort((a, b) => {
     const sa = statusOrder[a.status] ?? 1;
     const sb = statusOrder[b.status] ?? 1;

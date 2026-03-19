@@ -217,7 +217,15 @@ const commands = {
           }
 
           // Move from active to completed in dispatch
-          try { e.completeDispatch(item.id, result, isSuccess ? 'Completed (orphan recovery)' : 'Failed (orphan recovery)'); } catch {}
+          try {
+            e.completeDispatch(
+              item.id,
+              result,
+              isSuccess ? 'Completed (orphan recovery)' : 'Failed (orphan recovery)',
+              '',
+              { processWorkItemFailure: false }
+            );
+          } catch {}
 
           // Check plan completion
           if (isSuccess && item.meta?.item?.sourcePlan) {

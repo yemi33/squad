@@ -119,6 +119,9 @@ function getRouting() {
 
 // ─── Routing Parser ─────────────────────────────────────────────────────────
 
+let _routingCache = null;
+let _routingCacheMtime = 0;
+
 function parseRoutingTable() {
   const content = getRouting();
   const routes = {};
@@ -143,6 +146,15 @@ function parseRoutingTable() {
   return routes;
 }
 
+function getRoutingTableCached() {
+  let mtime = 0;
+  try { mtime = fs.statSync(ROUTING_PATH).mtimeMs; } catch {}
+  if (_routingCache && _routingCacheMtime === mtime) return _routingCache;
+  _routingCache = parseRoutingTable();
+  _routingCacheMtime = mtime;
+  return _routingCache;
+}
+
 function getAgentErrorRate(agentId) {
   const metricsPath = path.join(ENGINE_DIR, 'metrics.json');
   const metrics = safeJson(metricsPath) || {};
@@ -163,7 +175,7 @@ const _claimedAgents = new Set();
 function resetClaimedAgents() { _claimedAgents.clear(); }
 
 function resolveAgent(workType, config, authorAgent = null) {
-  const routes = parseRoutingTable();
+  const routes = getRoutingTableCached();
   const route = routes[workType] || routes['implement'];
   const agents = config.agents || {};
 
@@ -926,7 +938,8 @@ function addToDispatch(item) {
   return item.id;
 }
 
-function completeDispatch(id, result = 'success', reason = '', resultSummary = '') {
+function completeDispatch(id, result = 'success', reason = '', resultSummary = '', opts = {}) {
+  const { processWorkItemFailure = true } = opts;
   const dispatch = getDispatch();
 
   // Check active list first
@@ -959,8 +972,9 @@ function completeDispatch(id, result = 'success', reason = '', resultSummary = '
     log('info', `Completed dispatch: ${id} (${result}${reason ? ': ' + reason : ''})`);
 
     // Update source work item status on failure + auto-retry with backoff
-    if (result === 'error' && item.meta?.item?.id) {
-      if (item.meta?.dispatchKey) setCooldownFailure(item.meta.dispatchKey);
+    if (result === 'error' && item.meta?.dispatchKey) setCooldownFailure(item.meta.dispatchKey);
+
+    if (processWorkItemFailure && result === 'error' && item.meta?.item?.id) {
       const retries = (item.meta.item._retryCount || 0);
       if (retries < 3) {
         log('info', `Dispatch error for ${item.meta.item.id} — auto-retry ${retries + 1}/3`);
@@ -1003,8 +1017,6 @@ function completeDispatch(id, result = 'success', reason = '', resultSummary = '
           );
         } catch {}
       }
-    } else if (result === 'error') {
-      if (item.meta?.dispatchKey) setCooldownFailure(item.meta.dispatchKey);
     }
   }
 }
@@ -1304,7 +1316,7 @@ function checkTimeouts(config) {
 
   // Clean up dead items
   for (const { item, reason } of deadItems) {
-    completeDispatch(item.id, 'error', reason);
+    completeDispatch(item.id, 'error', reason, '', { processWorkItemFailure: false });
     if (item.meta?.item?.id) updateWorkItemStatus(item.meta, 'failed', reason);
   }
 

@@ -26,7 +26,7 @@ Before scanning, the engine materializes plans and specs into project work items
 
 ### Source 1: Pull Requests (`discoverFromPrs`)
 
-**Reads:** `<project>/.squad/pull-requests.json`
+**Reads:** `~/.squad/projects/<project>/pull-requests.json`
 
 | PR State | Action | Dispatch Type |
 |----------|--------|---------------|
@@ -48,7 +48,7 @@ PRD items flow through `materializePlansAsWorkItems()`, which scans `~/.squad/pr
 
 ### Source 3: Per-Project Work Items (`discoverFromWorkItems`)
 
-**Reads:** `<project>/.squad/work-items.json`
+**Reads:** `~/.squad/projects/<project>/work-items.json`
 
 | Item State | Action | Dispatch Type |
 |------------|--------|---------------|
@@ -249,7 +249,7 @@ claude -p <prompt-file> --system-prompt <sysprompt-file> \
 - CLAUDECODE env vars stripped to allow nested sessions
 
 ### 6. Track State
-- Agent status → `working` in `agents/<name>/status.json`
+- Agent status derived from dispatch queue (`engine/dispatch.json`)
 - Dispatch item → moved from `pending` to `active` in `dispatch.json`
 - Process tracked in `activeProcesses` Map for timeout monitoring
 
@@ -262,7 +262,7 @@ proc.on('close')
   │
   ├─ Save output to agents/<name>/output.log
   │
-  ├─ Set agent status to "done" (exit 0) or "error" (non-zero)
+  ├─ Dispatch completion determines visible agent status ("done"/"error")
   │
   ├─ Move dispatch item: active → completed
   │
@@ -326,8 +326,8 @@ ADO REST API ─── pollPrBuildStatus() ──► pull-requests.json
                                             │
                                ┌────────────┼────────────┐
                                ▼            ▼            ▼
-                          worktree     claude CLI    status.json
-                          (in project   (max 100      (working)
+                          worktree     claude CLI    dispatch.json
+                          (in project   (max 100      (active/completed)
                            repo dir)     turns)
                                             │
                                         on exit:
@@ -396,12 +396,12 @@ All discovery behavior is controlled via `config.json`:
         },
         "pullRequests": {
           "enabled": true,
-          "path": ".squad/pull-requests.json",
+          "path": "projects/<name>/pull-requests.json",
           "cooldownMinutes": 30
         },
         "workItems": {
           "enabled": true,
-          "path": ".squad/work-items.json",
+          "path": "projects/<name>/work-items.json",
           "cooldownMinutes": 0
         }
       }

@@ -163,9 +163,9 @@ You can also run scripts directly: `node ~/.squad/engine.js start`, `node ~/.squ
               ▼            ▼                ▼
      ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
      │  Project A   │ │  Project B   │ │  Project C   │
-     │  .squad/     │ │  .squad/     │ │  .squad/     │
-     │   work-items │ │   work-items │ │   work-items │
-     │   pull-reqs  │ │   pull-reqs  │ │   pull-reqs  │
+     │ projects/A   │ │ projects/B   │ │ projects/C   │
+     │  work-items  │ │  work-items  │ │  work-items  │
+     │  pull-reqs   │ │  pull-reqs   │ │  pull-reqs   │
      │  .claude/    │ │  .claude/    │ │  .claude/    │
      │   skills/    │ │   skills/    │ │   skills/    │
      └──────────────┘ └──────────────┘ └──────────────┘
@@ -247,7 +247,7 @@ When you run `squad add <dir>`, it prompts for project details and saves them to
 - `adoProject` — ADO project name (leave blank for GitHub).
 - `workSources` — toggle which work sources the engine scans for each project.
 
-The init script also creates `<project>/.squad/` with empty `work-items.json` and `pull-requests.json`.
+Per-project runtime state is stored centrally at `~/.squad/projects/<project-name>/work-items.json` and `~/.squad/projects/<project-name>/pull-requests.json`.
 
 ### Auto-Discovery
 
@@ -353,7 +353,7 @@ No bash or shell involved — Node spawns Node directly. Prompts with special ch
 ### What Each Agent Gets
 
 - **System prompt** — lean (~2-4KB) identity + rules only
-- **Task prompt** — rendered playbook with `{{variables}}` filled from config, plus bulk context (charter, history, project context, skill index, team notes)
+- **Task prompt** — rendered playbook with `{{variables}}` filled from config, plus bulk context (charter, history, project context, active PR/dispatch context, team notes). Skills/KB are referenced by path and loaded on-demand.
 - **Working directory** — project root (agent creates worktrees as needed)
 - **MCP servers** — inherited from `~/.claude.json` (no extra config needed)
 - **Full tool access** — all built-in tools plus all MCP tools
@@ -364,7 +364,7 @@ No bash or shell involved — Node spawns Node directly. Prompts with special ch
 
 When an agent finishes:
 1. Output saved to `agents/<name>/output.log`
-2. Agent status updated (done/error)
+2. Agent status derived from `engine/dispatch.json` (done/error/working)
 3. Work item status updated (done/failed, with auto-retry up to 3x)
 4. PRs auto-synced from output → correct project's `pull-requests.json` (per-URL matching)
 5. "No PR" detection — implement/fix tasks that complete without creating a PR get flagged (`noPr: true`)
@@ -556,7 +556,6 @@ To move to a new machine: `npm install -g @yemi33/squad && squad init --force`, 
   agents/
     {name}/
       charter.md         <- Agent identity and boundaries (editable)
-      status.json        <- Current state (runtime, generated)
       history.md         <- Task history, last 20 (runtime, generated)
       live-output.log    <- Streaming output while working (runtime, generated)
       output.log         <- Final output after completion (runtime, generated)
@@ -573,9 +572,12 @@ To move to a new machine: `npm install -g @yemi33/squad && squad init --force`, 
     engine-restart.md    <- Engine restart and recovery procedures
 
 Each linked project keeps locally:
-  <project>/.squad/
-    work-items.json      <- Per-project work queue
-    pull-requests.json   <- PR tracker
   <project>/.claude/
     skills/              <- Project-specific skills (requires PR)
+
+Per-project engine state remains centralized:
+  ~/.squad/projects/<project-name>/
+    work-items.json      <- Per-project work queue
+    pull-requests.json   <- PR tracker
 ```
+

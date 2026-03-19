@@ -9,7 +9,7 @@ When the engine restarts, it loses its in-memory process handles (`activeProcess
 | State | Storage | Survives Restart |
 |-------|---------|-----------------|
 | Dispatch queue (pending/active/completed) | `engine/dispatch.json` | Yes |
-| Agent status (working/idle/error) | `agents/*/status.json` | Yes |
+| Agent status (working/idle/error) | Derived from `engine/dispatch.json` | Yes |
 | Agent live output | `agents/*/live-output.log` | Yes (mtime used as heartbeat) |
 | Process handles (`ChildProcess`) | In-memory Map | **No** |
 | Cooldown timestamps | In-memory Map | **No** (repopulated from `engine/cooldowns.json`) |

@@ -469,6 +469,12 @@ async function testQueriesAgents() {
     }
   });
 
+  await test('getAgentStatus prefers started_at over created_at for active dispatch', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine', 'queries.js'), 'utf8');
+    assert.ok(src.includes('active.started_at || active.created_at'),
+      'getAgentStatus should prefer started_at for active dispatches');
+  });
+
   await test('getAgents returns array with agent metadata', () => {
     const agents = queries.getAgents();
     assert.ok(Array.isArray(agents));
@@ -498,7 +504,16 @@ async function testQueriesWorkItems() {
     const items = queries.getWorkItems();
     assert.ok(Array.isArray(items));
     // Verify sort order: pending before dispatched before done
-    const statusOrder = { pending: 0, queued: 0, dispatched: 1, done: 2 };
+    const statusOrder = {
+      pending: 0,
+      queued: 0,
+      dispatched: 1,
+      'in-pr': 2,
+      done: 3,
+      implemented: 3,
+      failed: 4,
+      paused: 5,
+    };
     for (let i = 1; i < items.length; i++) {
       const prevOrder = statusOrder[items[i - 1].status] ?? 1;
       const currOrder = statusOrder[items[i].status] ?? 1;
@@ -1232,6 +1247,16 @@ async function testPrReviewFixCycle() {
       'Human fix key should not include timestamp (prevents cooldown bypass)');
     assert.ok(src.includes("human-fix-${project?.name || 'default'}-${pr.id}`"),
       'Human fix key should be PR-level only');
+  });
+
+  await test('routing parser uses mtime cache to avoid reparsing every resolve', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes('function getRoutingTableCached()'),
+      'engine should use a cached routing table helper');
+    assert.ok(src.includes('_routingCacheMtime'),
+      'routing cache should track routing.md mtime');
+    assert.ok(src.includes('const routes = getRoutingTableCached();'),
+      'resolveAgent should use cached routes');
   });
 
   await test('PRs with active dispatch are skipped (race prevention)', () => {
