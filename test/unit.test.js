@@ -1095,8 +1095,18 @@ async function testPrdStaleInvalidation() {
     const html = fs.readFileSync(path.join(SQUAD_DIR, 'dashboard.html'), 'utf8');
     assert.ok(html.includes('prdRegenerate('),
       'dashboard.html should have prdRegenerate function call');
-    assert.ok(html.includes('Regenerate PRD?'),
-      'dashboard.html should show Regenerate PRD? label');
+    assert.ok(html.includes('Regenerate now'),
+      'dashboard.html should show a clear regenerate action label');
+  });
+
+  await test('Dashboard stale PRD UX explains meaning and recovery', () => {
+    const html = fs.readFileSync(path.join(SQUAD_DIR, 'dashboard.html'), 'utf8');
+    assert.ok(html.includes('STALE'),
+      'dashboard should visibly label stale PRDs');
+    assert.ok(html.includes('Source plan was revised. This PRD may be outdated.'),
+      'dashboard should explain why stale appears');
+    assert.ok(html.includes('Regenerate now'),
+      'dashboard should present explicit stale recovery action');
   });
 
   await test('Dashboard shows immediate PRD retry feedback states', () => {
