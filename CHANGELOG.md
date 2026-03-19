@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.64 (2026-03-19)
+
+### Engine
+- engine.js
+- engine/cli.js
+- engine/lifecycle.js
+
+### Dashboard
+- dashboard.js
+
+### Playbooks
+- plan-to-prd.md
+
+### Other
+- test/unit.test.js
+
 ## 0.1.63 (2026-03-19)
 
 ### Engine
