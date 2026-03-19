@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.75 (2026-03-19)
+
+### Other
+- squad.js
+
 ## 0.1.74 (2026-03-19)
 
 ### Dashboard
