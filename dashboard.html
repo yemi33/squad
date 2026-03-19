@@ -530,6 +530,7 @@
   .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 400; align-items: center; justify-content: center; }
   .modal-bg.open { display: flex; }
   .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); width: 95%; max-width: 1100px; max-height: 80vh; display: flex; flex-direction: column; }
+  .modal.modal-wide { width: 98vw; max-width: 1500px; }
   .modal-header { padding: var(--space-7) var(--space-8); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
   .modal-header h3 { font-size: var(--text-xl); color: var(--blue); }
   .modal-header-actions { display: flex; align-items: center; gap: var(--space-4); }
@@ -1927,6 +1928,8 @@ function prPrev() { if (prPage > 0) { prPage--; renderPrs(allPrs); } }
 function prNext() { const totalPages = Math.ceil(allPrs.length / PR_PER_PAGE); if (prPage < totalPages-1) { prPage++; renderPrs(allPrs); } }
 
 function openAllPrs() {
+  const modalEl = document.querySelector('#modal .modal');
+  if (modalEl) modalEl.classList.add('modal-wide');
   document.getElementById('modal-title').textContent = 'All Pull Requests (' + allPrs.length + ')';
   document.getElementById('modal-body').innerHTML = prTableHtml(allPrs.map(prRow).join(''));
   document.getElementById('modal-body').style.fontFamily = "'Segoe UI', system-ui, sans-serif";
@@ -1949,6 +1952,8 @@ function openModal(i) {
   document.getElementById('modal').classList.add('open');
 }
 function closeModal() {
+  const modalEl = document.querySelector('#modal .modal');
+  if (modalEl) modalEl.classList.remove('modal-wide');
   document.getElementById('modal').classList.remove('open');
   // Hide Q&A section (only shown for document modals)
   document.getElementById('modal-qa').style.display = 'none';
