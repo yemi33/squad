@@ -838,6 +838,10 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+function normalizePlanFile(file) {
+  return String(file || '').replace(/\\/g, '/').split('/').pop();
+}
+
 function timeAgo(isoStr) {
   if (!isoStr) return '';
   const ms = Date.now() - new Date(isoStr).getTime();
@@ -1658,10 +1662,11 @@ async function planRegeneratePRD(source) {
 // Feature 2: Open plan in doc-chat modal for natural language editing
 async function planOpenInDocChat(file) {
   try {
-    const raw = await fetch('/api/plans/' + encodeURIComponent(file)).then(r => r.text());
-    let title = file;
+    const normalizedFile = normalizePlanFile(file);
+    const raw = await fetch('/api/plans/' + encodeURIComponent(normalizedFile)).then(r => r.text());
+    let title = normalizedFile;
     let text = raw;
-    if (file.endsWith('.json')) {
+    if (normalizedFile.endsWith('.json')) {
       try { title = JSON.parse(raw).plan_summary || file; } catch {}
     }
     document.getElementById('modal-title').textContent = 'Edit: ' + title;
@@ -1669,7 +1674,7 @@ async function planOpenInDocChat(file) {
     document.getElementById('modal-body').style.fontFamily = 'Consolas, monospace';
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
     _modalDocContext = { title: title, content: text, selection: '' };
-    _modalFilePath = (file.endsWith('.json') ? 'prd/' : 'plans/') + file; showModalQa();
+    _modalFilePath = (normalizedFile.endsWith('.json') ? 'prd/' : 'plans/') + normalizedFile; showModalQa();
     const card = findCardForFile(_modalFilePath);
     if (card) clearNotifBadge(card);
     document.getElementById('modal').classList.add('open');
@@ -3925,16 +3930,17 @@ async function planDiscuss(file) {
 
 async function planView(file) {
   try {
-    const planRes = await fetch('/api/plans/' + encodeURIComponent(file));
+    const normalizedFile = normalizePlanFile(file);
+    const planRes = await fetch('/api/plans/' + encodeURIComponent(normalizedFile));
     const lastMod = planRes.headers.get('Last-Modified');
     const raw = await planRes.text();
-    let title = file;
+    let title = normalizedFile;
     let text = '';
 
-    if (file.endsWith('.json')) {
+    if (normalizedFile.endsWith('.json')) {
       // PRD JSON — format nicely
       const plan = JSON.parse(raw);
-      title = plan.plan_summary || file;
+      title = plan.plan_summary || normalizedFile;
       const items = (plan.missing_features || []).map((f, i) =>
         (i + 1) + '. [' + f.id + '] ' + f.name + ' (' + (f.estimated_complexity || '?') + ', ' + (f.priority || '?') + ')' +
         (f.depends_on?.length ? ' → depends on: ' + f.depends_on.join(', ') : '') +
@@ -3956,41 +3962,41 @@ async function planView(file) {
     }
 
     // Determine plan type and status for action buttons
-    const isMdPlan = file.endsWith('.md');
+    const isMdPlan = normalizedFile.endsWith('.md');
     let planStatus = '';
-    try { if (file.endsWith('.json')) planStatus = JSON.parse(raw).status || ''; } catch {}
+    try { if (normalizedFile.endsWith('.json')) planStatus = JSON.parse(raw).status || ''; } catch {}
     const isActive = planStatus === 'approved' || planStatus === 'active';
     const isPaused = planStatus === 'awaiting-approval' || planStatus === 'paused';
     // Check if work is in progress for this plan
     const wi = window._lastWorkItems || [];
     const hasActiveWork = wi.some(w =>
       (w.status === 'pending' || w.status === 'dispatched') &&
-      (w.planFile === file || w.sourcePlan === file ||
+      (w.planFile === normalizedFile || w.sourcePlan === normalizedFile ||
        // For .md plans: any work item with a sourcePlan .json means the plan is being executed
-       (isMdPlan && w.sourcePlan && w.sourcePlan.endsWith('.json')))
+        (isMdPlan && w.sourcePlan && w.sourcePlan.endsWith('.json')))
     );
-    const prdCompleted = wi.some(w => w.type === 'plan-to-prd' && w.status === 'done' && w.planFile === file);
+    const prdCompleted = wi.some(w => w.type === 'plan-to-prd' && w.status === 'done' && w.planFile === normalizedFile);
     const modalExecuteBtn = isMdPlan && !hasActiveWork && !prdCompleted ? '<button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--green);font-weight:600" ' +
-      'onclick="planExecute(\'' + escHtml(file) + '\',\'\',this)">Execute</button>' : '';
+      'onclick="planExecute(\'' + escHtml(normalizedFile) + '\',\'\',this)">Execute</button>' : '';
     const modalCompletedLabel = prdCompleted && !hasActiveWork ? '<span style="font-size:10px;color:var(--green);font-weight:600">Completed</span>' : '';
     const modalInProgressLabel = hasActiveWork ? '<span style="font-size:10px;color:var(--blue)">In Progress</span>' : '';
     const modalPauseBtn = isActive && !isMdPlan ? '<button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--yellow)" ' +
-      'onclick="planPause(\'' + escHtml(file) + '\');closeModal()">Pause</button>' : '';
+      'onclick="planPause(\'' + escHtml(normalizedFile) + '\');closeModal()">Pause</button>' : '';
     const modalResumeBtn = isPaused ? '<button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--green)" ' +
-      'onclick="planApprove(\'' + escHtml(file) + '\');closeModal()">Resume</button>' : '';
+      'onclick="planApprove(\'' + escHtml(normalizedFile) + '\');closeModal()">Resume</button>' : '';
 
     const lastModLabel = lastMod ? '<div style="font-size:10px;color:var(--muted);font-weight:400;margin-top:2px">Last updated: ' + new Date(lastMod).toLocaleString() + '</div>' : '';
     const actionBtns = '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">' +
       (modalCompletedLabel || '') + (modalInProgressLabel || '') + (modalExecuteBtn || '') + (modalPauseBtn || '') + (modalResumeBtn || '') +
       ' <button class="pr-pager-btn" style="font-size:10px;padding:2px 10px;color:var(--red)" ' +
-      'onclick="planDelete(\'' + escHtml(file) + '\')">Delete</button>' +
+      'onclick="planDelete(\'' + escHtml(normalizedFile) + '\')">Delete</button>' +
     '</div>';
     document.getElementById('modal-title').innerHTML = escHtml(title) + lastModLabel + actionBtns;
     document.getElementById('modal-body').textContent = text;
     document.getElementById('modal-body').style.fontFamily = 'Consolas, monospace';
     document.getElementById('modal-body').style.whiteSpace = 'pre-wrap';
     _modalDocContext = { title, content: text, selection: '' };
-    _modalFilePath = (file.endsWith('.json') ? 'prd/' : 'plans/') + file; showModalQa();
+    _modalFilePath = (normalizedFile.endsWith('.json') ? 'prd/' : 'plans/') + normalizedFile; showModalQa();
     // Clear notification badge when opening this document
     const card = findCardForFile(_modalFilePath);
     if (card) clearNotifBadge(card);

@@ -1104,6 +1104,14 @@ async function testPrdStaleInvalidation() {
       'dashboard should prune stale PRD requeue feedback states');
   });
 
+  await test('Dashboard normalizes plan file paths before plan modal fetch', () => {
+    const html = fs.readFileSync(path.join(SQUAD_DIR, 'dashboard.html'), 'utf8');
+    assert.ok(html.includes('function normalizePlanFile(file)'),
+      'dashboard should normalize path-like plan references');
+    assert.ok(html.includes("fetch('/api/plans/' + encodeURIComponent(normalizedFile))"),
+      'plan modal should fetch using normalized file name');
+  });
+
   await test('Dashboard has /api/prd/regenerate endpoint', () => {
     const src = fs.readFileSync(path.join(SQUAD_DIR, 'dashboard.js'), 'utf8');
     assert.ok(src.includes('/api/prd/regenerate'),
