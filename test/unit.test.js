@@ -1460,6 +1460,16 @@ async function testConfigAndPlaybooks() {
     assert.ok(src.includes('Refusing to initialize Squad home inside package directory'),
       'init should fail fast when SQUAD_HOME is inside PKG_ROOT');
   });
+
+  await test('bin/squad force init restarts engine and dashboard automatically', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'bin', 'squad.js'), 'utf8');
+    assert.ok(src.includes('Upgrade complete (') && src.includes('Restarting engine and dashboard'),
+      'force upgrade should announce automatic restart');
+    assert.ok(src.includes('engine.js') && src.includes('stop'),
+      'force upgrade should stop engine before restart');
+    assert.ok(src.includes('Dashboard started (PID:'),
+      'init flow should still auto-start dashboard');
+  });
 }
 
 // ─── Integration-Level Tests (uses real state files) ─────────────────────────

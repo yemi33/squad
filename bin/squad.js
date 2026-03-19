@@ -162,24 +162,25 @@ function init() {
     showChangelog(installedVersion);
   }
 
-  if (!isUpgrade) {
-    // Auto-start engine and dashboard
-    console.log('\n  Starting engine and dashboard...\n');
-    const engineProc = spawn(process.execPath, [path.join(SQUAD_HOME, 'engine.js'), 'start'], {
-      cwd: SQUAD_HOME, stdio: 'ignore', detached: true, windowsHide: true
-    });
-    engineProc.unref();
-    console.log(`  Engine started (PID: ${engineProc.pid})`);
-
-    const dashProc = spawn(process.execPath, [path.join(SQUAD_HOME, 'dashboard.js')], {
-      cwd: SQUAD_HOME, stdio: 'ignore', detached: true, windowsHide: true
-    });
-    dashProc.unref();
-    console.log(`  Dashboard started (PID: ${dashProc.pid})`);
-    console.log('  Dashboard: http://localhost:7331\n');
-  } else {
-    console.log(`\n  Upgrade complete (${pkgVersion}). Restart the engine: squad stop && squad start\n`);
+  // Auto-start on fresh install; force-upgrade restarts automatically.
+  if (isUpgrade) {
+    try { execSync(`node "${path.join(SQUAD_HOME, 'engine.js')}" stop`, { stdio: 'ignore', cwd: SQUAD_HOME }); } catch {}
   }
+  console.log(isUpgrade
+    ? `\n  Upgrade complete (${pkgVersion}). Restarting engine and dashboard...\n`
+    : '\n  Starting engine and dashboard...\n');
+  const engineProc = spawn(process.execPath, [path.join(SQUAD_HOME, 'engine.js'), 'start'], {
+    cwd: SQUAD_HOME, stdio: 'ignore', detached: true, windowsHide: true
+  });
+  engineProc.unref();
+  console.log(`  Engine started (PID: ${engineProc.pid})`);
+
+  const dashProc = spawn(process.execPath, [path.join(SQUAD_HOME, 'dashboard.js')], {
+    cwd: SQUAD_HOME, stdio: 'ignore', detached: true, windowsHide: true
+  });
+  dashProc.unref();
+  console.log(`  Dashboard started (PID: ${dashProc.pid})`);
+  console.log('  Dashboard: http://localhost:7331\n');
 }
 
 function copyDir(src, dest, excludeTop, alwaysUpdate, neverOverwrite, isUpgrade, actions, relPath = '') {
