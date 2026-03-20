@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.106 (2026-03-20)
+
+### Engine
+- engine/queries.js
+
+### Other
+- test/unit.test.js
+
 ## 0.1.105 (2026-03-20)
 
 ### Engine
