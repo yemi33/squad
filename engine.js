@@ -707,10 +707,10 @@ function spawnAgent(dispatchItem, config) {
       log('info', `Reusing existing worktree for ${branchName}: ${existingWt}`);
       try { exec(`git fetch origin "${branchName}"`, { ..._gitOpts, cwd: rootDir }); } catch {}
       try { exec(`git pull origin "${branchName}"`, { ..._gitOpts, cwd: existingWt }); } catch {}
-    } else if (type === 'review' || type === 'test') {
-      // Review and test are reuse-only — if no existing worktree, run in rootDir rather than creating a new one
-      // (avoids expensive checkout on large repos when no worktree has already been set up)
-      log('info', `${type}: no existing worktree for ${branchName} — falling back to rootDir`);
+    } else if (type !== 'implement') {
+      // Only implement tasks may create new worktrees.
+      // Other task types are reuse-only: if no existing worktree, run in rootDir.
+      log('info', `${type}: no existing worktree for ${branchName} — creation disabled for non-implement tasks, falling back to rootDir`);
       branchName = null;
       worktreePath = null;
     } else {
@@ -792,14 +792,9 @@ function spawnAgent(dispatchItem, config) {
           cwd = worktreePath;
           log('warn', `Proceeding with recovered worktree after add failure for ${branchName}`);
         } else {
-        log('error', `Failed to create worktree for ${branchName}: ${err.message}${err.stderr ? '\n' + err.stderr.toString().slice(0, 500) : ''}`);
-        // Fall back to main directory for non-writing tasks
-        if (type === 'review' || type === 'analyze' || type === 'plan-to-prd' || type === 'plan') {
-          cwd = rootDir;
-        } else {
+          log('error', `Failed to create worktree for ${branchName}: ${err.message}${err.stderr ? '\n' + err.stderr.toString().slice(0, 500) : ''}`);
           completeDispatch(id, 'error', 'Worktree creation failed: ' + (err.message || '').slice(0, 200));
           return null;
-        }
         }
       }
     }
