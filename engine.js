@@ -1371,8 +1371,7 @@ function checkTimeouts(config) {
 
   // Clean up dead items
   for (const { item, reason } of deadItems) {
-    completeDispatch(item.id, 'error', reason, '', { processWorkItemFailure: false });
-    if (item.meta?.item?.id) updateWorkItemStatus(item.meta, 'failed', reason);
+    completeDispatch(item.id, 'error', reason);
   }
 
   // Agent status is now derived from dispatch.json at read time (getAgentStatus).

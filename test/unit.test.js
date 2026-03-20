@@ -1620,6 +1620,14 @@ async function testStateIntegrity() {
     assert.ok(src.includes("defaultValue: { pending: [], active: [], completed: [] }"),
       'dashboard dispatch mutations should normalize queue structure');
   });
+
+  await test('Hung timeout path uses normal auto-retry flow', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes("completeDispatch(item.id, 'error', reason);"),
+      'Hung/orphan cleanup should route through normal completeDispatch retry handling');
+    assert.ok(!src.includes("completeDispatch(item.id, 'error', reason, '', { processWorkItemFailure: false })"),
+      'Hung/orphan cleanup should not bypass work item retry handling');
+  });
 }
 
 // ─── Edge Cases ──────────────────────────────────────────────────────────────
