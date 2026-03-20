@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.103 (2026-03-20)
+
+### Other
+- bin/squad.js
+- test/unit.test.js
+
 ## 0.1.102 (2026-03-20)
 
 ### Dashboard
