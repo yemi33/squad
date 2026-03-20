@@ -41,8 +41,6 @@ function checkPlanCompletion(meta, config) {
   }
   const planItems = allWorkItems.filter(w => w.sourcePlan === planFile && w.itemType !== 'pr' && w.itemType !== 'verify');
   if (planItems.length === 0) return;
-  const completedStatuses = new Set(['done', 'in-pr', 'failed']);
-  if (!planItems.every(w => completedStatuses.has(w.status))) return;
 
   // Don't mark complete if not all plan features have been materialized as work items
   const totalPlanFeatures = (plan.missing_features || []).length;
@@ -51,9 +49,17 @@ function checkPlanCompletion(meta, config) {
     return;
   }
 
-  const doneItems = planItems.filter(w => w.status === 'done' || w.status === 'in-pr');
-  const failedItems = planItems.filter(w => w.status === 'failed');
-  const allDone = failedItems.length === 0;
+  // Hard completion gate: every PRD feature must be represented by a work item that reached in-pr.
+  const planFeatureIds = new Set((plan.missing_features || []).map(f => f.id).filter(Boolean));
+  const inPrFeatureIds = new Set(planItems.filter(w => w.status === 'in-pr').map(w => w.id).filter(Boolean));
+  const missingInPr = [...planFeatureIds].filter(id => !inPrFeatureIds.has(id));
+  if (missingInPr.length > 0) {
+    e.log('info', `Plan ${planFile}: waiting for in-pr on ${missingInPr.length}/${planFeatureIds.size} item(s)`);
+    return;
+  }
+
+  const doneItems = planItems.filter(w => w.status === 'in-pr');
+  const failedItems = [];
 
   // 1. Mark plan as completed
   plan.status = 'completed';

@@ -1225,6 +1225,16 @@ async function testPrdStaleInvalidation() {
     assert.ok(states.includes('plan-to-prd-queued'));
     assert.ok(states.indexOf('prd-approved') > states.indexOf('prd-regenerated:awaiting-approval'));
   });
+
+  await test('Plan completion requires every PRD feature to reach in-pr', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine', 'lifecycle.js'), 'utf8');
+    assert.ok(src.includes('Hard completion gate: every PRD feature'),
+      'Plan completion should enforce strict in-pr gate');
+    assert.ok(src.includes('missingInPr.length > 0'),
+      'Plan completion should block when any PRD feature is not in-pr');
+    assert.ok(src.includes("w.status === 'in-pr'"),
+      'Completion gate should be based on in-pr status');
+  });
 }
 
 // ─── LLM Module Tests ──────────────────────────────────────────────────────
