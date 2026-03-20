@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.96 (2026-03-20)
+
+### Engine
+- engine.js
+
+### Other
+- test/unit.test.js
+
 ## 0.1.95 (2026-03-20)
 
 ### Engine
