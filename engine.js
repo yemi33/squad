@@ -996,6 +996,23 @@ function addToDispatch(item) {
   return item.id;
 }
 
+function isRetryableFailureReason(reason = '') {
+  const r = String(reason || '').toLowerCase();
+  if (!r) return true; // unknown error from tool exit — keep retryable
+  const nonRetryable = [
+    'no playbook rendered',
+    'failed to render',
+    'no target project available',
+    'no plan files found',
+    'plan file not found',
+    'invalid filename',
+    'invalid file path',
+    'missing required',
+    'validation failed',
+  ];
+  return !nonRetryable.some(s => r.includes(s));
+}
+
 function completeDispatch(id, result = 'success', reason = '', resultSummary = '', opts = {}) {
   const { processWorkItemFailure = true } = opts;
   let item = null;
@@ -1027,11 +1044,12 @@ function completeDispatch(id, result = 'success', reason = '', resultSummary = '
     log('info', `Completed dispatch: ${id} (${result}${reason ? ': ' + reason : ''})`);
 
     // Update source work item status on failure + auto-retry with backoff
-    if (result === 'error' && item.meta?.dispatchKey) setCooldownFailure(item.meta.dispatchKey);
+    const retryableFailure = isRetryableFailureReason(reason);
+    if (result === 'error' && item.meta?.dispatchKey && retryableFailure) setCooldownFailure(item.meta.dispatchKey);
 
     if (processWorkItemFailure && result === 'error' && item.meta?.item?.id) {
       const retries = (item.meta.item._retryCount || 0);
-      if (retries < 3) {
+      if (retryableFailure && retries < 3) {
         log('info', `Dispatch error for ${item.meta.item.id} — auto-retry ${retries + 1}/3`);
         updateWorkItemStatus(item.meta, 'pending', '');
         // Increment retry counter on the source work item
@@ -1042,11 +1060,24 @@ function completeDispatch(id, result = 'success', reason = '', resultSummary = '
           if (wiPath) {
             const items = safeJson(wiPath) || [];
             const wi = items.find(i => i.id === item.meta.item.id);
-            if (wi && wi.status !== 'paused') { wi._retryCount = retries + 1; wi.status = 'pending'; delete wi.dispatched_at; delete wi.dispatched_to; safeWrite(wiPath, items); }
+            if (wi && wi.status !== 'paused') {
+              wi._retryCount = retries + 1;
+              wi.status = 'pending';
+              wi._lastRetryReason = reason || '';
+              wi._lastRetryAt = ts();
+              delete wi.failReason;
+              delete wi.failedAt;
+              delete wi.dispatched_at;
+              delete wi.dispatched_to;
+              safeWrite(wiPath, items);
+            }
           }
         } catch {}
       } else {
-        updateWorkItemStatus(item.meta, 'failed', reason || 'Failed after 3 retries');
+        const finalReason = !retryableFailure
+          ? `Non-retryable failure: ${reason || 'Unknown error'}`
+          : (reason || 'Failed after 3 retries');
+        updateWorkItemStatus(item.meta, 'failed', finalReason);
         // Alert: find items blocked by this failure and write inbox note
         try {
           const config = getConfig();
@@ -1064,7 +1095,7 @@ function completeDispatch(id, result = 'success', reason = '', resultSummary = '
           writeInboxAlert(`failed-${failedId}`,
             `# Work Item Failed — \`${failedId}\`\n\n` +
             `**Item:** ${item.meta.item.title || failedId}\n` +
-            `**Reason:** ${reason || 'Failed after 3 retries'}\n\n` +
+            `**Reason:** ${finalReason}\n\n` +
             (blockedItems.length > 0
               ? `**Blocked dependents (${blockedItems.length}):**\n${blockedItems.join('\n')}\n\n` +
                 `These items cannot dispatch until \`${failedId}\` is fixed and reset to \`pending\`.\n`

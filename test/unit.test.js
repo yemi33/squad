@@ -1628,6 +1628,24 @@ async function testStateIntegrity() {
     assert.ok(!src.includes("completeDispatch(item.id, 'error', reason, '', { processWorkItemFailure: false })"),
       'Hung/orphan cleanup should not bypass work item retry handling');
   });
+
+  await test('Auto-retry is gated by retryable failure reason classification', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes('function isRetryableFailureReason('),
+      'Engine should classify retryable vs non-retryable failures');
+    assert.ok(src.includes('retryableFailure && retries < 3'),
+      'Auto-retry should run only for retryable failures under retry cap');
+    assert.ok(src.includes('Non-retryable failure:'),
+      'Non-retryable failures should be surfaced explicitly');
+  });
+
+  await test('Auto-retry writes retry metadata on work items', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes('_lastRetryReason'),
+      'Auto-retry should persist last retry reason');
+    assert.ok(src.includes('_lastRetryAt'),
+      'Auto-retry should persist last retry timestamp');
+  });
 }
 
 // ─── Edge Cases ──────────────────────────────────────────────────────────────
