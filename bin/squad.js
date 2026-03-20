@@ -24,14 +24,62 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { spawn, execSync } = require('child_process');
 
-const SQUAD_HOME = path.join(require('os').homedir(), '.squad');
 const PKG_ROOT = path.resolve(__dirname, '..');
+const DEFAULT_SQUAD_HOME = path.join(os.homedir(), '.squad');
+const ROOT_POINTER_PATH = path.join(os.homedir(), '.squad-root');
+
+function isInstalledRoot(dir) {
+  if (!dir) return false;
+  return fs.existsSync(path.join(dir, 'engine.js')) &&
+    fs.existsSync(path.join(dir, 'dashboard.js')) &&
+    fs.existsSync(path.join(dir, 'squad.js'));
+}
+
+function findNearestLocalSquadRoot(startDir) {
+  let cur = path.resolve(startDir || process.cwd());
+  while (true) {
+    const candidate = path.join(cur, '.squad');
+    if (isInstalledRoot(candidate)) return candidate;
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return null;
+}
+
+function readRootPointer() {
+  try {
+    const p = fs.readFileSync(ROOT_POINTER_PATH, 'utf8').trim();
+    return p ? path.resolve(p) : null;
+  } catch { return null; }
+}
+
+function saveRootPointer(root) {
+  try { fs.writeFileSync(ROOT_POINTER_PATH, root); } catch {}
+}
+
+function resolveSquadHome(forInit = false) {
+  const envHome = process.env.SQUAD_HOME ? path.resolve(process.env.SQUAD_HOME) : null;
+  if (envHome) return envHome;
+
+  if (forInit) return path.join(process.cwd(), '.squad');
+
+  const localRoot = findNearestLocalSquadRoot(process.cwd());
+  if (localRoot) return localRoot;
+
+  const pointerRoot = readRootPointer();
+  if (isInstalledRoot(pointerRoot)) return pointerRoot;
+
+  return DEFAULT_SQUAD_HOME;
+}
 
 const [cmd, ...rest] = process.argv.slice(2);
 const force = rest.includes('--force');
 const skipScan = rest.includes('--skip-scan');
+const SQUAD_HOME = resolveSquadHome(cmd === 'init');
 
 function isSubpath(parent, child) {
   const rel = path.relative(path.resolve(parent), path.resolve(child));
@@ -133,6 +181,7 @@ function init() {
 
   // Save version
   saveInstalledVersion(pkgVersion);
+  saveRootPointer(SQUAD_HOME);
 
   // Generate install ID on fresh init (tells dashboard to clear stale browser state)
   const installIdPath = path.join(SQUAD_HOME, '.install-id');
@@ -245,6 +294,7 @@ function showVersion() {
   const pkg = getPkgVersion();
   const installed = getInstalledVersion();
   console.log(`\n  Package version:   ${pkg}`);
+  console.log(`  Runtime root:      ${SQUAD_HOME}`);
   if (installed) {
     console.log(`  Installed version: ${installed}`);
     if (installed !== pkg) {
@@ -311,7 +361,7 @@ if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
   Dashboard:
     squad dash                     Start web dashboard (default :7331)
 
-  Home: ${SQUAD_HOME}
+  Runtime root: ${SQUAD_HOME}
 `);
 } else if (cmd === 'init') {
   init();

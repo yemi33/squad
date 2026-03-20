@@ -1533,6 +1533,18 @@ async function testConfigAndPlaybooks() {
     assert.ok(src.includes('Dashboard started (PID:'),
       'init flow should still auto-start dashboard');
   });
+
+  await test('bin/squad resolves runtime root from init location and pointer', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'bin', 'squad.js'), 'utf8');
+    assert.ok(src.includes('resolveSquadHome('),
+      'bin/squad.js should resolve runtime root dynamically');
+    assert.ok(src.includes("return path.join(process.cwd(), '.squad')"),
+      'init should default runtime root to <cwd>/.squad');
+    assert.ok(src.includes(".squad-root"),
+      'bin/squad.js should persist/read runtime root pointer');
+    assert.ok(src.includes('findNearestLocalSquadRoot('),
+      'bin/squad.js should detect nearest local .squad root');
+  });
 }
 
 // ─── Integration-Level Tests (uses real state files) ─────────────────────────
