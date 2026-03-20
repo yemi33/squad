@@ -617,6 +617,49 @@ function findExistingWorktree(repoDir, branchName) {
   return null;
 }
 
+function isWorktreeRetryableError(err) {
+  const msg = String(err?.message || '');
+  return msg.includes('ETIMEDOUT')
+    || msg.includes('index.lock')
+    || msg.includes('timed out')
+    || msg.includes('could not lock')
+    || msg.includes('resource busy')
+    || msg.includes('already exists');
+}
+
+function removeStaleIndexLock(rootDir) {
+  const lockFile = path.join(rootDir, '.git', 'index.lock');
+  try {
+    if (fs.existsSync(lockFile)) {
+      const age = Date.now() - fs.statSync(lockFile).mtimeMs;
+      if (age > 300000) {
+        fs.unlinkSync(lockFile);
+        log('warn', `Removed stale index.lock (${Math.round(age / 1000)}s old) in ${rootDir}`);
+      }
+    }
+  } catch {}
+}
+
+function runWorktreeAdd(rootDir, worktreePath, args, gitOpts, worktreeCreateRetries) {
+  let lastErr = null;
+  const retries = Math.max(0, Number(worktreeCreateRetries) || 0);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      if (attempt > 0) {
+        try { exec('git worktree prune', { ...gitOpts, cwd: rootDir, timeout: 15000 }); } catch {}
+        removeStaleIndexLock(rootDir);
+        log('warn', `Retrying git worktree add (attempt ${attempt + 1}/${retries + 1}) for ${path.basename(worktreePath)}`);
+      }
+      exec(`git worktree add "${worktreePath}" ${args}`, { ...gitOpts, cwd: rootDir });
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (attempt >= retries || !isWorktreeRetryableError(err)) throw err;
+    }
+  }
+  if (lastErr) throw lastErr;
+}
+
 function spawnAgent(dispatchItem, config) {
   const { id, agent: agentId, prompt: taskPrompt, type, meta } = dispatchItem;
   const claudeConfig = config.claude || {};
@@ -631,7 +674,10 @@ function spawnAgent(dispatchItem, config) {
   let cwd = rootDir;
   let worktreePath = null;
   let branchName = meta?.branch ? sanitizeBranch(meta.branch) : null;
+  const worktreeCreateTimeout = Math.max(30000, Number(engineConfig.worktreeCreateTimeout) || DEFAULTS.worktreeCreateTimeout);
+  const worktreeCreateRetries = Math.max(0, Math.min(3, Number(engineConfig.worktreeCreateRetries) || DEFAULTS.worktreeCreateRetries));
   const _gitOpts = { stdio: 'pipe', timeout: 30000, windowsHide: true, env: shared.gitEnv() };
+  const _worktreeGitOpts = { ..._gitOpts, timeout: worktreeCreateTimeout };
 
   if (branchName) {
     const wtSuffix = id ? id.split('-').pop() : shared.uid();
@@ -658,21 +704,14 @@ function spawnAgent(dispatchItem, config) {
           const isSharedBranch = meta?.branchStrategy === 'shared-branch' || meta?.useExistingBranch;
           // Prune stale worktree entries before creating (handles leftover entries from crashed runs)
           try { exec(`git worktree prune`, { ..._gitOpts, cwd: rootDir, timeout: 10000 }); } catch {}
-          // Remove index.lock if stale (Windows: previous git process died without cleanup)
-          // 5 minute threshold — generous enough that even slow git operations finish
-          const lockFile = path.join(rootDir, '.git', 'index.lock');
-          try {
-            if (fs.existsSync(lockFile)) {
-              const age = Date.now() - fs.statSync(lockFile).mtimeMs;
-              if (age > 300000) { fs.unlinkSync(lockFile); log('warn', `Removed stale index.lock (${Math.round(age/1000)}s old) in ${rootDir}`); }
-            }
-          } catch {}
+          // Remove stale index.lock before creating worktree (Windows crashes can leave this behind)
+          removeStaleIndexLock(rootDir);
 
           if (isSharedBranch) {
             log('info', `Creating worktree for shared branch: ${worktreePath} on ${branchName}`);
             try { exec(`git fetch origin "${branchName}"`, { ..._gitOpts, cwd: rootDir }); } catch {}
             try {
-              exec(`git worktree add "${worktreePath}" "${branchName}"`, { ..._gitOpts, cwd: rootDir });
+              runWorktreeAdd(rootDir, worktreePath, `"${branchName}"`, _worktreeGitOpts, worktreeCreateRetries);
             } catch (eShared) {
               if (eShared.message?.includes('already used by worktree') || eShared.message?.includes('already checked out')) {
                 const existingWtPath = findExistingWorktree(rootDir, branchName);
@@ -685,14 +724,12 @@ function spawnAgent(dispatchItem, config) {
           } else {
             log('info', `Creating worktree: ${worktreePath} on branch ${branchName}`);
             try {
-              exec(`git worktree add "${worktreePath}" -b "${branchName}" ${sanitizeBranch(project.mainBranch || 'main')}`, {
-                ..._gitOpts, cwd: rootDir
-              });
+              runWorktreeAdd(rootDir, worktreePath, `-b "${branchName}" ${sanitizeBranch(project.mainBranch || 'main')}`, _worktreeGitOpts, worktreeCreateRetries);
             } catch (e1) {
               // Branch already exists or checked out elsewhere — try without -b
               try { exec(`git fetch origin "${branchName}"`, { ..._gitOpts, cwd: rootDir }); } catch {}
               try {
-                exec(`git worktree add "${worktreePath}" "${branchName}"`, { ..._gitOpts, cwd: rootDir });
+                runWorktreeAdd(rootDir, worktreePath, `"${branchName}"`, _worktreeGitOpts, worktreeCreateRetries);
                 log('info', `Reusing existing branch: ${branchName}`);
               } catch (e2) {
                 // "already checked out" or "already used by worktree" — find and reuse or recover
@@ -718,12 +755,12 @@ function spawnAgent(dispatchItem, config) {
                     // Directory gone but git still tracks it — prune and recreate
                     log('warn', `Branch ${branchName} tracked in missing dir ${existingWtPath} — pruning and recreating`);
                     try { exec(`git worktree prune`, { ..._gitOpts, cwd: rootDir, timeout: 10000 }); } catch {}
-                    exec(`git worktree add "${worktreePath}" "${branchName}"`, { ..._gitOpts, cwd: rootDir });
+                    runWorktreeAdd(rootDir, worktreePath, `"${branchName}"`, _worktreeGitOpts, worktreeCreateRetries);
                     log('info', `Recovered worktree for ${branchName} after stale entry prune`);
                   } else {
                     // Can't find the worktree at all — prune and retry
                     try { exec(`git worktree prune`, { ..._gitOpts, cwd: rootDir, timeout: 10000 }); } catch {}
-                    exec(`git worktree add "${worktreePath}" "${branchName}"`, { ..._gitOpts, cwd: rootDir });
+                    runWorktreeAdd(rootDir, worktreePath, `"${branchName}"`, _worktreeGitOpts, worktreeCreateRetries);
                   }
                 } else {
                   throw e2;
@@ -1635,8 +1672,13 @@ function runCleanup(config, verbose = false) {
       if (current < checkpoint.count) {
         log('warn', `KB watchdog: file count dropped ${checkpoint.count} → ${current}, restoring from git`);
         try {
-          execSilent('git checkout HEAD -- knowledge/', { cwd: SQUAD_DIR });
-          log('info', 'KB watchdog: restored knowledge/ from git HEAD');
+          const trackedCheck = execSilent('git ls-tree --name-only HEAD -- knowledge', { cwd: SQUAD_DIR }).toString().trim();
+          if (!trackedCheck) {
+            log('warn', 'KB watchdog: knowledge/ is not tracked in git HEAD — skipping restore');
+          } else {
+            execSilent('git checkout HEAD -- knowledge', { cwd: SQUAD_DIR });
+            log('info', 'KB watchdog: restored knowledge/ from git HEAD');
+          }
         } catch (err) {
           log('error', `KB watchdog: git restore failed — ${err.message}`);
         }

@@ -307,7 +307,7 @@ async function testEngineDefaults() {
   await test('ENGINE_DEFAULTS has all required keys', () => {
     const required = ['tickInterval', 'maxConcurrent', 'inboxConsolidateThreshold',
       'agentTimeout', 'heartbeatTimeout', 'maxTurns', 'worktreeRoot',
-      'idleAlertMinutes', 'restartGracePeriod'];
+      'idleAlertMinutes', 'restartGracePeriod', 'worktreeCreateTimeout', 'worktreeCreateRetries'];
     for (const key of required) {
       assert.ok(shared.ENGINE_DEFAULTS[key] !== undefined, `Missing default: ${key}`);
     }
@@ -1422,10 +1422,28 @@ async function testWorktreeManagement() {
       'Should use 5-minute threshold for stale lock detection');
   });
 
+  await test('Worktree creation supports configurable timeout and retries', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes('worktreeCreateTimeout'),
+      'Should support configurable worktree create timeout');
+    assert.ok(src.includes('worktreeCreateRetries'),
+      'Should support configurable worktree create retries');
+    assert.ok(src.includes('runWorktreeAdd('),
+      'Should centralize worktree add with retry behavior');
+  });
+
   await test('findExistingWorktree validates directory exists on disk', () => {
     const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
     assert.ok(src.includes('fs.existsSync(wtPath)'),
       'findExistingWorktree should verify directory exists');
+  });
+
+  await test('KB watchdog skips git restore when knowledge is untracked', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes('git ls-tree --name-only HEAD -- knowledge'),
+      'KB watchdog should check whether knowledge is tracked before restore');
+    assert.ok(src.includes('knowledge/ is not tracked in git HEAD'),
+      'KB watchdog should emit explicit skip log when knowledge is untracked');
   });
 }
 
