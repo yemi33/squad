@@ -1658,6 +1658,12 @@ async function testStateIntegrity() {
     assert.ok(src.includes('_lastRetryAt'),
       'Auto-retry should persist last retry timestamp');
   });
+
+  await test('Auto-retry clears completed dedupe marker for dispatch key', () => {
+    const src = fs.readFileSync(path.join(SQUAD_DIR, 'engine.js'), 'utf8');
+    assert.ok(src.includes("dp.completed.filter(d => d.meta?.dispatchKey !== item.meta.dispatchKey)"),
+      'Auto-retry should clear completed dedupe entry for the same dispatch key');
+  });
 }
 
 // ─── Edge Cases ──────────────────────────────────────────────────────────────

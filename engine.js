@@ -1052,6 +1052,16 @@ function completeDispatch(id, result = 'success', reason = '', resultSummary = '
       if (retryableFailure && retries < 3) {
         log('info', `Dispatch error for ${item.meta.item.id} — auto-retry ${retries + 1}/3`);
         updateWorkItemStatus(item.meta, 'pending', '');
+        // Remove this dispatch key from completed so dedupe doesn't block immediate redispatch.
+        if (item.meta?.dispatchKey) {
+          try {
+            mutateDispatch((dp) => {
+              const before = Array.isArray(dp.completed) ? dp.completed.length : 0;
+              dp.completed = Array.isArray(dp.completed) ? dp.completed.filter(d => d.meta?.dispatchKey !== item.meta.dispatchKey) : [];
+              return dp.completed.length !== before ? dp : undefined;
+            });
+          } catch {}
+        }
         // Increment retry counter on the source work item
         try {
           const wiPath = item.meta.source === 'central-work-item' || item.meta.source === 'central-work-item-fanout'
