@@ -1298,7 +1298,7 @@ If nothing to do, return: { "duplicates": [], "reclassify": [], "remove": [] }`;
             file: f, format: 'draft', archived,
             project: projectMatch ? projectMatch[1].trim() : '',
             summary: titleMatch ? titleMatch[1].trim() : f.replace('.md', ''),
-            status: archived ? 'completed' : completedPrdFiles.has(f) ? 'completed' : 'draft',
+            status: archived ? 'completed' : completedPrdFiles.has(f) ? 'converted' : 'draft',
             branchStrategy: '',
             featureBranch: '',
             itemCount: (content.match(/^\d+\.\s+\*\*/gm) || []).length,

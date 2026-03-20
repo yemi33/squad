@@ -1188,24 +1188,30 @@ function renderPrdProgress(prog) {
     const done = g.items.filter(i => i.status === 'done' || i.status === 'complete' || i.status === 'implemented').length;
     const wip = g.items.filter(i => i.status === 'in-progress' || i.status === 'dispatched').length;
     const summary = (g.summary || '').replace(/^Convert plan to PRD:\s*/i, '').slice(0, 80);
-    const isPaused = g.planStatus === 'awaiting-approval' || g.planStatus === 'paused';
+    const isAwaitingApproval = g.planStatus === 'awaiting-approval';
+    const isPaused = g.planStatus === 'paused';
+    const isBlocked = isAwaitingApproval || isPaused;
 
     // Runtime: from first dispatch to last completion (or now if still running, frozen if paused)
     const t = timings[g.file];
     let runtimeLabel = '';
     if (t && t.firstDispatched) {
-      const end = t.allDone && t.lastCompleted ? t.lastCompleted : isPaused ? (t.lastCompleted || t.firstDispatched) : Date.now();
+      const end = t.allDone && t.lastCompleted ? t.lastCompleted : isBlocked ? (t.lastCompleted || t.firstDispatched) : Date.now();
       const elapsed = end - t.firstDispatched;
-      const icon = t.allDone ? '&#x2713;' : isPaused ? '&#x23F8;' : '&#x23F1;';
-      runtimeLabel = '<span style="color:' + (t.allDone ? 'var(--green)' : isPaused ? 'var(--muted)' : 'var(--yellow)') + ';font-weight:400;font-size:10px">' +
-        icon + ' ' + formatDuration(elapsed) + (t.allDone ? '' : isPaused ? ' (paused)' : ' elapsed') + '</span>';
+      const icon = t.allDone ? '&#x2713;' : isBlocked ? '&#x23F8;' : '&#x23F1;';
+      runtimeLabel = '<span style="color:' + (t.allDone ? 'var(--green)' : isBlocked ? 'var(--muted)' : 'var(--yellow)') + ';font-weight:400;font-size:10px">' +
+        icon + ' ' + formatDuration(elapsed) + (t.allDone ? '' : isAwaitingApproval ? ' (awaiting approval)' : isPaused ? ' (paused)' : ' elapsed') + '</span>';
     }
 
-    const pausedLabel = isPaused ? '<span style="color:var(--yellow);font-weight:600;font-size:10px;padding:1px 6px;border:1px solid var(--yellow);border-radius:3px">PAUSED</span>' : '';
-    const staleLabel = (!isPaused && g.planStale)
+    const pausedLabel = isAwaitingApproval
+      ? '<span style="color:var(--yellow);font-weight:600;font-size:10px;padding:1px 6px;border:1px solid var(--yellow);border-radius:3px">AWAITING APPROVAL</span>'
+      : isPaused
+        ? '<span style="color:var(--muted);font-weight:600;font-size:10px;padding:1px 6px;border:1px solid var(--muted);border-radius:3px">PAUSED</span>'
+        : '';
+    const staleLabel = (!isBlocked && g.planStale)
       ? '<span style="color:var(--orange);font-weight:700;font-size:10px;padding:1px 6px;border:1px solid var(--orange);border-radius:3px;background:rgba(210,153,34,0.12)" title="Source plan changed after this PRD was generated">STALE</span>'
       : '';
-    const staleRecovery = (!isPaused && g.planStale)
+    const staleRecovery = (!isBlocked && g.planStale)
       ? '<div style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid rgba(210,153,34,0.35);border-radius:4px;background:rgba(210,153,34,0.08);display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
           '<span style="color:var(--orange);font-size:10px;font-weight:600">&#x26A0;&#xFE0F; Source plan was revised. This PRD may be outdated.</span>' +
           '<span onclick="event.stopPropagation();prdRegenerate(\'' + escHtml(g.file) + '\')" style="color:var(--green);cursor:pointer;font-size:10px;font-weight:700;padding:2px 8px;background:rgba(63,185,80,0.12);border:1px solid rgba(63,185,80,0.35);border-radius:4px" title="Regenerate PRD from latest plan">Regenerate now</span>' +
@@ -3585,6 +3591,11 @@ function renderPlans(plans) {
 
   const statusLabels = { 'awaiting-approval': 'Awaiting Approval', 'paused': 'Paused', 'approved': 'Approved', 'rejected': 'Rejected', 'revision-requested': 'Revision Requested', 'completed': 'Completed', 'active': 'Active' };
   const statusClass = (s) => s === 'awaiting-approval' || s === 'paused' ? 'awaiting' : s || '';
+  const normalizeSourcePlanKey = (name) => {
+    if (!name) return '';
+    if (name.endsWith('.md') || name.endsWith('.json')) return name;
+    return name + '.md';
+  };
 
   // Check which plans have active dispatches or pending plan-to-prd work items
   const activeDisp = (window._lastDispatch?.active || []);
@@ -3628,11 +3639,17 @@ function renderPlans(plans) {
 
   // Track which .md plans have a paused PRD, and map .md → PRD .json
   const pausedPlanFiles = new Set();
+  const awaitingApprovalPlanFiles = new Set();
   const planToPrdFile = {}; // .md filename → .json PRD filename
   for (const p of plans) {
     if (p.format === 'prd' && !p.archived && p.sourcePlan) {
-      planToPrdFile[p.sourcePlan] = p.file;
-      if (p.status === 'awaiting-approval' || p.status === 'paused') pausedPlanFiles.add(p.sourcePlan);
+      const sourceKeys = [p.sourcePlan, normalizeSourcePlanKey(p.sourcePlan)];
+      for (const sourceKey of sourceKeys) {
+        if (!sourceKey) continue;
+        planToPrdFile[sourceKey] = p.file;
+        if (p.status === 'paused') pausedPlanFiles.add(sourceKey);
+        if (p.status === 'awaiting-approval') awaitingApprovalPlanFiles.add(sourceKey);
+      }
     }
   }
 
@@ -3644,9 +3661,19 @@ function renderPlans(plans) {
     const status = p.status || 'active';
     const isWorking = workingPlanFiles.has(p.file);
     const isPrdPaused = pausedPlanFiles.has(p.file);
+    const isPrdAwaitingApproval = awaitingApprovalPlanFiles.has(p.file);
+    const isPrdBlocked = isPrdPaused || isPrdAwaitingApproval;
     const isArchived = p.archived;
-    const label = isArchived ? 'Completed' : isPrdPaused ? 'Paused' : isWorking ? 'In Progress' : (statusLabels[status] || status);
-    const needsAction = (status === 'awaiting-approval' || status === 'paused') && !isArchived;
+    const label = isArchived
+      ? 'Completed'
+      : isPrdAwaitingApproval
+        ? 'Awaiting Approval'
+        : isPrdPaused
+          ? 'Paused'
+          : isWorking
+            ? 'In Progress'
+            : (statusLabels[status] || status);
+    const needsAction = (status === 'awaiting-approval' || status === 'paused' || isPrdAwaitingApproval || isPrdPaused) && !isArchived;
     const isRevision = status === 'revision-requested' && !isArchived;
 
     let actions = '';
@@ -3669,28 +3696,31 @@ function renderPlans(plans) {
 
     const isCompleted = status === 'completed';
     const isDraft = (p.format === 'draft' || status === 'draft') && !isCompleted;
-    const isPaused = status === 'awaiting-approval' || status === 'paused';
+    const isAwaitingApproval = status === 'awaiting-approval';
+    const isPaused = status === 'paused';
     const isApproved = status === 'approved' || status === 'active';
     // For .md drafts: show Execute only if no PRD exists and not paused
-    const executeBtn = isDraft && !isWorking && !isPrdPaused && !isArchived ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green);font-weight:600" ' +
+    const executeBtn = isDraft && !isWorking && !isPrdBlocked && !isArchived ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green);font-weight:600" ' +
       'onclick="event.stopPropagation();planExecute(\'' + escHtml(p.file) + '\',\'' + escHtml(p.project) + '\',this)">Execute</button>' : '';
     // Pause/Resume: target the PRD .json file if it exists, otherwise the plan itself
     const prdFile = planToPrdFile[p.file] || (p.file.endsWith('.json') ? p.file : '');
-    const effectivelyPaused = isPrdPaused || isPaused;
+    const effectivelyPaused = isPrdBlocked || isAwaitingApproval || isPaused;
     const showPause = !effectivelyPaused && prdFile && !isArchived;
     const showResume = effectivelyPaused && prdFile && !isArchived;
     const pauseBtn = showPause ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--yellow)" ' +
       'onclick="event.stopPropagation();planPause(\'' + escHtml(prdFile) + '\')">Pause</button>' : '';
-    const resumeBtn = showResume ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green)" ' +
-      'onclick="event.stopPropagation();planApprove(\'' + escHtml(prdFile) + '\')">Resume</button>' : '';
+    const resumeBtn = showResume
+      ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--green)" ' +
+        'onclick="event.stopPropagation();planApprove(\'' + escHtml(prdFile) + '\')">' + (isPrdAwaitingApproval || isAwaitingApproval ? 'Approve' : 'Resume') + '</button>'
+      : '';
     const deleteBtn = !isArchived ? '<button class="pr-pager-btn" style="font-size:9px;padding:2px 8px;color:var(--red)" ' +
       'onclick="event.stopPropagation();planDelete(\'' + escHtml(p.file) + '\')">Delete</button>' : '';
 
-    return '<div class="plan-card ' + statusClass(status) + (isWorking && !isPrdPaused ? ' working' : '') + (isPrdPaused ? ' awaiting' : '') + '" data-file="plans/' + escHtml(p.file) + '" style="cursor:pointer' + (isArchived ? ';opacity:0.7' : '') + '" onclick="planView(\'' + escHtml(p.file) + '\')">' +
+    return '<div class="plan-card ' + statusClass(status) + (isWorking && !isPrdBlocked ? ' working' : '') + (isPrdBlocked ? ' awaiting' : '') + '" data-file="plans/' + escHtml(p.file) + '" style="cursor:pointer' + (isArchived ? ';opacity:0.7' : '') + '" onclick="planView(\'' + escHtml(p.file) + '\')">' +
       '<div class="plan-card-header">' +
         '<div><div class="plan-card-title">' + escHtml(p.summary || p.file) + '</div>' +
           '<div class="plan-card-meta">' +
-            '<span style="font-weight:600;color:' + (isArchived || isCompleted ? 'var(--green)' : isPrdPaused ? 'var(--yellow)' : isWorking ? 'var(--blue)' : needsAction ? 'var(--yellow,#d29922)' : status === 'approved' ? 'var(--green)' : 'var(--muted)') + '">' + label + '</span>' +
+            '<span style="font-weight:600;color:' + (isArchived || isCompleted ? 'var(--green)' : isPrdAwaitingApproval ? 'var(--yellow)' : isPrdPaused ? 'var(--muted)' : isWorking ? 'var(--blue)' : needsAction ? 'var(--yellow,#d29922)' : status === 'approved' ? 'var(--green)' : 'var(--muted)') + '">' + label + '</span>' +
             '<span>' + escHtml(p.project) + '</span>' +
             '<span>' + p.itemCount + ' items</span>' +
             (p.updatedAt ? '<span title="Last updated: ' + p.updatedAt + '">Updated ' + timeAgo(p.updatedAt) + '</span>' : '') +
