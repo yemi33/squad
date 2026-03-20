@@ -2302,7 +2302,8 @@ async function refresh() {
       localStorage.setItem('squad-install-id', data.installId);
     }
     document.getElementById('ts').textContent = new Date(data.timestamp).toLocaleTimeString();
-    document.getElementById('setup-banner').style.display = data.initialized ? 'none' : 'block';
+    const engineState = (data.engine && data.engine.state) ? data.engine.state : 'stopped';
+    document.getElementById('setup-banner').style.display = (!data.initialized && engineState !== 'stopped') ? 'block' : 'none';
     renderAgents(data.agents);
     renderPrdProgress(data.prdProgress);
     _cachePrdItems(data.prdProgress);
